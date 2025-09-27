@@ -6,10 +6,11 @@ import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { db } from './db';
 import { conversations } from './db/schema';
 import { eq } from 'drizzle-orm';
-import { aiModelApis, chatModels, khojUsers } from './db/schema';
+import { aiModelApis, chatModels, users } from './db/schema';
 import openapi from './routes/openapi';
 
 import { type ChatMessage } from './db/schema';
+import { getDefaultUser } from './utils';
 
 const app = new Hono();
 
@@ -65,13 +66,13 @@ app.post('/chat', zValidator('json', schema), async (c) => {
     const createdAt = new Date().toISOString();
 
     const userMessageToLog: ChatMessage = { by: 'user', message, created: createdAt, turnId };
-    const aiMessageToLog: ChatMessage = { by: 'khoj', message: aiMessage, created: createdAt, turnId };
+    const aiMessageToLog: ChatMessage = { by: 'assistant', message: aiMessage, created: createdAt, turnId };
 
     if (conversation) {
         const updatedLog = { chat: [...(conversation.conversationLog?.chat || []), userMessageToLog, aiMessageToLog] };
         await db.update(conversations).set({ conversationLog: updatedLog }).where(eq(conversations.id, conversation.id));
     } else {
-        const [adminUser] = await db.select().from(khojUsers).where(eq(khojUsers.email, process.env.KHOJ_ADMIN_EMAIL!));
+        const [adminUser] = await db.select().from(users).where(eq(users.email, getDefaultUser().email));
         if (!adminUser) {
             return c.json({ error: 'Admin user not found. Please set KHOJ_ADMIN_EMAIL and KHOJ_ADMIN_PASSWORD environment variables.' }, 500);
         }

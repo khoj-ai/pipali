@@ -1,6 +1,7 @@
 import { db } from './db';
-import { khojUsers, aiModelApis, chatModels } from './db/schema';
+import { users, aiModelApis, chatModels } from './db/schema';
 import { eq } from 'drizzle-orm';
+import { getDefaultUser } from './utils';
 
 const defaultOpenAIModels = ['gpt-4.1-mini', 'gpt-4.1', 'o3', 'o4-mini'];
 const defaultGeminiModels = ['gemini-2.0-flash', 'gemini-2.5-flash', 'gemini-2.5-pro'];
@@ -33,23 +34,18 @@ async function setupChatModelProvider(providerName: string, modelType: 'openai' 
 
 export async function initializeDatabase() {
     // 1. Create Admin User
-    const adminUserEmail = process.env.KHOJ_ADMIN_EMAIL;
-    const adminUserPassword = process.env.KHOJ_ADMIN_PASSWORD;
+    const adminUserEmail = getDefaultUser().email;
+    const adminUserPassword = getDefaultUser().password;
 
-    if (adminUserEmail && adminUserPassword) {
-        const [existingAdmin] = await db.select().from(khojUsers).where(eq(khojUsers.email, adminUserEmail));
+    const [existingAdmin] = await db.select().from(users).where(eq(users.email, adminUserEmail));
 
-        if (!existingAdmin) {
-            console.log(`👩‍✈️ Creating admin user: ${adminUserEmail}. These credentials will allow you to configure your server at /server/admin.`);
-            await db.insert(khojUsers).values({
-                email: adminUserEmail,
-                username: adminUserEmail,
-                password: adminUserPassword, // Note: Storing plaintext password. In production, this should be hashed.
-                isStaff: true,
-                isSuperuser: true,
-                isActive: true,
-            });
-        }
+    if (!existingAdmin) {
+        console.log(`👩‍✈️ Creating admin user: ${adminUserEmail}. These credentials will allow you to configure your server at /server/admin.`);
+        await db.insert(users).values({
+            email: adminUserEmail,
+            username: adminUserEmail,
+            password: adminUserPassword, // Note: Storing plaintext password. In production, this should be hashed.
+        });
     }
 
     // 2. Create Chat Model Configurations - only if no chat models exist

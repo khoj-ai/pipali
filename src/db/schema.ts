@@ -72,8 +72,7 @@ export interface OnlineContext {
 export interface Intent {
     type: string;
     query?: string;
-    'memory-type'?: string;
-    'inferred-queries'?: string[];
+    inferredQueries?: string[];
 }
 
 export interface TrainOfThought {
@@ -82,8 +81,8 @@ export interface TrainOfThought {
 }
 
 export interface ChatMessage {
-    by: 'user' | 'khoj';
-    message: string | Record<string, any>[];
+    by: 'user' | 'assistant';
+    message: string;
     trainOfThought?: TrainOfThought[];
     context?: Context[];
     onlineContext?: Record<string, OnlineContext>;
@@ -91,13 +90,10 @@ export interface ChatMessage {
     researchContext?: any[];
     operatorContext?: any[];
     created?: string;
-    images?: string[];
+    queryImages?: string[];
     queryFiles?: Record<string, any>[];
-    excalidrawDiagram?: Record<string, any>[];
-    mermaidjsDiagram?: string;
     turnId?: string;
     intent?: Intent;
-    automationId?: string;
 }
 
 // Base model with timestamps
@@ -106,37 +102,27 @@ const dbBaseModel = {
   updatedAt: timestamp('updated_at').defaultNow().notNull(),
 };
 
-export const clientApplications = pgTable('client_applications', {
-  id: serial('id').primaryKey(),
-  name: text('name').notNull(),
-  clientId: text('client_id').notNull(),
-  clientSecret: text('client_secret').notNull(),
-  ...dbBaseModel,
-});
-
-export const khojUsers = pgTable('khoj_users', {
+// User Schemas
+export const users = pgTable('users', {
   id: serial('id').primaryKey(),
   uuid: uuid('uuid').defaultRandom().notNull().unique(),
   password: text('password'),
-  lastLogin: timestamp('last_login'),
-  isSuperuser: boolean('is_superuser').default(false).notNull(),
   username: text('username').notNull().unique(),
   firstName: text('first_name'),
   lastName: text('last_name'),
   email: text('email'),
-  isStaff: boolean('is_staff').default(false).notNull(),
-  isActive: boolean('is_active').default(true).notNull(),
-  dateJoined: timestamp('date_joined').defaultNow().notNull(),
   phoneNumber: text('phone_number'),
   verifiedPhoneNumber: boolean('verified_phone_number').default(false).notNull(),
   verifiedEmail: boolean('verified_email').default(false).notNull(),
-  emailVerificationCode: text('email_verification_code'),
-  emailVerificationCodeExpiry: timestamp('email_verification_code_expiry'),
+  accountVerificationCode: text('account_verification_code'),
+  accountVerificationCodeExpiry: timestamp('account_verification_code_expiry'),
+  lastLogin: timestamp('last_login'),
+  ...dbBaseModel,
 });
 
 export const googleUsers = pgTable('google_users', {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     sub: text('sub').notNull(),
     azp: text('azp').notNull(),
     email: text('email').notNull(),
@@ -147,26 +133,26 @@ export const googleUsers = pgTable('google_users', {
     locale: text('locale'),
 });
 
-export const subscriptionTypeEnum = pgEnum('subscription_type', ['trial', 'standard']);
-
-export const khojApiUsers = pgTable('khoj_api_users', {
+export const apiKeys = pgTable('api_keys', {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     token: text('token').notNull().unique(),
     name: text('name').notNull(),
     accessedAt: timestamp('accessed_at'),
 });
 
+export const subscriptionTypeEnum = pgEnum('subscription_type', ['free', 'premium']);
+
 export const subscriptions = pgTable('subscriptions', {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    type: subscriptionTypeEnum('type').default('standard').notNull(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    type: subscriptionTypeEnum('type').default('free').notNull(),
     isRecurring: boolean('is_recurring').default(false).notNull(),
     renewalDate: timestamp('renewal_date'),
     enabledTrialAt: timestamp('enabled_trial_at'),
-    ...dbBaseModel,
 });
 
+// AI Model Schemas
 export const aiModelApis = pgTable('ai_model_apis', {
     id: serial('id').primaryKey(),
     name: text('name').notNull(),
@@ -175,7 +161,7 @@ export const aiModelApis = pgTable('ai_model_apis', {
     ...dbBaseModel,
 });
 
-export const priceTierEnum = pgEnum('price_tier', ['free', 'standard']);
+export const priceTierEnum = pgEnum('price_tier', ['free', 'premium']);
 export const chatModelTypeEnum = pgEnum('chat_model_type', ['openai', 'anthropic', 'google']);
 
 export const chatModels = pgTable('chat_models', {
@@ -194,14 +180,68 @@ export const chatModels = pgTable('chat_models', {
     ...dbBaseModel,
 });
 
-export const voiceModelOptions = pgTable('voice_model_options', {
+export const textToSpeechModels = pgTable('text_to_speech_models', {
     id: serial('id').primaryKey(),
     modelId: text('model_id').notNull(),
     name: text('name').notNull(),
-    priceTier: priceTierEnum('price_tier').default('standard').notNull(),
+    priceTier: priceTierEnum('price_tier').default('free').notNull(),
     ...dbBaseModel,
 });
 
+export const textToImageModelTypeEnum = pgEnum('text_to_image_model_type', ['openai', 'replicate', 'google']);
+
+export const textToImageModels = pgTable('text_to_image_models', {
+    id: serial('id').primaryKey(),
+    modelName: text('model_name').default('imagen-4.0-generate-001').notNull(),
+    friendlyName: text('friendly_name'),
+    modelType: textToImageModelTypeEnum('model_type').default('openai').notNull(),
+    priceTier: priceTierEnum('price_tier').default('free').notNull(),
+    apiKey: text('api_key'),
+    aiModelApiId: integer('ai_model_api_id').references(() => aiModelApis.id, { onDelete: 'cascade' }),
+    ...dbBaseModel,
+});
+
+export const speechToTextModelTypeEnum = pgEnum('speech_to_text_model_type', ['openai', 'google']);
+
+export const speechToTextModels = pgTable('speech_to_text_models', {
+    id: serial('id').primaryKey(),
+    modelName: text('model_name').default('whisper-1').notNull(),
+    friendlyName: text('friendly_name'),
+    modelType: speechToTextModelTypeEnum('model_type').default('openai').notNull(),
+    priceTier: priceTierEnum('price_tier').default('free').notNull(),
+    aiModelApiId: integer('ai_model_api_id').references(() => aiModelApis.id, { onDelete: 'cascade' }),
+    ...dbBaseModel,
+});
+
+export const userChatModel = pgTable('user_chat_model', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    modelId: integer('model_id').references(() => chatModels.id, { onDelete: 'cascade' }),
+    ...dbBaseModel,
+});
+
+export const userTextToSpeechModel = pgTable('user_text_to_speech_model', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    modelId: integer('model_id').references(() => textToSpeechModels.id, { onDelete: 'cascade' }),
+    ...dbBaseModel,
+});
+
+export const userSpeechToTextModel = pgTable('user_speech_to_text_model', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    modelId: integer('model_id').notNull().references(() => speechToTextModels.id, { onDelete: 'cascade' }),
+    ...dbBaseModel,
+});
+
+export const userTextToImageModel = pgTable('user_text_to_image_model', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    modelId: integer('model_id').notNull().references(() => textToImageModels.id, { onDelete: 'cascade' }),
+    ...dbBaseModel,
+});
+
+// Agent Schemas
 export const styleColorEnum = pgEnum('style_color', ['blue', 'green', 'red', 'yellow', 'orange', 'purple', 'pink', 'teal', 'cyan', 'lime', 'indigo', 'fuchsia', 'rose', 'sky', 'amber', 'emerald']);
 export const styleIconEnum = pgEnum('style_icon', ['Lightbulb', 'Health', 'Robot', 'Aperture', 'GraduationCap', 'Jeep', 'Island', 'MathOperations', 'Asclepius', 'Couch', 'Code', 'Atom', 'ClockCounterClockwise', 'PencilLine', 'Chalkboard', 'Cigarette', 'CraneTower', 'Heart', 'Leaf', 'NewspaperClipping', 'OrangeSlice', 'SmileyMelting', 'YinYang', 'SneakerMove', 'Student', 'Oven', 'Gavel', 'Broadcast']);
 export const privacyLevelEnum = pgEnum('privacy_level', ['public', 'private', 'protected']);
@@ -210,7 +250,7 @@ export const outputModeEnum = pgEnum('output_mode', ['image', 'diagram']);
 
 export const agents = pgTable('agents', {
     id: serial('id').primaryKey(),
-    creatorId: integer('creator_id').references(() => khojUsers.id, { onDelete: 'cascade' }),
+    creatorId: integer('creator_id').references(() => users.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     personality: text('personality'),
     inputTools: inputToolEnum('input_tools').array(),
@@ -225,168 +265,11 @@ export const agents = pgTable('agents', {
     ...dbBaseModel,
 });
 
-export const processLockOperationEnum = pgEnum('process_lock_operation', ['index_content', 'scheduled_job', 'schedule_leader', 'apply_migrations']);
-
-export const processLocks = pgTable('process_locks', {
-    id: serial('id').primaryKey(),
-    name: processLockOperationEnum('name').notNull().unique(),
-    startedAt: timestamp('started_at').defaultNow().notNull(),
-    maxDurationInSeconds: integer('max_duration_in_seconds').default(43200).notNull(),
-    ...dbBaseModel,
-});
-
-export const notionConfigs = pgTable('notion_configs', {
-    id: serial('id').primaryKey(),
-    token: text('token').notNull(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const githubConfigs = pgTable('github_configs', {
-    id: serial('id').primaryKey(),
-    patToken: text('pat_token').notNull(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const githubRepoConfigs = pgTable('github_repo_configs', {
-    id: serial('id').primaryKey(),
-    name: text('name').notNull(),
-    owner: text('owner').notNull(),
-    branch: text('branch').notNull(),
-    githubConfigId: integer('github_config_id').notNull().references(() => githubConfigs.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const webScraperTypeEnum = pgEnum('web_scraper_type', ['Firecrawl', 'Olostep', 'Jina', 'Direct']);
-
-export const webScrapers = pgTable('web_scrapers', {
-    id: serial('id').primaryKey(),
-    name: text('name').unique(),
-    type: webScraperTypeEnum('type').default('Jina').notNull(),
-    apiKey: text('api_key'),
-    apiUrl: text('api_url'),
-    priority: integer('priority').unique(),
-    ...dbBaseModel,
-});
-
-export const serverChatSettings = pgTable('server_chat_settings', {
-    id: serial('id').primaryKey(),
-    chatDefaultId: integer('chat_default_id').references(() => chatModels.id, { onDelete: 'cascade' }),
-    chatAdvancedId: integer('chat_advanced_id').references(() => chatModels.id, { onDelete: 'cascade' }),
-    webScraperId: integer('web_scraper_id').references(() => webScrapers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const localOrgConfigs = pgTable('local_org_configs', {
-    id: serial('id').primaryKey(),
-    inputFiles: jsonb('input_files').default([]),
-    inputFilter: jsonb('input_filter').default([]),
-    indexHeadingEntries: boolean('index_heading_entries').default(false).notNull(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const localMarkdownConfigs = pgTable('local_markdown_configs', {
-    id: serial('id').primaryKey(),
-    inputFiles: jsonb('input_files').default([]),
-    inputFilter: jsonb('input_filter').default([]),
-    indexHeadingEntries: boolean('index_heading_entries').default(false).notNull(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const localPdfConfigs = pgTable('local_pdf_configs', {
-    id: serial('id').primaryKey(),
-    inputFiles: jsonb('input_files').default([]),
-    inputFilter: jsonb('input_filter').default([]),
-    indexHeadingEntries: boolean('index_heading_entries').default(false).notNull(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const localPlaintextConfigs = pgTable('local_plaintext_configs', {
-    id: serial('id').primaryKey(),
-    inputFiles: jsonb('input_files').default([]),
-    inputFilter: jsonb('input_filter').default([]),
-    indexHeadingEntries: boolean('index_heading_entries').default(false).notNull(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const searchModelTypeEnum = pgEnum('search_model_type', ['text']);
-export const searchModelApiTypeEnum = pgEnum('search_model_api_type', ['huggingface', 'openai', 'local']);
-
-export const searchModelConfigs = pgTable('search_model_configs', {
-    id: serial('id').primaryKey(),
-    name: text('name').default('default').notNull(),
-    modelType: searchModelTypeEnum('model_type').default('text').notNull(),
-    biEncoder: text('bi_encoder').default('thenlper/gte-small').notNull(),
-    biEncoderModelConfig: jsonb('bi_encoder_model_config').default({}),
-    biEncoderQueryEncodeConfig: jsonb('bi_encoder_query_encode_config').default({}),
-    biEncoderDocsEncodeConfig: jsonb('bi_encoder_docs_encode_config').default({}),
-    crossEncoder: text('cross_encoder').default('mixedbread-ai/mxbai-rerank-xsmall-v1').notNull(),
-    crossEncoderModelConfig: jsonb('cross_encoder_model_config').default({}),
-    embeddingsInferenceEndpoint: text('embeddings_inference_endpoint'),
-    embeddingsInferenceEndpointApiKey: text('embeddings_inference_endpoint_api_key'),
-    embeddingsInferenceEndpointType: searchModelApiTypeEnum('embeddings_inference_endpoint_type').default('local').notNull(),
-    crossEncoderInferenceEndpoint: text('cross_encoder_inference_endpoint'),
-    crossEncoderInferenceEndpointApiKey: text('cross_encoder_inference_endpoint_api_key'),
-    biEncoderConfidenceThreshold: real('bi_encoder_confidence_threshold').default(0.18).notNull(),
-    ...dbBaseModel,
-});
-
-export const textToImageModelTypeEnum = pgEnum('text_to_image_model_type', ['openai', 'stability-ai', 'replicate', 'google']);
-
-export const textToImageModelConfigs = pgTable('text_to_image_model_configs', {
-    id: serial('id').primaryKey(),
-    modelName: text('model_name').default('dall-e-3').notNull(),
-    friendlyName: text('friendly_name'),
-    modelType: textToImageModelTypeEnum('model_type').default('openai').notNull(),
-    priceTier: priceTierEnum('price_tier').default('free').notNull(),
-    apiKey: text('api_key'),
-    aiModelApiId: integer('ai_model_api_id').references(() => aiModelApis.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const speechToTextModelTypeEnum = pgEnum('speech_to_text_model_type', ['openai']);
-
-export const speechToTextModelOptions = pgTable('speech_to_text_model_options', {
-    id: serial('id').primaryKey(),
-    modelName: text('model_name').default('whisper-1').notNull(),
-    friendlyName: text('friendly_name'),
-    modelType: speechToTextModelTypeEnum('model_type').default('openai').notNull(),
-    priceTier: priceTierEnum('price_tier').default('free').notNull(),
-    aiModelApiId: integer('ai_model_api_id').references(() => aiModelApis.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const userConversationConfigs = pgTable('user_conversation_configs', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    settingId: integer('setting_id').references(() => chatModels.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const userVoiceModelConfigs = pgTable('user_voice_model_configs', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    settingId: integer('setting_id').references(() => voiceModelOptions.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const userTextToImageModelConfigs = pgTable('user_text_to_image_model_configs', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    settingId: integer('setting_id').notNull().references(() => textToImageModelConfigs.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
+// Conversation Schema
 export const conversations = pgTable('conversations', {
     id: uuid('id').defaultRandom().notNull().primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     conversationLog: jsonb('conversation_log').$type<{ chat: ChatMessage[] }>().default({ chat: [] }),
-    clientId: integer('client_id').references(() => clientApplications.id, { onDelete: 'cascade' }),
     slug: text('slug'),
     title: text('title'),
     agentId: integer('agent_id').references(() => agents.id, { onDelete: 'set null' }),
@@ -394,65 +277,10 @@ export const conversations = pgTable('conversations', {
     ...dbBaseModel,
 });
 
-export const publicConversations = pgTable('public_conversations', {
-    id: serial('id').primaryKey(),
-    sourceOwnerId: integer('source_owner_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
-    conversationLog: jsonb('conversation_log').$type<{ chat: ChatMessage[] }>().default({ chat: [] }),
-    slug: text('slug'),
-    title: text('title'),
-    agentId: integer('agent_id').references(() => agents.id, { onDelete: 'set null' }),
-    ...dbBaseModel,
-});
-
-export const reflectiveQuestions = pgTable('reflective_questions', {
-    id: serial('id').primaryKey(),
-    question: text('question').notNull(),
-    userId: integer('user_id').references(() => khojUsers.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const fileObjects = pgTable('file_objects', {
-    id: serial('id').primaryKey(),
-    fileName: text('file_name'),
-    rawText: text('raw_text').notNull(),
-    userId: integer('user_id').references(() => khojUsers.id, { onDelete: 'cascade' }),
-    agentId: integer('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const entryTypeEnum = pgEnum('entry_type', ['image', 'pdf', 'plaintext', 'markdown', 'org', 'notion', 'github', 'conversation', 'docx']);
-export const entrySourceEnum = pgEnum('entry_source', ['computer', 'notion', 'github']);
-
-export const entries = pgTable('entries', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').references(() => khojUsers.id, { onDelete: 'cascade' }),
-    agentId: integer('agent_id').references(() => agents.id, { onDelete: 'cascade' }),
-    embeddings: jsonb('embeddings'),
-    raw: text('raw').notNull(),
-    compiled: text('compiled').notNull(),
-    heading: text('heading'),
-    fileSource: entrySourceEnum('file_source').default('computer').notNull(),
-    fileType: entryTypeEnum('file_type').default('plaintext').notNull(),
-    filePath: text('file_path'),
-    fileName: text('file_name'),
-    url: text('url'),
-    hashedValue: text('hashed_value').notNull(),
-    corpusId: uuid('corpus_id').defaultRandom().notNull(),
-    searchModelId: integer('search_model_id').references(() => searchModelConfigs.id, { onDelete: 'set null' }),
-    fileObjectId: integer('file_object_id').references(() => fileObjects.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const entryDates = pgTable('entry_dates', {
-    id: serial('id').primaryKey(),
-    date: date('date').notNull(),
-    entryId: integer('entry_id').notNull().references(() => entries.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
+// Other Schemas
 export const userRequests = pgTable('user_requests', {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => khojUsers.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
     slug: text('slug').notNull(),
     ...dbBaseModel,
 });
@@ -461,14 +289,5 @@ export const rateLimitRecords = pgTable('rate_limit_records', {
     id: serial('id').primaryKey(),
     identifier: text('identifier').notNull(),
     slug: text('slug').notNull(),
-    ...dbBaseModel,
-});
-
-export const dataStores = pgTable('data_stores', {
-    id: serial('id').primaryKey(),
-    key: text('key').notNull().unique(),
-    value: jsonb('value').default({}),
-    private: boolean('private').default(false).notNull(),
-    ownerId: integer('owner_id').references(() => khojUsers.id, { onDelete: 'cascade' }),
     ...dbBaseModel,
 });
