@@ -11,4 +11,8 @@ function getDefaultUser() {
     };
 }
 
-export { getDefaultUser };
+function getDbName() {
+    return process.env.POSTGRES_DB || './local.db';
+}
+
+export { getDefaultUser, getDbName };

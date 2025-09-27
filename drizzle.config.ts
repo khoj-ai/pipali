@@ -6,6 +6,6 @@ export default {
   dialect: 'postgresql',
   driver: 'pglite',
   dbCredentials: {
-    url: 'local.db'
+    url: process.env.POSTGRES_DB || './local.db'
   }
 } satisfies Config;
