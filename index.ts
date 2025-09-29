@@ -1,1 +1,1 @@
-import './src/run';
+import './src/server/index';

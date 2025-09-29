@@ -1,7 +1,7 @@
 
 import { migrate } from 'drizzle-orm/pglite/migrator';
 import { db } from './db';
-import app from '.';
+import api from './routes/api';
 
 import { initializeDatabase } from './init';
 
@@ -10,7 +10,7 @@ async function main() {
   await initializeDatabase();
 
   const server = Bun.serve({
-    fetch: app.fetch,
+    fetch: api.fetch,
     port: 3000,
   });
 

@@ -3,23 +3,23 @@ import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { ChatOpenAI } from '@langchain/openai';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
-import { db } from './db';
-import { conversations } from './db/schema';
+import { db } from '../db';
+import { conversations } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { aiModelApis, chatModels, users } from './db/schema';
-import openapi from './routes/openapi';
+import { aiModelApis, chatModels, users } from '../db/schema';
+import openapi from './openapi';
 
-import { type ChatMessage } from './db/schema';
-import { getDefaultUser } from './utils';
+import { type ChatMessage } from '../db/schema';
+import { getDefaultUser } from '../utils';
 
-const app = new Hono();
+const api = new Hono();
 
 const schema = z.object({
     message: z.string(),
     conversationId: z.uuid().optional(),
 });
 
-app.post('/chat', zValidator('json', schema), async (c) => {
+api.post('/chat', zValidator('json', schema), async (c) => {
     const { message, conversationId } = c.req.valid('json');
 
     console.log(`💬 Received message: ${message} for ${conversationId ? conversationId : 'new conversation'}`);
@@ -84,6 +84,6 @@ app.post('/chat', zValidator('json', schema), async (c) => {
 });
 
 // Mount the OpenAPI documentation
-app.route('/', openapi);
+api.route('/', openapi);
 
-export default app;
+export default api;

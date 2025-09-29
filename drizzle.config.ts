@@ -1,11 +1,11 @@
 import type { Config } from 'drizzle-kit';
 
 export default {
-  schema: './src/db/schema.ts',
+  schema: './src/server/db/schema.ts',
   out: './drizzle',
   dialect: 'postgresql',
   driver: 'pglite',
   dbCredentials: {
-    url: process.env.POSTGRES_DB || './local.db'
+    url: process.env.POSTGRES_DB || './panini.db'
   }
 } satisfies Config;
