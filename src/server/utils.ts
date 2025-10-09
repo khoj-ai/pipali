@@ -1,8 +1,8 @@
 function getDefaultUser() {
-    if (process.env.KHOJ_ADMIN_EMAIL && process.env.KHOJ_ADMIN_PASSWORD) {
+    if (process.env.PANINI_ADMIN_EMAIL && process.env.PANINI_ADMIN_PASSWORD) {
         return {
-            email: process.env.KHOJ_ADMIN_EMAIL,
-            password: process.env.KHOJ_ADMIN_PASSWORD,
+            email: process.env.PANINI_ADMIN_EMAIL,
+            password: process.env.PANINI_ADMIN_PASSWORD,
         };
     }
     return {

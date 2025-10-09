@@ -74,7 +74,7 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     } else {
         const [adminUser] = await db.select().from(users).where(eq(users.email, getDefaultUser().email));
         if (!adminUser) {
-            return c.json({ error: 'Admin user not found. Please set KHOJ_ADMIN_EMAIL and KHOJ_ADMIN_PASSWORD environment variables.' }, 500);
+            return c.json({ error: 'Admin user not found. Please set PANINI_ADMIN_EMAIL and PANINI_ADMIN_PASSWORD environment variables.' }, 500);
         }
         const newConversation = await db.insert(conversations).values({ conversationLog: { chat: [userMessageToLog, aiMessageToLog] }, userId: adminUser.id }).returning();
         conversation = newConversation[0];
