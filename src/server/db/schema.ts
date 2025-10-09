@@ -1,4 +1,4 @@
-import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb, real, date, primaryKey } from 'drizzle-orm/pg-core';
+import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb } from 'drizzle-orm/pg-core';
 
 export interface Context {
     compiled: string;
@@ -82,7 +82,7 @@ export interface TrainOfThought {
 
 export interface ChatMessage {
     by: 'user' | 'assistant';
-    message: string;
+    message: string | Record<string, any>;
     trainOfThought?: TrainOfThought[];
     context?: Context[];
     onlineContext?: Record<string, OnlineContext>;
@@ -103,7 +103,7 @@ const dbBaseModel = {
 };
 
 // User Schemas
-export const users = pgTable('users', {
+export const User = pgTable('user', {
   id: serial('id').primaryKey(),
   uuid: uuid('uuid').defaultRandom().notNull().unique(),
   password: text('password'),
@@ -120,9 +120,9 @@ export const users = pgTable('users', {
   ...dbBaseModel,
 });
 
-export const googleUsers = pgTable('google_users', {
+export const GoogleUser = pgTable('google_user', {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
     sub: text('sub').notNull(),
     azp: text('azp').notNull(),
     email: text('email').notNull(),
@@ -133,27 +133,27 @@ export const googleUsers = pgTable('google_users', {
     locale: text('locale'),
 });
 
-export const apiKeys = pgTable('api_keys', {
+export const ApiKey = pgTable('api_key', {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
     token: text('token').notNull().unique(),
     name: text('name').notNull(),
     accessedAt: timestamp('accessed_at'),
 });
 
-export const subscriptionTypeEnum = pgEnum('subscription_type', ['free', 'premium']);
+export const SubscriptionTypeEnum = pgEnum('subscription_type', ['free', 'premium']);
 
-export const subscriptions = pgTable('subscriptions', {
+export const Subscription = pgTable('subscription', {
     id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    type: subscriptionTypeEnum('type').default('free').notNull(),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
+    type: SubscriptionTypeEnum('type').default('free').notNull(),
     isRecurring: boolean('is_recurring').default(false).notNull(),
     renewalDate: timestamp('renewal_date'),
     enabledTrialAt: timestamp('enabled_trial_at'),
 });
 
 // AI Model Schemas
-export const aiModelApis = pgTable('ai_model_apis', {
+export const AiModelApi = pgTable('ai_model_api', {
     id: serial('id').primaryKey(),
     name: text('name').notNull(),
     apiKey: text('api_key').notNull(),
@@ -161,83 +161,24 @@ export const aiModelApis = pgTable('ai_model_apis', {
     ...dbBaseModel,
 });
 
-export const priceTierEnum = pgEnum('price_tier', ['free', 'premium']);
-export const chatModelTypeEnum = pgEnum('chat_model_type', ['openai', 'anthropic', 'google']);
+export const ChatModelTypeEnum = pgEnum('chat_model_type', ['openai', 'anthropic', 'google']);
 
-export const chatModels = pgTable('chat_models', {
+export const ChatModel = pgTable('chat_model', {
     id: serial('id').primaryKey(),
     maxPromptSize: integer('max_prompt_size'),
-    subscribedMaxPromptSize: integer('subscribed_max_prompt_size'),
     tokenizer: text('tokenizer'),
     name: text('name').default('gemini-2.5-flash').notNull(),
     friendlyName: text('friendly_name'),
-    modelType: chatModelTypeEnum('model_type').default('google').notNull(),
-    priceTier: priceTierEnum('price_tier').default('free').notNull(),
+    modelType: ChatModelTypeEnum('model_type').default('google').notNull(),
     visionEnabled: boolean('vision_enabled').default(false).notNull(),
-    aiModelApiId: integer('ai_model_api_id').references(() => aiModelApis.id, { onDelete: 'cascade' }),
-    description: text('description'),
-    strengths: text('strengths'),
+    aiModelApiId: integer('ai_model_api_id').references(() => AiModelApi.id, { onDelete: 'cascade' }),
     ...dbBaseModel,
 });
 
-export const textToSpeechModels = pgTable('text_to_speech_models', {
+export const UserChatModel = pgTable('user_chat_model', {
     id: serial('id').primaryKey(),
-    modelId: text('model_id').notNull(),
-    name: text('name').notNull(),
-    priceTier: priceTierEnum('price_tier').default('free').notNull(),
-    ...dbBaseModel,
-});
-
-export const textToImageModelTypeEnum = pgEnum('text_to_image_model_type', ['openai', 'replicate', 'google']);
-
-export const textToImageModels = pgTable('text_to_image_models', {
-    id: serial('id').primaryKey(),
-    modelName: text('model_name').default('imagen-4.0-generate-001').notNull(),
-    friendlyName: text('friendly_name'),
-    modelType: textToImageModelTypeEnum('model_type').default('openai').notNull(),
-    priceTier: priceTierEnum('price_tier').default('free').notNull(),
-    apiKey: text('api_key'),
-    aiModelApiId: integer('ai_model_api_id').references(() => aiModelApis.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const speechToTextModelTypeEnum = pgEnum('speech_to_text_model_type', ['openai', 'google']);
-
-export const speechToTextModels = pgTable('speech_to_text_models', {
-    id: serial('id').primaryKey(),
-    modelName: text('model_name').default('whisper-1').notNull(),
-    friendlyName: text('friendly_name'),
-    modelType: speechToTextModelTypeEnum('model_type').default('openai').notNull(),
-    priceTier: priceTierEnum('price_tier').default('free').notNull(),
-    aiModelApiId: integer('ai_model_api_id').references(() => aiModelApis.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const userChatModel = pgTable('user_chat_model', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    modelId: integer('model_id').references(() => chatModels.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const userTextToSpeechModel = pgTable('user_text_to_speech_model', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    modelId: integer('model_id').references(() => textToSpeechModels.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const userSpeechToTextModel = pgTable('user_speech_to_text_model', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    modelId: integer('model_id').notNull().references(() => speechToTextModels.id, { onDelete: 'cascade' }),
-    ...dbBaseModel,
-});
-
-export const userTextToImageModel = pgTable('user_text_to_image_model', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    modelId: integer('model_id').notNull().references(() => textToImageModels.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
+    modelId: integer('model_id').references(() => ChatModel.id, { onDelete: 'cascade' }),
     ...dbBaseModel,
 });
 
@@ -250,13 +191,13 @@ export const outputModeEnum = pgEnum('output_mode', ['image', 'diagram']);
 
 export const agents = pgTable('agents', {
     id: serial('id').primaryKey(),
-    creatorId: integer('creator_id').references(() => users.id, { onDelete: 'cascade' }),
+    creatorId: integer('creator_id').references(() => User.id, { onDelete: 'cascade' }),
     name: text('name').notNull(),
     personality: text('personality'),
     inputTools: inputToolEnum('input_tools').array(),
     outputModes: outputModeEnum('output_modes').array(),
     managedByAdmin: boolean('managed_by_admin').default(false).notNull(),
-    chatModelId: integer('chat_model_id').notNull().references(() => chatModels.id, { onDelete: 'cascade' }),
+    chatModelId: integer('chat_model_id').notNull().references(() => ChatModel.id, { onDelete: 'cascade' }),
     slug: text('slug').notNull().unique(),
     styleColor: styleColorEnum('style_color').default('orange').notNull(),
     styleIcon: styleIconEnum('style_icon').default('Lightbulb').notNull(),
@@ -266,28 +207,13 @@ export const agents = pgTable('agents', {
 });
 
 // Conversation Schema
-export const conversations = pgTable('conversations', {
+export const Conversation = pgTable('conversation', {
     id: uuid('id').defaultRandom().notNull().primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
     conversationLog: jsonb('conversation_log').$type<{ chat: ChatMessage[] }>().default({ chat: [] }),
     slug: text('slug'),
     title: text('title'),
     agentId: integer('agent_id').references(() => agents.id, { onDelete: 'set null' }),
     fileFilters: jsonb('file_filters').default([]),
-    ...dbBaseModel,
-});
-
-// Other Schemas
-export const userRequests = pgTable('user_requests', {
-    id: serial('id').primaryKey(),
-    userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
-    slug: text('slug').notNull(),
-    ...dbBaseModel,
-});
-
-export const rateLimitRecords = pgTable('rate_limit_records', {
-    id: serial('id').primaryKey(),
-    identifier: text('identifier').notNull(),
-    slug: text('slug').notNull(),
     ...dbBaseModel,
 });

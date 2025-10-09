@@ -1,5 +1,5 @@
 import { db } from './db';
-import { users, aiModelApis, chatModels } from './db/schema';
+import { User, AiModelApi, ChatModel } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { getDefaultUser } from './utils';
 
@@ -9,20 +9,20 @@ const defaultAnthropicModels = ['claude-sonnet-4-5-20250929', 'claude-3-5-haiku-
 const defaultGroqModels = ['openai/gpt-oss-120b', 'moonshotai/kimi-k2-instruct-0905'];
 
 async function setupChatModelProvider(providerName: string, modelType: 'openai' | 'google' | 'anthropic', apiKey: string, defaultModels: string[], visionEnabled: boolean, apiBaseUrl?: string) {
-    const [existingProvider] = await db.select().from(aiModelApis).where(eq(aiModelApis.name, providerName));
+    const [existingProvider] = await db.select().from(AiModelApi).where(eq(AiModelApi.name, providerName));
     if (existingProvider) {
         console.log(`${providerName} provider already exists.`);
         return;
     }
 
-    const [apiProvider] = await db.insert(aiModelApis).values({
+    const [apiProvider] = await db.insert(AiModelApi).values({
         name: providerName,
         apiKey: apiKey,
         apiBaseUrl: apiBaseUrl,
     }).returning();
 
     for (const model of defaultModels) {
-        await db.insert(chatModels).values({
+        await db.insert(ChatModel).values({
             name: model,
             friendlyName: model,
             modelType: modelType,
@@ -38,11 +38,11 @@ export async function initializeDatabase() {
     const adminUserEmail = getDefaultUser().email;
     const adminUserPassword = getDefaultUser().password;
 
-    const [existingAdmin] = await db.select().from(users).where(eq(users.email, adminUserEmail));
+    const [existingAdmin] = await db.select().from(User).where(eq(User.email, adminUserEmail));
 
     if (!existingAdmin) {
         console.log(`👩‍✈️ Creating admin user: ${adminUserEmail}. These credentials will allow you to configure your server at /server/admin.`);
-        await db.insert(users).values({
+        await db.insert(User).values({
             email: adminUserEmail,
             username: adminUserEmail,
             password: adminUserPassword, // Note: Storing plaintext password. In production, this should be hashed.
@@ -50,7 +50,7 @@ export async function initializeDatabase() {
     }
 
     // 2. Create Chat Model Configurations - only if no chat models exist
-    const existingChatModels = await db.select().from(chatModels).limit(1);
+    const existingChatModels = await db.select().from(ChatModel).limit(1);
 
     if (existingChatModels.length === 0) {
         if (process.env.OPENAI_API_KEY && process.env.OPENAI_BASE_URL == 'https://api.groq.com/openai/v1') {

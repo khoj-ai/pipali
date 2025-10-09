@@ -4,9 +4,9 @@ import { zValidator } from '@hono/zod-validator';
 import { ChatOpenAI } from '@langchain/openai';
 import { AIMessage, HumanMessage } from '@langchain/core/messages';
 import { db } from '../db';
-import { conversations } from '../db/schema';
+import { Conversation } from '../db/schema';
 import { eq } from 'drizzle-orm';
-import { aiModelApis, chatModels, users } from '../db/schema';
+import { AiModelApi, ChatModel, User } from '../db/schema';
 import openapi from './openapi';
 
 import { type ChatMessage } from '../db/schema';
@@ -23,19 +23,19 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     const { message, conversationId } = c.req.valid('json');
 
     console.log(`💬 Received message: ${message} for ${conversationId ? conversationId : 'new conversation'}`);
-    const [openAIModel] = await db.select().from(chatModels)
-        .leftJoin(aiModelApis, eq(chatModels.aiModelApiId, aiModelApis.id))
-        .where(eq(chatModels.modelType, 'openai'));
+    const [openAIModel] = await db.select().from(ChatModel)
+        .leftJoin(AiModelApi, eq(ChatModel.aiModelApiId, AiModelApi.id))
+        .where(eq(ChatModel.modelType, 'openai'));
 
     if (!openAIModel) {
         return c.json({ error: 'No OpenAI model configured. Please set OPENAI_API_KEY environment variable.' }, 500);
     }
 
     const chat = new ChatOpenAI({
-        apiKey: openAIModel.ai_model_apis?.apiKey,
-        model: openAIModel.chat_models.name,
+        apiKey: openAIModel.ai_model_api?.apiKey,
+        model: openAIModel.chat_model.name,
         configuration: {
-            baseURL: openAIModel.ai_model_apis?.apiBaseUrl,
+            baseURL: openAIModel.ai_model_api?.apiBaseUrl,
         }
     });
 
@@ -43,7 +43,7 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     let history: (HumanMessage | AIMessage)[] = [];
 
     if (conversationId) {
-        const results = await db.select().from(conversations).where(eq(conversations.id, conversationId));
+        const results = await db.select().from(Conversation).where(eq(Conversation.id, conversationId));
         conversation = results[0];
         if (conversation && conversation.conversationLog) {
             history = conversation.conversationLog.chat.map((msg) => {
@@ -70,13 +70,13 @@ api.post('/chat', zValidator('json', schema), async (c) => {
 
     if (conversation) {
         const updatedLog = { chat: [...(conversation.conversationLog?.chat || []), userMessageToLog, aiMessageToLog] };
-        await db.update(conversations).set({ conversationLog: updatedLog }).where(eq(conversations.id, conversation.id));
+        await db.update(Conversation).set({ conversationLog: updatedLog }).where(eq(Conversation.id, conversation.id));
     } else {
-        const [adminUser] = await db.select().from(users).where(eq(users.email, getDefaultUser().email));
+        const [adminUser] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
         if (!adminUser) {
             return c.json({ error: 'Admin user not found. Please set PANINI_ADMIN_EMAIL and PANINI_ADMIN_PASSWORD environment variables.' }, 500);
         }
-        const newConversation = await db.insert(conversations).values({ conversationLog: { chat: [userMessageToLog, aiMessageToLog] }, userId: adminUser.id }).returning();
+        const newConversation = await db.insert(Conversation).values({ conversationLog: { chat: [userMessageToLog, aiMessageToLog] }, userId: adminUser.id }).returning();
         conversation = newConversation[0];
     }
 
