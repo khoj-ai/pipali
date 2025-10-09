@@ -32,8 +32,8 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     }
 
     const chat = new ChatOpenAI({
-        openAIApiKey: openAIModel.ai_model_apis?.apiKey,
-        modelName: openAIModel.chat_models.name,
+        apiKey: openAIModel.ai_model_apis?.apiKey,
+        model: openAIModel.chat_models.name,
         configuration: {
             baseURL: openAIModel.ai_model_apis?.apiBaseUrl,
         }
