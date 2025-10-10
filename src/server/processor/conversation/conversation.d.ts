@@ -1,6 +1,6 @@
-import { AIMessage, HumanMessage } from '@langchain/core/messages';
+import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
 
-export type ChatMessageModel = HumanMessage | AIMessage;
+export type ChatMessageModel = HumanMessage | AIMessage | ToolMessage | SystemMessage;
 
 export interface ResponseWithThought {
     message?: string;
