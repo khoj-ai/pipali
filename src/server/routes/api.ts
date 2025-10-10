@@ -11,6 +11,9 @@ import openapi from './openapi';
 
 import { type ChatMessage } from '../db/schema';
 import { getDefaultUser } from '../utils';
+import type { ChatMessageModel } from '../processor/conversation/conversation';
+import { generateChatmlMessagesWithContext } from '../processor/conversation/utils';
+import { sendMessageToModel } from '../processor/conversation';
 
 const api = new Hono();
 
@@ -40,28 +43,25 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     });
 
     let conversation;
-    let history: (HumanMessage | AIMessage)[] = [];
+    let history: ChatMessage[] = [];
 
     if (conversationId) {
         const results = await db.select().from(Conversation).where(eq(Conversation.id, conversationId));
         conversation = results[0];
         if (conversation && conversation.conversationLog) {
-            history = conversation.conversationLog.chat.map((msg) => {
-                if (msg.by === 'user') {
-                    return new HumanMessage(msg.message);
-                } else {
-                    return new AIMessage(msg.message);
-                }
-            });
+            history = conversation.conversationLog.chat;
         }
     }
 
-    const response = await chat.invoke([
-        ...history,
-        new HumanMessage(message),
-    ]);
+    const response = await sendMessageToModel(
+        message,
+        undefined,
+        undefined,
+        undefined,
+        history,
+    );
 
-    const aiMessage = response.content as string;
+    const aiMessage = response?.message as string;
     const turnId = crypto.randomUUID();
     const createdAt = new Date().toISOString();
 

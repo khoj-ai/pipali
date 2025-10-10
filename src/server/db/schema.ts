@@ -96,6 +96,11 @@ export interface ChatMessage {
     intent?: Intent;
 }
 
+export type ChatModelWithApi = {
+    chatModel: typeof ChatModel.$inferSelect;
+    aiModelApi: typeof AiModelApi.$inferSelect | null;
+};
+
 // Base model with timestamps
 const dbBaseModel = {
   createdAt: timestamp('created_at').defaultNow().notNull(),
