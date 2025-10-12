@@ -1,5 +1,6 @@
 import { glob } from 'glob';
 import path from 'path';
+import { homedir } from 'os';
 
 export interface GrepFilesArgs {
     regex_pattern: string;
@@ -17,9 +18,10 @@ export interface GrepResult {
 
 /**
  * Search for a regex pattern in files with optional path prefix and context lines
+ * Defaults to home directory if path_prefix is not provided and no context lines
  */
 export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
-    const { regex_pattern, path_prefix, lines_before = 0, lines_after = 0 } = args;
+    const { regex_pattern, path_prefix = homedir(), lines_before = 0, lines_after = 0 } = args;
     const maxResults = 1000;
 
     try {
@@ -30,14 +32,14 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
         } catch (e) {
             return {
                 query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after),
-                file: path_prefix || '.',
-                uri: path_prefix || '.',
+                file: path_prefix,
+                uri: path_prefix,
                 compiled: `Invalid regex pattern: ${e instanceof Error ? e.message : String(e)}`,
             };
         }
 
         // Determine search path and pattern
-        const searchPath = path_prefix ? path.resolve(path_prefix) : process.cwd();
+        const searchPath = path.resolve(path_prefix);
         const globPattern = path.join(searchPath, '**/*');
 
         // Find all files in the specified path
@@ -49,8 +51,8 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
         if (files.length === 0) {
             return {
                 query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after),
-                file: path_prefix || '.',
-                uri: path_prefix || '.',
+                file: path_prefix,
+                uri: path_prefix,
                 compiled: 'No files found in specified path.',
             };
         }
@@ -108,8 +110,8 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
         if (matches.length === 0) {
             return {
                 query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after),
-                file: path_prefix || '.',
-                uri: path_prefix || '.',
+                file: path_prefix,
+                uri: path_prefix,
                 compiled: 'No matches found.',
             };
         }
@@ -122,8 +124,8 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
 
         return {
             query: generateQuery(matches.length, matchedFileCount, path_prefix, regex_pattern, lines_before, lines_after, maxResults),
-            file: path_prefix || '.',
-            uri: path_prefix || '.',
+            file: path_prefix,
+            uri: path_prefix,
             compiled,
         };
     } catch (error) {
@@ -132,8 +134,8 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
 
         return {
             query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after),
-            file: path_prefix || '.',
-            uri: path_prefix || '.',
+            file: path_prefix,
+            uri: path_prefix,
             compiled: errorMsg,
         };
     }

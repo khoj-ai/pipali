@@ -61,7 +61,7 @@ const tools: ToolDefinition[] = [
     },
     {
         name: 'regex_search_files',
-        description: 'To search through files using regex patterns. Returns all lines matching the pattern. Use this when you need to find all relevant files. The regex pattern will ONLY match content on a single line. Use lines_before, lines_after to show context around matches.',
+        description: 'To search through files under specified path using regex patterns. Returns all lines matching the pattern. Use this when you need to find all relevant files. The regex pattern will ONLY match content on a single line. Use lines_before, lines_after to show context around matches.',
         schema: {
             type: 'object',
             properties: {
