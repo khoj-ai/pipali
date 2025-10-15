@@ -1,7 +1,7 @@
 import { PGlite } from '@electric-sql/pglite';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/pglite';
-import { getDbName, getPGliteConfig } from '../utils';
+import { getDbName, getPGliteConfig } from './utils';
 import { AiModelApi, ChatModel, User, UserChatModel, type ChatModelWithApi } from './schema';
 
 const dbName = getDbName();
