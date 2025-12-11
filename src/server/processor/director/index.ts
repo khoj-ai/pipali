@@ -1,5 +1,5 @@
-import { type ChatMessage, ChatModel, User, type ChatModelWithApi } from '../../db/schema';
-import type { ToolDefinition, ResponseWithThought } from '../conversation/conversation';
+import { type ChatMessage } from '../../db/schema';
+import type { ToolDefinition } from '../conversation/conversation';
 import { sendMessageToModel } from '../conversation/index';
 import type { ResearchIteration, ToolCall } from './types';
 import { listFiles, type ListFilesArgs } from '../actor/list_files';

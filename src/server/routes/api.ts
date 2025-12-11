@@ -1,7 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import { ChatOpenAI } from '@langchain/openai';
 import { db } from '../db';
 import { Conversation } from '../db/schema';
 import { eq } from 'drizzle-orm';
@@ -28,16 +27,8 @@ api.post('/chat', zValidator('json', schema), async (c) => {
         .where(eq(ChatModel.modelType, 'openai'));
 
     if (!openAIModel) {
-        return c.json({ error: 'No OpenAI model configured. Please set OPENAI_API_KEY environment variable.' }, 500);
+        return c.json({ error: 'No OpenAI model configured. Please set OPENAI_API_KEY and/or OPENAI_BASE_URL environment variable.' }, 500);
     }
-
-    const chat = new ChatOpenAI({
-        apiKey: openAIModel.ai_model_api?.apiKey,
-        model: openAIModel.chat_model.name,
-        configuration: {
-            baseURL: openAIModel.ai_model_api?.apiBaseUrl,
-        }
-    });
 
     let conversation;
     let history: ChatMessage[] = [];
