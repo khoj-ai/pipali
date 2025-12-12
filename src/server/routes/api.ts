@@ -63,7 +63,7 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     for await (const iteration of research({
         query: message,
         chatHistory: history,
-        maxIterations: 5,
+        maxIterations: 15,
         currentDate: new Date().toISOString().split('T')[0],
         dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         user: user,

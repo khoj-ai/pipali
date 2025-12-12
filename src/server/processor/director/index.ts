@@ -10,7 +10,7 @@ import * as prompts from './prompts';
 interface ResearchConfig {
     query: string;
     chatHistory: ChatMessage[];
-    maxIterations?: number;
+    maxIterations: number;
     currentDate?: string;
     dayOfWeek?: string;
     location?: string;
@@ -134,7 +134,7 @@ async function pickNextTool(
         day_of_week: dayOfWeek ?? new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         location: location ?? 'Unknown',
         username: username ?? 'User',
-        max_iterations: String(config.maxIterations || 5)
+        max_iterations: String(config.maxIterations)
     });
 
     // Construct iteration history from previous iterations
@@ -290,7 +290,7 @@ async function executeToolsInParallel(toolCalls: ToolCall[]): Promise<ToolResult
  * Main research function - iterates through tool calls until completion
  */
 export async function* research(config: ResearchConfig): AsyncGenerator<ResearchIteration> {
-    const { query, maxIterations = 5 } = config;
+    const { query, maxIterations } = config;
     const previousIterations: ResearchIteration[] = [];
 
     for (let i = 0; i < maxIterations; i++) {
