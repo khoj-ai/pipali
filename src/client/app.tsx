@@ -603,12 +603,9 @@ const MessageItem = ({ message }: { message: Message }) => {
 const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
     const [isExpanded, setIsExpanded] = useState(false);
 
-    const toolCalls = thoughts.filter(t => t.type === 'tool_call');
-    const reasoningThoughts = thoughts.filter(t => t.type === 'thought' && t.content);
+    if (thoughts.length === 0) return null;
 
-    if (toolCalls.length === 0 && reasoningThoughts.length === 0) return null;
-
-    const stepCount = toolCalls.length;
+    const toolCallCount = thoughts.filter(t => t.type === 'tool_call').length;
 
     return (
         <div className="thoughts-section">
@@ -617,9 +614,7 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
                 onClick={() => setIsExpanded(!isExpanded)}
             >
                 <span className="thoughts-summary">
-                    {stepCount > 0 && `${stepCount} step${stepCount > 1 ? 's' : ''} taken`}
-                    {stepCount > 0 && reasoningThoughts.length > 0 && ' · '}
-                    {reasoningThoughts.length > 0 && 'Thinking'}
+                    {toolCallCount > 0 && `${toolCallCount} step${toolCallCount > 1 ? 's' : ''} taken`}
                 </span>
                 <ChevronDown
                     size={14}
@@ -629,31 +624,44 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
 
             {isExpanded && (
                 <div className="thoughts-list">
-                    {/* Show reasoning thoughts first */}
-                    {reasoningThoughts.map((thought) => (
-                        <div key={thought.id} className="thought-item reasoning">
-                            <div className="thought-step">💭</div>
-                            <div className="thought-content">
-                                <div className="thought-reasoning">{thought.content}</div>
-                            </div>
-                        </div>
-                    ))}
-
-                    {/* Show tool calls with their results */}
-                    {toolCalls.map((thought, idx) => (
-                        <div key={thought.id} className="thought-item">
-                            <div className="thought-step">{idx + 1}</div>
-                            <div className="thought-content">
-                                <div className="thought-tool">{formatToolName(thought.toolName || '')}</div>
-                                {thought.toolResult && (
-                                    <div className="thought-result">
-                                        {thought.toolResult.slice(0, 200)}
-                                        {thought.toolResult.length > 200 && '...'}
+                    {/* Render thoughts in the order they appear */}
+                    {thoughts.map((thought, idx) => {
+                        if (thought.type === 'thought' && thought.content) {
+                            return (
+                                <div key={thought.id} className="thought-item reasoning">
+                                    <div className="thought-step">💭</div>
+                                    <div className="thought-content">
+                                        <div className="thought-reasoning">{thought.content}</div>
                                     </div>
-                                )}
-                            </div>
-                        </div>
-                    ))}
+                                </div>
+                            );
+                        } else if (thought.type === 'tool_call') {
+                            // Count tool call position (excluding reasoning thoughts)
+                            const toolCallIdx = thoughts.slice(0, idx).filter(t => t.type === 'tool_call').length + 1;
+                            const formattedArgs = formatToolArgs(thought.toolName || '', thought.toolArgs);
+
+                            return (
+                                <div key={thought.id} className="thought-item">
+                                    <div className="thought-step">{toolCallIdx}</div>
+                                    <div className="thought-content">
+                                        <div className="thought-tool">
+                                            {formatToolName(thought.toolName || '')}
+                                            {formattedArgs && (
+                                                <span className="thought-args"> {formattedArgs}</span>
+                                            )}
+                                        </div>
+                                        {thought.toolResult && (
+                                            <div className="thought-result">
+                                                {thought.toolResult.slice(0, 200)}
+                                                {thought.toolResult.length > 200 && '...'}
+                                            </div>
+                                        )}
+                                    </div>
+                                </div>
+                            );
+                        }
+                        return null;
+                    })}
                 </div>
             )}
         </div>
@@ -664,6 +672,43 @@ const formatToolName = (name: string): string => {
     return name
         .replace(/_/g, ' ')
         .replace(/\b\w/g, c => c.toUpperCase());
+};
+
+const formatToolArgs = (toolName: string, args: any): string => {
+    if (!args || typeof args !== 'object') return '';
+
+    // Tool-specific formatting for readability
+    switch (toolName) {
+        case 'view_file':
+            if (args.start_line && args.end_line) {
+                return `${args.path} (lines ${args.start_line}-${args.end_line})`;
+            }
+            return args.path || '';
+
+        case 'list_files':
+            if (args.path && args.pattern) {
+                return `${args.path}/${args.pattern}`;
+            }
+            return args.path || args.pattern || '';
+
+        case 'regex_search_files':
+            const parts = [];
+            if (args.regex_pattern) parts.push(`"${args.regex_pattern}"`);
+            if (args.path_prefix) parts.push(`in ${args.path_prefix}`);
+            return parts.join(' ');
+
+        default:
+            // Generic formatting: show key values in a readable way
+            return Object.entries(args)
+                .filter(([_, v]) => v !== undefined && v !== null && v !== '')
+                .map(([k, v]) => {
+                    if (typeof v === 'string' && v.length > 50) {
+                        return `${k}: "${v.slice(0, 47)}..."`;
+                    }
+                    return typeof v === 'string' ? `${k}: "${v}"` : `${k}: ${v}`;
+                })
+                .join(', ');
+    }
 };
 
 const root = createRoot(document.getElementById("root")!);
