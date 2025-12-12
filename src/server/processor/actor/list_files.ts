@@ -1,5 +1,6 @@
 import { glob } from 'glob';
 import path from 'path';
+import os from 'os';
 
 export interface ListFilesArgs {
     path?: string;
@@ -14,14 +15,38 @@ export interface FileListResult {
 }
 
 /**
+ * Resolve a path relative to user's home directory.
+ * - "~" or "~/foo" expands to home directory
+ * - Relative paths like "Downloads" resolve from home directory
+ * - Absolute paths are used as-is
+ */
+function resolvePath(inputPath: string): string {
+    const home = os.homedir();
+
+    if (inputPath === '~' || inputPath === '') {
+        return home;
+    }
+
+    if (inputPath.startsWith('~/')) {
+        return path.join(home, inputPath.slice(2));
+    }
+
+    if (path.isAbsolute(inputPath)) {
+        return inputPath;
+    }
+
+    // Relative paths resolve from home directory
+    return path.join(home, inputPath);
+}
+
+/**
  * List files under a given path or glob pattern
  */
 export async function listFiles(args: ListFilesArgs): Promise<FileListResult> {
-    const { path: searchPath = '~', pattern } = args;
+    const { path: searchPath = '', pattern } = args;
 
     try {
-        // Normalize the search path
-        const normalizedPath = path.resolve(searchPath);
+        const normalizedPath = resolvePath(searchPath);
 
         // Build glob pattern
         const globPattern = pattern
