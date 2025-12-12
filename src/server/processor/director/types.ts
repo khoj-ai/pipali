@@ -12,4 +12,5 @@ export interface ResearchIteration {
     summarizedResult?: string;
     warning?: string;
     raw_response?: any[];
+    thought?: string;
 }

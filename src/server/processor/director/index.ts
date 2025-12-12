@@ -220,12 +220,14 @@ async function pickNextTool(
             return {
                 query: toolCall,
                 warning: `Repeated tool call detected. You've already called ${toolCall.name} with args: ${JSON.stringify(toolCall.args)}. Try something different.`,
+                thought: response.message,
             };
         }
 
         return {
             query: toolCall,
             raw_response: response.raw,
+            thought: response.message,
         };
     } catch (error) {
         console.error('Failed to pick next tool:', error);
