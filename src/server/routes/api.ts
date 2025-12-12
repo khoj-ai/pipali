@@ -95,6 +95,25 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     return c.json({ response: finalResponse, conversationId: conversation?.id, iterations: researchIterations.length });
 });
 
+api.get('/chat/:conversationId/history', async (c) => {
+    const conversationId = c.req.param('conversationId');
+    // validate uuid
+    try {
+        z.string().uuid().parse(conversationId);
+    } catch (e) {
+        return c.json({ error: 'Invalid conversation ID' }, 400);
+    }
+
+    const results = await db.select().from(Conversation).where(eq(Conversation.id, conversationId));
+    const conversation = results[0];
+
+    if (!conversation) {
+        return c.json({ error: 'Conversation not found' }, 404);
+    }
+
+    return c.json({ history: conversation.conversationLog?.chat || [] });
+});
+
 // Mount the OpenAPI documentation
 api.route('/', openapi);
 
