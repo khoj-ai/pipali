@@ -1,6 +1,6 @@
 import type { ServerWebSocket } from "bun";
 import { research } from "../processor/director";
-import { db } from "../db";
+import { db, getDefaultChatModel } from "../db";
 import { Conversation, User, type ChatMessage } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { getDefaultUser } from "../utils";
@@ -22,9 +22,28 @@ export const websocketHandler = {
         }
 
         const { message: userQuery, conversationId } = data;
-        console.log(`ws: 💬 Received message: ${userQuery} for ${conversationId || 'new conversation'}`);
+        console.log(`\n${'='.repeat(60)}`);
+        console.log(`[WS] 💬 New message received`);
+        console.log(`[WS] Query: "${userQuery.slice(0, 100)}${userQuery.length > 100 ? '...' : ''}"`);
+        console.log(`[WS] Conversation: ${conversationId || 'new'}`);
+
         // Get the user
         const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
+        if (!user) {
+            console.error(`[WS] ❌ User not found: ${getDefaultUser().email}`);
+            ws.send(JSON.stringify({ type: 'error', error: 'User not found' }));
+            return;
+        }
+        console.log(`[WS] User: ${user.email} (id: ${user.id})`);
+
+        // Get the user's selected model
+        const chatModelWithApi = await getDefaultChatModel(user);
+        if (chatModelWithApi) {
+            console.log(`[WS] 🤖 Model: ${chatModelWithApi.chatModel.name} (${chatModelWithApi.chatModel.modelType})`);
+            console.log(`[WS] Provider: ${chatModelWithApi.aiModelApi?.name || 'Unknown'}`);
+        } else {
+            console.warn(`[WS] ⚠️ No chat model configured`);
+        }
 
         let conversation;
         let history: ChatMessage[] = [];
@@ -38,6 +57,7 @@ export const websocketHandler = {
         }
 
         // Run research
+        console.log(`[WS] 🔬 Starting research...`);
         const researchIterations = [];
         let finalResponse = '';
 
@@ -50,6 +70,14 @@ export const websocketHandler = {
                 dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
                 user: user, // Pass user for model selection
             })) {
+                // Log iteration
+                if (iteration.query && typeof iteration.query !== 'string') {
+                    console.log(`[WS] 🔧 Tool: ${iteration.query.name}`, iteration.query.args ? JSON.stringify(iteration.query.args).slice(0, 100) : '');
+                }
+                if (iteration.warning) {
+                    console.warn(`[WS] ⚠️ Warning: ${iteration.warning}`);
+                }
+
                 // Send iteration event
                 ws.send(JSON.stringify({
                     type: 'iteration',
@@ -62,7 +90,7 @@ export const websocketHandler = {
                 researchIterations.push(iteration);
             }
         } catch (error) {
-             console.error("Research error:", error);
+             console.error(`[WS] ❌ Research error:`, error);
              ws.send(JSON.stringify({ type: 'error', error: error instanceof Error ? error.message : String(error) }));
              return;
         }
@@ -95,6 +123,12 @@ export const websocketHandler = {
              }
         }
 
+        console.log(`[WS] ✅ Research complete`);
+        console.log(`[WS] Iterations: ${researchIterations.length}`);
+        console.log(`[WS] Response length: ${finalResponse.length} chars`);
+        console.log(`[WS] Conversation ID: ${conversation?.id}`);
+        console.log(`${'='.repeat(60)}\n`);
+
         ws.send(JSON.stringify({
             type: 'complete',
             data: {
@@ -103,10 +137,10 @@ export const websocketHandler = {
             }
         }));
     },
-    open(ws: ServerWebSocket<WebSocketData>) {
-        console.log("ws: connected");
+    open(_ws: ServerWebSocket<WebSocketData>) {
+        console.log("[WS] 🔌 Client connected");
     },
-    close(ws: ServerWebSocket<WebSocketData>) {
-        console.log("ws: disconnected");
+    close(_ws: ServerWebSocket<WebSocketData>) {
+        console.log("[WS] 🔌 Client disconnected");
     }
 };

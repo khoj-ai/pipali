@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
-import { db } from '../db';
+import { db, getDefaultChatModel } from '../db';
 import { Conversation } from '../db/schema';
 import { eq, desc } from 'drizzle-orm';
 import { AiModelApi, ChatModel, User, UserChatModel } from '../db/schema';
@@ -21,15 +21,27 @@ const schema = z.object({
 api.post('/chat', zValidator('json', schema), async (c) => {
     const { message, conversationId } = c.req.valid('json');
 
-    console.log(`💬 Received message: ${message} for ${conversationId ? conversationId : 'new conversation'}`);
-    const [openAIModel] = await db.select().from(ChatModel)
-        .leftJoin(AiModelApi, eq(ChatModel.aiModelApiId, AiModelApi.id))
-        .where(eq(ChatModel.modelType, 'openai'));
+    console.log(`\n${'='.repeat(60)}`);
+    console.log(`[API] 💬 New message received`);
+    console.log(`[API] Query: "${message.slice(0, 100)}${message.length > 100 ? '...' : ''}"`);
+    console.log(`[API] Conversation: ${conversationId || 'new'}`);
+
     // Get the user
     const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
+    if (!user) {
+        console.error(`[API] ❌ User not found: ${getDefaultUser().email}`);
+        return c.json({ error: 'User not found' }, 404);
+    }
+    console.log(`[API] User: ${user.email} (id: ${user.id})`);
 
-    if (!openAIModel) {
-        return c.json({ error: 'No OpenAI model configured. Please set OPENAI_API_KEY and/or OPENAI_BASE_URL environment variable.' }, 500);
+    // Get the user's selected model
+    const chatModelWithApi = await getDefaultChatModel(user);
+    if (chatModelWithApi) {
+        console.log(`[API] 🤖 Model: ${chatModelWithApi.chatModel.name} (${chatModelWithApi.chatModel.modelType})`);
+        console.log(`[API] Provider: ${chatModelWithApi.aiModelApi?.name || 'Unknown'}`);
+    } else {
+        console.warn(`[API] ⚠️ No chat model configured`);
+        return c.json({ error: 'No chat model configured. Please configure an AI provider.' }, 500);
     }
 
     let conversation;
@@ -44,6 +56,7 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     }
 
     // Use research agent to handle the query
+    console.log(`[API] 🔬 Starting research...`);
     const researchIterations = [];
     let finalResponse = '';
 
@@ -55,8 +68,13 @@ api.post('/chat', zValidator('json', schema), async (c) => {
         dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         user: user,
     })) {
+        // Log iteration
+        if (iteration.query && typeof iteration.query !== 'string') {
+            console.log(`[API] 🔧 Tool: ${iteration.query.name}`, iteration.query.args ? JSON.stringify(iteration.query.args).slice(0, 100) : '');
+        }
+
         if (iteration.warning) {
-            console.warn('Research warning:', iteration.warning);
+            console.warn(`[API] ⚠️ Research warning: ${iteration.warning}`);
             continue;
         }
 
@@ -68,6 +86,12 @@ api.post('/chat', zValidator('json', schema), async (c) => {
 
         researchIterations.push(iteration);
     }
+
+    console.log(`[API] ✅ Research complete`);
+    console.log(`[API] Iterations: ${researchIterations.length}`);
+    console.log(`[API] Response length: ${finalResponse.length} chars`);
+    console.log(`[API] Conversation ID: ${conversation?.id}`);
+    console.log(`${'='.repeat(60)}\n`);
 
     // If no final response was generated, create one from the last iteration
     if (!finalResponse && researchIterations.length > 0) {
