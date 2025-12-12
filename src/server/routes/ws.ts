@@ -1,9 +1,10 @@
 import type { ServerWebSocket } from "bun";
 import { research } from "../processor/director";
 import { db, getDefaultChatModel } from "../db";
-import { Conversation, User, type ChatMessage } from "../db/schema";
+import { Conversation, User, type ChatMessage, type TrainOfThought } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { getDefaultUser } from "../utils";
+import type { ResearchIteration } from "../processor/director/types";
 
 export type WebSocketData = {
     conversationId?: string;
@@ -108,11 +109,39 @@ export const websocketHandler = {
             finalResponse = 'Failed to generate response.';
         }
 
+        // Convert research iterations to trainOfThought format for storage
+        const trainOfThought: TrainOfThought[] = researchIterations.flatMap((iteration: ResearchIteration) => {
+            const thoughts: TrainOfThought[] = [];
+
+            // Add reasoning/thought if present
+            if (iteration.thought) {
+                thoughts.push({ type: 'thought', data: iteration.thought });
+            }
+
+            // Add each tool call with its result
+            for (const toolCall of iteration.toolCalls) {
+                if (toolCall.name === 'text') continue; // Skip final response tool
+
+                const matchingResult = iteration.toolResults?.find(tr => tr.toolCall.id === toolCall.id);
+                thoughts.push({
+                    type: 'tool_call',
+                    data: JSON.stringify({
+                        id: toolCall.id,
+                        name: toolCall.name,
+                        args: toolCall.args,
+                        result: matchingResult?.result,
+                    }),
+                });
+            }
+
+            return thoughts;
+        });
+
         // Save to DB
         const turnId = crypto.randomUUID();
         const createdAt = new Date().toISOString();
         const userMessageToLog: ChatMessage = { by: 'user', message: userQuery, created: createdAt, turnId };
-        const aiMessageToLog: ChatMessage = { by: 'assistant', message: finalResponse, created: createdAt, turnId };
+        const aiMessageToLog: ChatMessage = { by: 'assistant', message: finalResponse, created: createdAt, turnId, trainOfThought };
 
         if (conversation) {
              const updatedLog = { chat: [...(conversation.conversationLog?.chat || []), userMessageToLog, aiMessageToLog] };

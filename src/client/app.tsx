@@ -62,6 +62,7 @@ const App = () => {
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const modelDropdownRef = useRef<HTMLDivElement>(null);
+    const prevConversationIdRef = useRef<string | undefined>(undefined);
 
     // Initialize WebSocket and fetch data
     useEffect(() => {
@@ -97,19 +98,46 @@ const App = () => {
 
     // Fetch history if conversationId changes
     useEffect(() => {
-        // Clear messages immediately when conversation changes
-        setMessages([]);
+        const prevId = prevConversationIdRef.current;
 
+        // Update URL
         if (conversationId) {
             const url = new URL(window.location.href);
             url.searchParams.set('conversationId', conversationId);
             window.history.pushState({}, '', url);
-            fetchHistory(conversationId);
         } else {
             const url = new URL(window.location.href);
             url.searchParams.delete('conversationId');
             window.history.pushState({}, '', url);
         }
+
+        // Skip clearing/fetching if this is just a new conversation getting its ID assigned
+        // (indicated by going from undefined to a value while we have streaming messages)
+        const isNewConversationGettingId = prevId === undefined && conversationId !== undefined;
+        if (isNewConversationGettingId) {
+            // Check if we have a streaming message (meaning we just completed first message)
+            setMessages(prev => {
+                const hasStreamingOrJustCompleted = prev.some(m => m.role === 'assistant');
+                if (hasStreamingOrJustCompleted) {
+                    // Don't clear - just update the ref and return unchanged
+                    prevConversationIdRef.current = conversationId;
+                    return prev;
+                }
+                // No messages yet - this is initial page load, fetch history
+                fetchHistory(conversationId!);
+                prevConversationIdRef.current = conversationId;
+                return [];
+            });
+            return;
+        }
+
+        // Clear messages for conversation switches or new chat
+        setMessages([]);
+        if (conversationId) {
+            fetchHistory(conversationId);
+        }
+
+        prevConversationIdRef.current = conversationId;
     }, [conversationId]);
 
     // Auto-resize textarea
@@ -179,12 +207,42 @@ const App = () => {
             const res = await fetch(`/api/chat/${id}/history`);
             if (res.ok) {
                 const data = await res.json();
-                const historyMessages: Message[] = data.history.map((msg: any) => ({
-                    id: msg.turnId || crypto.randomUUID(),
-                    role: msg.by,
-                    content: typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message),
-                    thoughts: [],
-                }));
+                const historyMessages: Message[] = data.history.map((msg: any) => {
+                    // Parse trainOfThought into Thought[] format
+                    const thoughts: Thought[] = [];
+                    if (msg.trainOfThought && Array.isArray(msg.trainOfThought)) {
+                        for (const tot of msg.trainOfThought) {
+                            if (tot.type === 'thought') {
+                                thoughts.push({
+                                    id: crypto.randomUUID(),
+                                    type: 'thought',
+                                    content: tot.data,
+                                });
+                            } else if (tot.type === 'tool_call') {
+                                try {
+                                    const toolData = JSON.parse(tot.data);
+                                    thoughts.push({
+                                        id: toolData.id || crypto.randomUUID(),
+                                        type: 'tool_call',
+                                        content: '',
+                                        toolName: toolData.name,
+                                        toolArgs: toolData.args,
+                                        toolResult: toolData.result,
+                                    });
+                                } catch {
+                                    // Skip malformed tool call data
+                                }
+                            }
+                        }
+                    }
+
+                    return {
+                        id: msg.turnId || crypto.randomUUID(),
+                        role: msg.by,
+                        content: typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message),
+                        thoughts,
+                    };
+                });
                 setMessages(historyMessages);
             }
         } catch (e) {
@@ -258,18 +316,39 @@ const App = () => {
             setMessages(prev => {
                 const lastMsg = prev[prev.length - 1];
                 if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-                    const newThought: Thought = {
-                        id: crypto.randomUUID(),
-                        type: data.query ? 'tool_call' : 'thought',
-                        content: data.thought || '',
-                        toolName: data.query?.name,
-                        toolArgs: data.query?.args,
-                        toolResult: data.summarizedResult
-                    };
+                    const newThoughts: Thought[] = [];
+
+                    // Add thought/reasoning if present
+                    if (data.thought) {
+                        newThoughts.push({
+                            id: crypto.randomUUID(),
+                            type: 'thought',
+                            content: data.thought,
+                        });
+                    }
+
+                    // Add tool calls with their results
+                    if (data.toolCalls && Array.isArray(data.toolCalls)) {
+                        for (const toolCall of data.toolCalls) {
+                            // Find the matching result for this tool call
+                            const matchingResult = data.toolResults?.find(
+                                (tr: any) => tr.toolCall.id === toolCall.id
+                            );
+
+                            newThoughts.push({
+                                id: toolCall.id || crypto.randomUUID(),
+                                type: 'tool_call',
+                                content: '',
+                                toolName: toolCall.name,
+                                toolArgs: toolCall.args,
+                                toolResult: matchingResult?.result,
+                            });
+                        }
+                    }
 
                     return prev.map(msg =>
                         msg.id === lastMsg.id
-                            ? { ...msg, thoughts: [...(msg.thoughts || []), newThought] }
+                            ? { ...msg, thoughts: [...(msg.thoughts || []), ...newThoughts] }
                             : msg
                     );
                 }
@@ -525,7 +604,11 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
     const [isExpanded, setIsExpanded] = useState(false);
 
     const toolCalls = thoughts.filter(t => t.type === 'tool_call');
-    if (toolCalls.length === 0) return null;
+    const reasoningThoughts = thoughts.filter(t => t.type === 'thought' && t.content);
+
+    if (toolCalls.length === 0 && reasoningThoughts.length === 0) return null;
+
+    const stepCount = toolCalls.length;
 
     return (
         <div className="thoughts-section">
@@ -534,7 +617,9 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
                 onClick={() => setIsExpanded(!isExpanded)}
             >
                 <span className="thoughts-summary">
-                    {toolCalls.length} step{toolCalls.length > 1 ? 's' : ''} taken
+                    {stepCount > 0 && `${stepCount} step${stepCount > 1 ? 's' : ''} taken`}
+                    {stepCount > 0 && reasoningThoughts.length > 0 && ' · '}
+                    {reasoningThoughts.length > 0 && 'Thinking'}
                 </span>
                 <ChevronDown
                     size={14}
@@ -544,14 +629,22 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
 
             {isExpanded && (
                 <div className="thoughts-list">
+                    {/* Show reasoning thoughts first */}
+                    {reasoningThoughts.map((thought) => (
+                        <div key={thought.id} className="thought-item reasoning">
+                            <div className="thought-step">💭</div>
+                            <div className="thought-content">
+                                <div className="thought-reasoning">{thought.content}</div>
+                            </div>
+                        </div>
+                    ))}
+
+                    {/* Show tool calls with their results */}
                     {toolCalls.map((thought, idx) => (
                         <div key={thought.id} className="thought-item">
                             <div className="thought-step">{idx + 1}</div>
                             <div className="thought-content">
                                 <div className="thought-tool">{formatToolName(thought.toolName || '')}</div>
-                                {thought.content && (
-                                    <div className="thought-reasoning">{thought.content}</div>
-                                )}
                                 {thought.toolResult && (
                                     <div className="thought-result">
                                         {thought.toolResult.slice(0, 200)}
