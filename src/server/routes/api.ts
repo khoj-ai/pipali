@@ -25,6 +25,8 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     const [openAIModel] = await db.select().from(ChatModel)
         .leftJoin(AiModelApi, eq(ChatModel.aiModelApiId, AiModelApi.id))
         .where(eq(ChatModel.modelType, 'openai'));
+    // Get the user
+    const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
 
     if (!openAIModel) {
         return c.json({ error: 'No OpenAI model configured. Please set OPENAI_API_KEY and/or OPENAI_BASE_URL environment variable.' }, 500);
@@ -51,6 +53,7 @@ api.post('/chat', zValidator('json', schema), async (c) => {
         maxIterations: 5,
         currentDate: new Date().toISOString().split('T')[0],
         dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+        user: user,
     })) {
         if (iteration.warning) {
             console.warn('Research warning:', iteration.warning);

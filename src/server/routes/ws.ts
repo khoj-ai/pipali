@@ -23,6 +23,8 @@ export const websocketHandler = {
 
         const { message: userQuery, conversationId } = data;
         console.log(`ws: 💬 Received message: ${userQuery} for ${conversationId || 'new conversation'}`);
+        // Get the user
+        const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
 
         let conversation;
         let history: ChatMessage[] = [];
@@ -46,6 +48,7 @@ export const websocketHandler = {
                 maxIterations: 5,
                 currentDate: new Date().toISOString().split('T')[0],
                 dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+                user: user, // Pass user for model selection
             })) {
                 // Send iteration event
                 ws.send(JSON.stringify({

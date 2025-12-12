@@ -1,4 +1,4 @@
-import { type ChatMessage } from '../../db/schema';
+import { type ChatMessage, type User } from '../../db/schema';
 import type { ToolDefinition } from '../conversation/conversation';
 import { sendMessageToModel } from '../conversation/index';
 import type { ResearchIteration, ToolCall } from './types';
@@ -16,6 +16,7 @@ interface ResearchConfig {
     location?: string;
     username?: string;
     personality?: string;
+    user?: typeof User.$inferSelect;
 }
 
 // Tool definitions for the research agent
@@ -188,7 +189,10 @@ async function pickNextTool(
             messages,
             systemPrompt,
             tools,
-            true
+            true,      // deepThought
+            false,     // fastMode
+            undefined, // agentChatModel
+            config.user // user - for user's selected model
         );
 
         // Check if response is valid
