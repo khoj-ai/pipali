@@ -1,5 +1,5 @@
 {
-  "id": "ed9084ef-5ccb-4b44-a005-36dcdb640f7f",
+  "id": "77a6c0d1-70c7-4bd2-8f80-7c7406b00653",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -230,12 +230,11 @@
           "primaryKey": false,
           "notNull": true
         },
-        "conversation_log": {
-          "name": "conversation_log",
+        "trajectory": {
+          "name": "trajectory",
           "type": "jsonb",
           "primaryKey": false,
-          "notNull": false,
-          "default": "'{\"chat\":[]}'::jsonb"
+          "notNull": true
         },
         "slug": {
           "name": "slug",

@@ -39,7 +39,7 @@ CREATE TABLE "chat_model" (
 CREATE TABLE "conversation" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" integer NOT NULL,
-	"conversation_log" jsonb DEFAULT '{"chat":[]}'::jsonb,
+	"trajectory" jsonb NOT NULL,
 	"slug" text,
 	"title" text,
 	"agent_id" integer,

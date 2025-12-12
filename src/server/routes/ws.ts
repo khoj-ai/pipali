@@ -1,10 +1,13 @@
 import type { ServerWebSocket } from "bun";
 import { research } from "../processor/director";
 import { db, getDefaultChatModel } from "../db";
-import { Conversation, User, type ChatMessage, type TrainOfThought } from "../db/schema";
+import { Conversation, User, type ChatMessage } from "../db/schema";
 import { eq } from "drizzle-orm";
 import { getDefaultUser } from "../utils";
 import type { ResearchIteration } from "../processor/director/types";
+import { atifConversationService } from "../processor/conversation/atif/atif.service";
+import { type ATIFToolCall, type ATIFObservationResult } from "../processor/conversation/atif/atif.types";
+import { convertATIFToChatMessages } from "../processor/conversation/atif/atif.utils";
 
 export type WebSocketData = {
     conversationId?: string;
@@ -49,18 +52,42 @@ export const websocketHandler = {
         let conversation;
         let history: ChatMessage[] = [];
 
+        // Get or create conversation BEFORE starting research
         if (conversationId) {
             const results = await db.select().from(Conversation).where(eq(Conversation.id, conversationId));
             conversation = results[0];
-            if (conversation && conversation.conversationLog) {
-                history = conversation.conversationLog.chat;
+            if (conversation && conversation.trajectory) {
+                // Extract message history from ATIF trajectory for research function
+                history = convertATIFToChatMessages(conversation.trajectory);
             }
+        } else {
+            // Create new conversation at the start
+            const modelName = chatModelWithApi?.chatModel.name || 'unknown';
+            conversation = await atifConversationService.createConversation(
+                user,
+                'panini-agent',
+                '1.0.0',
+                modelName
+            );
         }
 
-        // Run research
+        // Ensure conversation was created
+        if (!conversation) {
+            ws.send(JSON.stringify({ type: 'error', error: 'Failed to create or find conversation' }));
+            return;
+        }
+
+        // Add user message to conversation immediately
+        await atifConversationService.addStep(
+            conversation.id,
+            'user',
+            userQuery
+        );
+
+        // Run research and add steps as they happen
         console.log(`[WS] 🔬 Starting research...`);
-        const researchIterations = [];
         let finalResponse = '';
+        let iterationCount = 0;
 
         try {
             for await (const iteration of research({
@@ -71,6 +98,8 @@ export const websocketHandler = {
                 dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
                 user: user,
             })) {
+                iterationCount++;
+
                 // Log tool calls
                 for (const tc of iteration.toolCalls) {
                     console.log(`[WS] 🔧 Tool: ${tc.name}`, tc.args ? JSON.stringify(tc.args).slice(0, 100) : '');
@@ -86,13 +115,35 @@ export const websocketHandler = {
                 const textTool = iteration.toolCalls.find(tc => tc.name === 'text');
                 if (textTool) {
                     finalResponse = textTool.args.response || '';
-                } else {
-                    // Send iteration update to client.
-                    // Exclude final response as it is rendered via 'complete' message
-                    ws.send(JSON.stringify({ type: 'iteration', data: iteration }));
-                }
+                    // Don't add the text tool as a step, we'll add it as the final response
+                // Add the entire iteration as a single step in the trajectory
+                } else if (iteration.toolCalls.length > 0 && iteration.toolResults) {
+                    const toolCalls: ATIFToolCall[] = iteration.toolCalls.map(tc => ({
+                        tool_call_id: tc.id,
+                        function_name: tc.name,
+                        arguments: tc.args || {},
+                    }));
 
-                researchIterations.push(iteration);
+                    const observationResults: ATIFObservationResult[] = iteration.toolResults.map(tr => ({
+                        source_call_id: tr.toolCall.id,
+                        content: typeof tr.result === 'string' ? tr.result : JSON.stringify(tr.result),
+                    }));
+
+                    await atifConversationService.addStep(
+                        conversation.id,
+                        'agent',
+                        '', // No message for tool execution steps
+                        undefined,
+                        toolCalls,
+                        { results: observationResults },
+                        iteration.thought // Add reasoning as part of the same step
+                    );
+
+                    // Send iteration update to client
+                    ws.send(JSON.stringify({ type: 'iteration', data: iteration }));
+                } else {
+                    console.warn(`[WS] ⚠️ No tool calls or results in iteration`);
+                }
             }
         } catch (error) {
              console.error(`[WS] ❌ Research error:`, error);
@@ -100,65 +151,20 @@ export const websocketHandler = {
              return;
         }
 
-        // If no final response was generated, create one from the last iteration's tool results
-        if (!finalResponse && researchIterations.length > 0) {
-            const lastIteration = researchIterations[researchIterations.length - 1];
-            const lastResults = lastIteration?.toolResults?.map(tr => tr.result).join('\n\n');
-            finalResponse = lastResults || 'Research completed but no final response generated.';
-        } else if (!finalResponse) {
+        // If no final response was generated, create one
+        if (!finalResponse) {
             finalResponse = 'Failed to generate response.';
         }
 
-        // Convert research iterations to trainOfThought format for storage
-        const trainOfThought: TrainOfThought[] = researchIterations.flatMap((iteration: ResearchIteration) => {
-            const thoughts: TrainOfThought[] = [];
-
-            // Add reasoning/thought if present
-            if (iteration.thought) {
-                thoughts.push({ type: 'thought', data: iteration.thought });
-            }
-
-            // Add each tool call with its result
-            for (const toolCall of iteration.toolCalls) {
-                if (toolCall.name === 'text') continue; // Skip final response tool
-
-                const matchingResult = iteration.toolResults?.find(tr => tr.toolCall.id === toolCall.id);
-                thoughts.push({
-                    type: 'tool_call',
-                    data: JSON.stringify({
-                        id: toolCall.id,
-                        name: toolCall.name,
-                        args: toolCall.args,
-                        result: matchingResult?.result,
-                    }),
-                });
-            }
-
-            return thoughts;
-        });
-
-        // Save to DB
-        const turnId = crypto.randomUUID();
-        const createdAt = new Date().toISOString();
-        const userMessageToLog: ChatMessage = { by: 'user', message: userQuery, created: createdAt, turnId };
-        const aiMessageToLog: ChatMessage = { by: 'assistant', message: finalResponse, created: createdAt, turnId, trainOfThought };
-
-        if (conversation) {
-             const updatedLog = { chat: [...(conversation.conversationLog?.chat || []), userMessageToLog, aiMessageToLog] };
-             await db.update(Conversation).set({ conversationLog: updatedLog }).where(eq(Conversation.id, conversation.id));
-        } else {
-             const [adminUser] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
-             if (adminUser) {
-                 const newConversation = await db.insert(Conversation).values({ conversationLog: { chat: [userMessageToLog, aiMessageToLog] }, userId: adminUser.id }).returning();
-                 conversation = newConversation[0];
-             } else {
-                 ws.send(JSON.stringify({ type: 'error', error: 'Admin user not found.' }));
-                 return;
-             }
-        }
+        // Add final response as the last agent step
+        await atifConversationService.addStep(
+            conversation.id,
+            'agent',
+            finalResponse
+        );
 
         console.log(`[WS] ✅ Research complete`);
-        console.log(`[WS] Iterations: ${researchIterations.length}`);
+        console.log(`[WS] Iterations: ${iterationCount}`);
         console.log(`[WS] Response length: ${finalResponse.length} chars`);
         console.log(`[WS] Conversation ID: ${conversation?.id}`);
         console.log(`${'='.repeat(60)}\n`);

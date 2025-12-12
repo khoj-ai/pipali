@@ -1,4 +1,5 @@
 import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb } from 'drizzle-orm/pg-core';
+import { type ATIFTrajectory } from '../processor/conversation/atif/atif.types';
 
 export interface Context {
     compiled: string;
@@ -215,7 +216,7 @@ export const agents = pgTable('agents', {
 export const Conversation = pgTable('conversation', {
     id: uuid('id').defaultRandom().notNull().primaryKey(),
     userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
-    conversationLog: jsonb('conversation_log').$type<{ chat: ChatMessage[] }>().default({ chat: [] }),
+    trajectory: jsonb('trajectory').$type<ATIFTrajectory>().notNull(),
     slug: text('slug'),
     title: text('title'),
     agentId: integer('agent_id').references(() => agents.id, { onDelete: 'set null' }),

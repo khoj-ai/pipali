@@ -210,9 +210,30 @@ const App = () => {
                 const historyMessages: Message[] = data.history.map((msg: any) => {
                     // Parse trainOfThought into Thought[] format
                     const thoughts: Thought[] = [];
+                    let toolResultsMap: Map<string, string> = new Map();
+
                     if (msg.trainOfThought && Array.isArray(msg.trainOfThought)) {
+                        // First pass: collect tool results
                         for (const tot of msg.trainOfThought) {
-                            if (tot.type === 'thought') {
+                            if (tot.type === 'tool_result') {
+                                try {
+                                    const toolResults = JSON.parse(tot.data);
+                                    if (Array.isArray(toolResults)) {
+                                        for (const result of toolResults) {
+                                            if (result.toolCall && result.toolCall.id && result.result) {
+                                                toolResultsMap.set(result.toolCall.id, result.result);
+                                            }
+                                        }
+                                    }
+                                } catch {
+                                    // Skip malformed tool result data
+                                }
+                            }
+                        }
+
+                        // Second pass: build thoughts with matched results
+                        for (const tot of msg.trainOfThought) {
+                            if (tot.type === 'reasoning') {
                                 thoughts.push({
                                     id: crypto.randomUUID(),
                                     type: 'thought',
@@ -220,15 +241,19 @@ const App = () => {
                                 });
                             } else if (tot.type === 'tool_call') {
                                 try {
-                                    const toolData = JSON.parse(tot.data);
-                                    thoughts.push({
-                                        id: toolData.id || crypto.randomUUID(),
-                                        type: 'tool_call',
-                                        content: '',
-                                        toolName: toolData.name,
-                                        toolArgs: toolData.args,
-                                        toolResult: toolData.result,
-                                    });
+                                    const toolCalls = JSON.parse(tot.data);
+                                    if (Array.isArray(toolCalls)) {
+                                        for (const toolCall of toolCalls) {
+                                            thoughts.push({
+                                                id: toolCall.id || crypto.randomUUID(),
+                                                type: 'tool_call',
+                                                content: '',
+                                                toolName: toolCall.name,
+                                                toolArgs: toolCall.args,
+                                                toolResult: toolResultsMap.get(toolCall.id),
+                                            });
+                                        }
+                                    }
                                 } catch {
                                     // Skip malformed tool call data
                                 }
