@@ -11,7 +11,7 @@ import { type ChatMessage } from '../db/schema';
 import { getDefaultUser } from '../utils';
 import { research } from '../processor/director';
 
-const api = new Hono();
+const api = new Hono().basePath('/api');
 
 const schema = z.object({
     message: z.string(),
