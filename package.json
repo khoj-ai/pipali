@@ -8,7 +8,9 @@
     "dev": "bun run --watch src/server/index.ts"
   },
   "devDependencies": {
-    "@types/bun": "latest"
+    "@types/bun": "latest",
+    "@types/react": "^19.2.7",
+    "@types/react-dom": "^19.2.3"
   },
   "peerDependencies": {
     "typescript": "^5"
@@ -23,7 +25,11 @@
     "drizzle-orm": "^0.44.3",
     "hono": "^4.8.5",
     "langchain": "^0.3.30",
+    "lucide-react": "^0.560.0",
     "pg": "^8.16.3",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
+    "react-markdown": "^10.1.0",
     "zod": "^4.0.8"
   }
 }
