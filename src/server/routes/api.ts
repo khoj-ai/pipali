@@ -169,7 +169,7 @@ api.get('/chat/:conversationId/history', async (c) => {
     const conversationId = c.req.param('conversationId');
     // validate uuid
     try {
-        z.string().uuid().parse(conversationId);
+        z.uuid().parse(conversationId);
     } catch (e) {
         return c.json({ error: 'Invalid conversation ID' }, 400);
     }
@@ -228,7 +228,7 @@ api.get('/conversations', async (c) => {
 api.delete('/conversations/:conversationId', async (c) => {
     const conversationId = c.req.param('conversationId');
     try {
-        z.string().uuid().parse(conversationId);
+        z.uuid().parse(conversationId);
     } catch (e) {
         return c.json({ error: 'Invalid conversation ID' }, 400);
     }
@@ -333,7 +333,7 @@ api.get('/conversations/:conversationId/export/atif', async (c) => {
 
     // Validate UUID
     try {
-        z.string().uuid().parse(conversationId);
+        z.uuid().parse(conversationId);
     } catch (e) {
         return c.json({ error: 'Invalid conversation ID' }, 400);
     }
