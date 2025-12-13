@@ -8,6 +8,7 @@ export async function sendMessageToGpt(
     apiKey?: string,
     apiBaseUrl?: string | null,
     tools?: ToolDefinition[],
+    toolChoice: string = 'auto',
 ): Promise<ResponseWithThought> {
     const lcTools = toOpenaiTools(tools);
     const chat = new ChatOpenAI({
@@ -18,6 +19,7 @@ export async function sendMessageToGpt(
         },
     }).withConfig({
         tools: lcTools,
+        tool_choice: toolChoice,
     });
 
     const response = await chat.invoke(messages);

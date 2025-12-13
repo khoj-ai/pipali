@@ -14,6 +14,7 @@ export async function sendMessageToModel(
     systemMessage?: string,
     // Model Config
     tools?: ToolDefinition[],
+    toolChoice: string = 'auto',
     deepThought: boolean = false,
     fastMode: boolean = false,
     agentChatModel?: typeof ChatModel.$inferSelect,
@@ -54,6 +55,7 @@ export async function sendMessageToModel(
             chatModelWithApi.aiModelApi?.apiKey,
             chatModelWithApi.aiModelApi?.apiBaseUrl,
             tools,
+            toolChoice,
         );
         console.log(`[Model] ⏱️ Response received in ${(Date.now() - startTime) / 1000.0}ms`);
         return response;

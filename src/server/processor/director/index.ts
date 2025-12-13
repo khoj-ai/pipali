@@ -121,6 +121,8 @@ async function pickNextTool(
     config: ResearchConfig
 ): Promise<ResearchIteration> {
     const { currentDate, dayOfWeek, location, username, personality } = config;
+    const isLast = previousIterations.length == config.maxIterations - 1;
+    const toolChoice = isLast ? 'none' : 'auto';
 
     // Build tool options string
     const toolOptionsStr = tools
@@ -195,6 +197,7 @@ async function pickNextTool(
             messages,
             systemPrompt,
             tools,
+            toolChoice,
             true,      // deepThought
             false,     // fastMode
             undefined, // agentChatModel
