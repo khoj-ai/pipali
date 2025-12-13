@@ -3,7 +3,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
-import { ArrowUp, Sparkles, ChevronDown, Circle, Loader2, Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, Check } from "lucide-react";
+import { ArrowUp, Sparkles, ChevronDown, Circle, Loader2, Plus, MessageSquare, Trash2, PanelLeftClose, PanelLeft, Check, MoreVertical, Download } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 
 // Types
@@ -58,6 +58,8 @@ const App = () => {
     const [selectedModel, setSelectedModel] = useState<ChatModelInfo | null>(null);
     const [showModelDropdown, setShowModelDropdown] = useState(false);
     const [sidebarOpen, setSidebarOpen] = useState(true);
+    const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
+    const [exportingConversationId, setExportingConversationId] = useState<string | null>(null);
     const wsRef = useRef<WebSocket | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -126,6 +128,18 @@ const App = () => {
             if (modelDropdownRef.current && !modelDropdownRef.current.contains(e.target as Node)) {
                 setShowModelDropdown(false);
             }
+        };
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Close conversation menu when clicking outside
+    useEffect(() => {
+        const handleClickOutside = (e: MouseEvent) => {
+            const target = e.target as HTMLElement | null;
+            if (!target) return;
+            if (target.closest('.conversation-menu-container')) return;
+            setOpenConversationMenuId(null);
         };
         document.addEventListener('mousedown', handleClickOutside);
         return () => document.removeEventListener('mousedown', handleClickOutside);
@@ -307,6 +321,77 @@ const App = () => {
             }
         } catch (e) {
             console.error("Failed to fetch history", e);
+        }
+    };
+
+    const getFilenameFromContentDisposition = (headerValue: string | null): string | null => {
+        if (!headerValue) return null;
+
+        // RFC 5987 (filename*=UTF-8''...) support
+        const filenameStarMatch = headerValue.match(/filename\*=(?:UTF-8'')?([^;]+)/i);
+        if (filenameStarMatch?.[1]) {
+            try {
+                return decodeURIComponent(filenameStarMatch[1].trim().replace(/^"|"$/g, ''));
+            } catch {
+                // fall through
+            }
+        }
+
+        const filenameMatch = headerValue.match(/filename=("[^"]+"|[^;]+)/i);
+        if (filenameMatch?.[1]) {
+            return filenameMatch[1].trim().replace(/^"|"$/g, '');
+        }
+
+        return null;
+    };
+
+    const exportConversationAsATIF = async (id: string) => {
+        if (!id) return;
+        if (exportingConversationId) return;
+
+        setExportingConversationId(id);
+        try {
+            const res = await fetch(`/api/conversations/${id}/export/atif`);
+            if (!res.ok) {
+                const text = await res.text().catch(() => '');
+                throw new Error(text || `Export failed (${res.status})`);
+            }
+
+            const blob = await res.blob();
+            const filename =
+                getFilenameFromContentDisposition(res.headers.get('Content-Disposition'))
+                || `conversation_${id}.atif.json`;
+
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            URL.revokeObjectURL(url);
+        } catch (e) {
+            console.error('Failed to export conversation as ATIF', e);
+            alert(e instanceof Error ? e.message : 'Failed to export conversation');
+        } finally {
+            setExportingConversationId(null);
+        }
+    };
+
+    const toggleConversationMenu = (id: string, e: React.MouseEvent) => {
+        e.stopPropagation();
+        setOpenConversationMenuId(prev => (prev === id ? null : id));
+    };
+
+    const selectConversation = (id: string) => {
+        setConversationId(id);
+        setOpenConversationMenuId(null);
+    };
+
+    const handleConversationKeyDown = (id: string, e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            selectConversation(id);
         }
     };
 
@@ -493,20 +578,62 @@ const App = () => {
 
                 <div className="conversations-list">
                     {conversations.map(conv => (
-                        <button
+                        <div
                             key={conv.id}
                             className={`conversation-item ${conversationId === conv.id ? 'active' : ''}`}
-                            onClick={() => setConversationId(conv.id)}
+                            onClick={() => selectConversation(conv.id)}
+                            onKeyDown={(e) => handleConversationKeyDown(conv.id, e)}
+                            role="button"
+                            tabIndex={0}
+                            aria-label={`Open conversation: ${conv.title}`}
                         >
                             <MessageSquare size={16} />
                             <span className="conversation-title">{conv.title}</span>
-                            <button
-                                className="delete-btn"
-                                onClick={(e) => deleteConversation(conv.id, e)}
-                            >
-                                <Trash2 size={14} />
-                            </button>
-                        </button>
+
+                            <div className="conversation-menu-container">
+                                <button
+                                    className="menu-btn"
+                                    onClick={(e) => toggleConversationMenu(conv.id, e)}
+                                    aria-label="Conversation actions"
+                                >
+                                    <MoreVertical size={16} />
+                                </button>
+
+                                {openConversationMenuId === conv.id && (
+                                    <div className="conversation-menu" role="menu">
+                                        <button
+                                            className="conversation-menu-item"
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                setOpenConversationMenuId(null);
+                                                exportConversationAsATIF(conv.id);
+                                            }}
+                                            disabled={exportingConversationId === conv.id}
+                                            role="menuitem"
+                                        >
+                                            {exportingConversationId === conv.id ? (
+                                                <Loader2 size={14} className="spinning" />
+                                            ) : (
+                                                <Download size={14} />
+                                            )}
+                                            <span>Export</span>
+                                        </button>
+
+                                        <button
+                                            className="conversation-menu-item danger"
+                                            onClick={(e) => {
+                                                setOpenConversationMenuId(null);
+                                                deleteConversation(conv.id, e);
+                                            }}
+                                            role="menuitem"
+                                        >
+                                            <Trash2 size={14} />
+                                            <span>Delete</span>
+                                        </button>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
                     ))}
                     {conversations.length === 0 && (
                         <div className="no-conversations">No conversations yet</div>

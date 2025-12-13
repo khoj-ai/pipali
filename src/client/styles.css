@@ -113,6 +113,11 @@ body {
     position: relative;
 }
 
+.conversation-item:focus-visible {
+    outline: 2px solid rgba(23, 23, 23, 0.25);
+    outline-offset: 2px;
+}
+
 .conversation-item:hover {
     background: var(--bg-tertiary);
     color: var(--text-primary);
@@ -131,7 +136,13 @@ body {
     white-space: nowrap;
 }
 
-.delete-btn {
+.conversation-menu-container {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.menu-btn {
     opacity: 0;
     padding: 4px;
     background: transparent;
@@ -142,13 +153,62 @@ body {
     transition: all var(--transition);
 }
 
-.conversation-item:hover .delete-btn {
+.conversation-item:hover .menu-btn {
     opacity: 1;
 }
 
-.delete-btn:hover {
-    background: var(--error);
-    color: white;
+.conversation-item:focus-within .menu-btn {
+    opacity: 1;
+}
+
+.menu-btn:hover {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+.conversation-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    min-width: 180px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    z-index: 200;
+    overflow: hidden;
+}
+
+.conversation-menu-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 10px 12px;
+    background: transparent;
+    border: none;
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background var(--transition);
+    text-align: left;
+}
+
+.conversation-menu-item:hover:not(:disabled) {
+    background: var(--bg-tertiary);
+}
+
+.conversation-menu-item:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.conversation-menu-item.danger {
+    color: var(--error);
+}
+
+.conversation-menu-item.danger:hover:not(:disabled) {
+    background: rgba(239, 68, 68, 0.10);
 }
 
 .no-conversations {
@@ -220,6 +280,8 @@ body {
     align-items: center;
     gap: 16px;
 }
+
+
 
 /* Model Selector */
 .model-selector {
