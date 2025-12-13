@@ -72,7 +72,7 @@ const tools: ToolDefinition[] = [
                 },
                 path_prefix: {
                     type: 'string',
-                    description: 'Optional path prefix to limit the search to files under a specified path.',
+                    description: 'Optional path prefix to limit the search to files under a specified path. Default is home directory.',
                 },
                 lines_before: {
                     type: 'integer',
@@ -85,6 +85,12 @@ const tools: ToolDefinition[] = [
                     description: 'Optional number of lines to show after each line match for context (0-20).',
                     minimum: 0,
                     maximum: 20,
+                },
+                max_results: {
+                    type: 'integer',
+                    description: 'Optional cap on number of output lines returned (1-5000). Lower values are faster. Default is 500.',
+                    minimum: 1,
+                    maximum: 5000,
                 },
             },
             required: ['regex_pattern'],

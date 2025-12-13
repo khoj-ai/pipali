@@ -168,7 +168,7 @@ describe('listFiles', () => {
         const nonExistentDir = path.join(testDir, 'does-not-exist');
         const result = await listFiles({ path: nonExistentDir });
 
-        expect(result.compiled).toBe('No files found.');
+        expect(result.compiled).toBe('Path does not exist.');
     });
 
     test('should include file count in query', async () => {
