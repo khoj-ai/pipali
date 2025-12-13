@@ -64,6 +64,23 @@ const App = () => {
     const modelDropdownRef = useRef<HTMLDivElement>(null);
     const prevConversationIdRef = useRef<string | undefined>(undefined);
 
+    const focusTextarea = () => {
+        const textarea = textareaRef.current;
+        if (!textarea) return;
+        if (textarea.disabled) return;
+        // If the element isn't currently visible/layouted, focusing can be flaky.
+        if (textarea.offsetParent === null) return;
+        textarea.focus({ preventScroll: true });
+    };
+
+    const scheduleTextareaFocus = () => {
+        // Schedule after React commits + browser paints to avoid focus being lost
+        // due to re-renders/state transitions.
+        requestAnimationFrame(() => {
+            setTimeout(() => focusTextarea(), 0);
+        });
+    };
+
     // Initialize WebSocket and fetch data
     useEffect(() => {
         connectWebSocket();
@@ -84,6 +101,24 @@ const App = () => {
             }
         };
     }, []);
+
+    // Keep the cursor in the chat input on initial load.
+    useEffect(() => {
+        scheduleTextareaFocus();
+    }, []);
+
+    // Keep the cursor in the chat input after switching conversations.
+    useEffect(() => {
+        scheduleTextareaFocus();
+    }, [conversationId]);
+
+    // After sending completes (processing ends) and whenever we become connected,
+    // ensure the input regains focus.
+    useEffect(() => {
+        if (!isConnected) return;
+        if (isProcessing) return;
+        scheduleTextareaFocus();
+    }, [isConnected, isProcessing]);
 
     // Close model dropdown when clicking outside
     useEffect(() => {
@@ -430,6 +465,7 @@ const App = () => {
         }));
 
         setInput("");
+        scheduleTextareaFocus();
     };
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
