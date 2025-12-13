@@ -34,7 +34,7 @@ const route = createRoute({
 
 app.openapi(route, (c) => {
     // This is a dummy handler for documentation purposes.
-    // The actual logic is in src/index.ts
+    // The actual logic is in src/server/routes/openapi.ts
     return c.json({
         response: 'This is a dummy response. Use the real endpoint to interact with the chat bot.',
         conversationId: crypto.randomUUID(),
