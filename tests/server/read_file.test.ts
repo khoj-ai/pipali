@@ -8,6 +8,7 @@ describe('readFile', () => {
     const testDir = path.join(os.tmpdir(), 'read-file-tests');
     const testFile = path.join(testDir, 'test.txt');
     const longFile = path.join(testDir, 'long.txt');
+    const mixedCaseFile = path.join(testDir, 'MixedCase.TXT');
 
     beforeAll(async () => {
         // Create test directory
@@ -26,6 +27,9 @@ describe('readFile', () => {
         // Create long file with more than 50 lines
         const longContent = Array.from({ length: 100 }, (_, i) => `Line ${i + 1}`).join('\n');
         await fs.writeFile(longFile, longContent);
+
+        // Create a file with mixed casing
+        await fs.writeFile(mixedCaseFile, 'Mixed case content');
     });
 
     afterAll(async () => {
@@ -175,5 +179,13 @@ describe('readFile', () => {
         const result = await readFile({ path: specialFile });
 
         expect(result.compiled).toBe(specialContent);
+    });
+
+    test('should read file with case-insensitive path', async () => {
+        // Deliberately change casing in the filename
+        const wrongCasePath = path.join(testDir, 'mixedcase.txt');
+        const result = await readFile({ path: wrongCasePath });
+
+        expect(result.compiled).toBe('Mixed case content');
     });
 });

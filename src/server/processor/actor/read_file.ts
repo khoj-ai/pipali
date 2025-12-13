@@ -1,4 +1,5 @@
 import path from 'path';
+import { resolveCaseInsensitivePath } from './actor.utils';
 
 export interface ReadFileArgs {
     path: string;
@@ -29,8 +30,19 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
         const absolutePath = path.resolve(filePath);
 
         // Read the file using Bun.file
-        const file = Bun.file(absolutePath);
-        const exists = await file.exists();
+        let resolvedPath = absolutePath;
+        let file = Bun.file(resolvedPath);
+        let exists = await file.exists();
+
+        // If the exact-cased path doesn't exist, try resolving case-insensitively.
+        if (!exists) {
+            const caseResolved = await resolveCaseInsensitivePath(path.normalize(absolutePath));
+            if (caseResolved) {
+                resolvedPath = caseResolved;
+                file = Bun.file(resolvedPath);
+                exists = await file.exists();
+            }
+        }
 
         if (!exists) {
             return {
