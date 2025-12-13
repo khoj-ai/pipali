@@ -171,6 +171,33 @@ describe('listFiles', () => {
         expect(result.compiled).toBe('Path does not exist.');
     });
 
+    test('should preserve on-disk casing in returned paths when input case differs', async () => {
+        const notesDirActual = path.join(testDir, 'Notes');
+        await fs.mkdir(notesDirActual, { recursive: true });
+        const fileActual = path.join(notesDirActual, 'tasks.md');
+        await fs.writeFile(fileActual, 'tasks');
+
+        const notesDirWrongCase = path.join(testDir, 'notes');
+
+        let caseInsensitive = false;
+        try {
+            await fs.stat(notesDirWrongCase);
+            caseInsensitive = true;
+        } catch {
+            caseInsensitive = false;
+        }
+
+        const result = await listFiles({ path: notesDirWrongCase });
+
+        if (!caseInsensitive) {
+            expect(result.compiled).toBe('Path does not exist.');
+            return;
+        }
+
+        expect(result.compiled).toContain(fileActual);
+        expect(result.compiled).not.toContain(path.join(testDir, 'notes', 'tasks.md'));
+    });
+
     test('should include file count in query', async () => {
         const result = await listFiles({ path: testDir });
 

@@ -1,7 +1,7 @@
 import path from 'path';
 import { homedir } from 'os';
 import fs from 'fs/promises';
-import { clampInt, getExcludedDirNamesForRootDir, resolvePath, walkFilePaths } from './actor.utils';
+import { clampInt, getExcludedDirNamesForRootDir, resolveCaseInsensitivePath, resolvePath, walkFilePaths } from './actor.utils';
 
 /** Arguments exposed to the agent via tool schema */
 export interface GrepFilesArgs {
@@ -69,7 +69,14 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
         }
 
         // Determine search path.
-        const searchPath = resolvePath(path_prefix);
+        let searchPath = resolvePath(path_prefix);
+
+        // Normalize to on-disk casing when input casing differs (common on macOS).
+        // This ensures reported file paths are case-correct (e.g. Notes/... not notes/...).
+        const caseResolvedSearchPath = await resolveCaseInsensitivePath(path.resolve(searchPath));
+        if (caseResolvedSearchPath) {
+            searchPath = caseResolvedSearchPath;
+        }
         // Prefer ripgrep when available for speed
         if (config.preferRipgrep) {
             const rgPath = Bun.which('rg');

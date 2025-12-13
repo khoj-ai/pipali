@@ -3,6 +3,42 @@ import os from 'os';
 import fs from 'fs/promises';
 import type { Dirent } from 'fs';
 
+async function resolveCaseInsensitivePath(absolutePath: string): Promise<string | null> {
+    // Cross-platform resolver for absolute paths (Windows/macOS/Linux).
+    // If a path exists but its casing differs (common on case-insensitive FS),
+    // this reconstructs the path using directory entries to recover real casing.
+    if (!path.isAbsolute(absolutePath)) return null;
+
+    const normalized = path.normalize(absolutePath);
+    const parsed = path.parse(normalized);
+    let currentDir = parsed.root;
+
+    // Compute the path components *after* the root (drive letter or '/' or UNC share).
+    const remainder = normalized.slice(parsed.root.length);
+    const parts = remainder.split(path.sep).filter(Boolean);
+
+    for (const part of parts) {
+        let entries: string[];
+        try {
+            entries = await fs.readdir(currentDir);
+        } catch {
+            return null;
+        }
+
+        // Prefer exact match first to avoid changing casing when not needed.
+        let match = entries.find(e => e === part);
+        if (!match) {
+            const partLower = part.toLowerCase();
+            match = entries.find(e => e.toLowerCase() === partLower);
+        }
+        if (!match) return null;
+
+        currentDir = path.join(currentDir, match);
+    }
+
+    return currentDir;
+}
+
 /**
  * Resolve a path relative to user's home directory.
  * - "~" or "~/foo" expands to home directory
@@ -91,7 +127,14 @@ async function* walkFilePaths(
     }
 ): AsyncGenerator<string> {
     const excluded = getExcludedDirNamesForRootDir(rootDir, { includeAppFolders: opts.includeAppFolders });
-    const resolvedRoot = path.resolve(rootDir);
+    let resolvedRoot = path.resolve(rootDir);
+
+    // If the provided root exists but has incorrect casing (common on macOS),
+    // normalize it to on-disk casing so returned paths are case-correct.
+    const caseResolvedRoot = await resolveCaseInsensitivePath(resolvedRoot);
+    if (caseResolvedRoot) {
+        resolvedRoot = caseResolvedRoot;
+    }
 
     // If the root itself is a file, yield it directly.
     try {
@@ -170,4 +213,5 @@ export {
     shouldExcludeEntry,
     getExcludedDirNamesForRootDir,
     walkFilePaths,
+    resolveCaseInsensitivePath,
 };

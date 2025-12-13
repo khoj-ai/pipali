@@ -177,6 +177,36 @@ describe('grepFiles', () => {
         await fs.rmdir(emptyDir);
     });
 
+    test('should preserve on-disk casing in returned paths when input case differs', async () => {
+        const notesDirActual = path.join(testDir, 'Notes');
+        await fs.mkdir(notesDirActual, { recursive: true });
+        const fileActual = path.join(notesDirActual, 'tasks.md');
+        await fs.writeFile(fileActual, 'Some content\nNeedle\nMore content');
+
+        const notesDirWrongCase = path.join(testDir, 'notes');
+
+        let caseInsensitive = false;
+        try {
+            await fs.stat(notesDirWrongCase);
+            caseInsensitive = true;
+        } catch {
+            caseInsensitive = false;
+        }
+
+        const result = await grepFiles({
+            regex_pattern: 'Needle',
+            path_prefix: notesDirWrongCase,
+        });
+
+        if (!caseInsensitive) {
+            expect(result.compiled).toBe('No files found in specified path.');
+            return;
+        }
+
+        expect(result.compiled).toContain(fileActual);
+        expect(result.compiled).not.toContain(path.join(testDir, 'notes', 'tasks.md'));
+    });
+
     test('should search in nested directories', async () => {
         const result = await grepFiles({
             regex_pattern: 'Nested',
