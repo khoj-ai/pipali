@@ -1,4 +1,5 @@
 import path from 'path';
+import os from 'os';
 import { resolveCaseInsensitivePath } from './actor.utils';
 
 export interface ReadFileArgs {
@@ -26,8 +27,10 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
     }
 
     try {
-        // Resolve to absolute path
-        const absolutePath = path.resolve(filePath);
+        // Resolve to absolute path (relative paths resolve relative to home folder)
+        const absolutePath = path.isAbsolute(filePath)
+            ? filePath
+            : path.resolve(os.homedir(), filePath);
 
         // Read the file using Bun.file
         let resolvedPath = absolutePath;
