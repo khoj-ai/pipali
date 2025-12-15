@@ -1,6 +1,6 @@
 import { ChatOpenAI } from '@langchain/openai';
 import type { ChatMessageModel, ResponseWithThought, ToolDefinition } from '../conversation';
-import { toOpenaiTools } from './utils';
+import { toOpenaiTools, formatMessagesForOpenAI } from './utils';
 
 export async function sendMessageToGpt(
     messages: ChatMessageModel[],
@@ -10,6 +10,7 @@ export async function sendMessageToGpt(
     tools?: ToolDefinition[],
     toolChoice: string = 'auto',
 ): Promise<ResponseWithThought> {
+    const formattedMessages = formatMessagesForOpenAI(messages);
     const lcTools = toOpenaiTools(tools);
     const chat = new ChatOpenAI({
         apiKey: apiKey,
@@ -22,7 +23,7 @@ export async function sendMessageToGpt(
         tool_choice: toolChoice,
     });
 
-    const response = await chat.invoke(messages);
+    const response = await chat.invoke(formattedMessages);
 
     return { message: response.text, raw: response.tool_calls };
 }
