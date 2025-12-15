@@ -12,7 +12,33 @@ export interface FileContentResult {
     query: string;
     file: string;
     uri: string;
-    compiled: string;
+    compiled: string | Array<{ type: string; [key: string]: any }>;
+    isImage?: boolean;
+}
+
+// Supported image formats
+const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
+
+/**
+ * Check if a file path is an image based on extension
+ */
+function isImageFile(filePath: string): boolean {
+    const ext = path.extname(filePath).toLowerCase();
+    return IMAGE_EXTENSIONS.includes(ext);
+}
+
+/**
+ * Get MIME type from file extension
+ */
+function getMimeType(filePath: string): string {
+    const ext = path.extname(filePath).toLowerCase();
+    const mimeTypes: Record<string, string> = {
+        '.jpg': 'image/jpeg',
+        '.jpeg': 'image/jpeg',
+        '.png': 'image/png',
+        '.webp': 'image/webp',
+    };
+    return mimeTypes[ext] || 'application/octet-stream';
 }
 
 /**
@@ -56,7 +82,48 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
             };
         }
 
-        // Read file content
+        // Check if file is an image
+        if (isImageFile(resolvedPath)) {
+            try {
+                // Read image as array buffer and convert to base64
+                console.log(`[Image] Reading: ${resolvedPath}`);
+                const arrayBuffer = await file.arrayBuffer();
+                const base64 = Buffer.from(arrayBuffer).toString('base64');
+                const mimeType = getMimeType(resolvedPath);
+                // const dataUrl = `data:${mimeType};base64,${base64}`;
+                console.log(`[Image] Encoded: ${(arrayBuffer.byteLength / 1024).toFixed(2)} KB as ${mimeType}`);
+
+                // Return multimodal content for vision-enabled models
+                return {
+                    query,
+                    file: filePath,
+                    uri: filePath,
+                    compiled: [
+                        {
+                            type: 'text',
+                            text: `Read image file: ${filePath}\nSize: ${(arrayBuffer.byteLength / 1024).toFixed(2)} KB\nFormat: ${mimeType}`
+                        },
+                        {
+                            type: 'image',
+                            source_type: 'base64',
+                            mime_type: mimeType,
+                            data: base64,
+                        }
+                    ],
+                    isImage: true,
+                };
+            } catch (imageError) {
+                console.error(`[Image] Error reading ${filePath}:`, imageError);
+                return {
+                    query,
+                    file: filePath,
+                    uri: filePath,
+                    compiled: `Error reading image file ${filePath}: ${imageError instanceof Error ? imageError.message : String(imageError)}`,
+                };
+            }
+        }
+
+        // Read file content as text
         const rawText = await file.text();
         const lines = rawText.split('\n');
 

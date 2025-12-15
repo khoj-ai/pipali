@@ -8,7 +8,7 @@ export interface ToolCall {
 
 export interface ToolResult {
     toolCall: ToolCall;
-    result: string;
+    result: string | Array<{ type: string; [key: string]: any }>;
 }
 
 export interface ResearchIteration {

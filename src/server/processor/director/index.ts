@@ -23,21 +23,21 @@ interface ResearchConfig {
 const tools: ToolDefinition[] = [
     {
         name: 'view_file',
-        description: 'To view the contents of specific files. Specify a line range to efficiently read relevant sections. You can view up to 50 lines at a time.',
+        description: 'To view the contents of specific files including text and images. For text files, specify a line range to efficiently read relevant sections (up to 50 lines at a time). For images (jpg, jpeg, png, webp), the full image will be provided for analysis.',
         schema: {
             type: 'object',
             properties: {
                 path: {
                     type: 'string',
-                    description: 'The file path to view (can be absolute or relative).',
+                    description: 'The file path to view (can be absolute or relative). Supports text files and image files (jpg, jpeg, png, webp).',
                 },
                 start_line: {
                     type: 'integer',
-                    description: 'Optional starting line number for viewing a specific range (1-indexed).',
+                    description: 'Optional starting line number for viewing a specific range of text files (1-indexed). Ignored for image files.',
                 },
                 end_line: {
                     type: 'integer',
-                    description: 'Optional ending line number for viewing a specific range (1-indexed).',
+                    description: 'Optional ending line number for viewing a specific range of text files (1-indexed). Ignored for image files.',
                 },
             },
             required: ['path'],
@@ -255,7 +255,7 @@ async function pickNextTool(
 /**
  * Execute a single tool call and return the result
  */
-async function executeTool(toolCall: ToolCall): Promise<string> {
+async function executeTool(toolCall: ToolCall): Promise<string | Array<{ type: string; [key: string]: any }>> {
     try {
         switch (toolCall.name) {
             case 'list_files': {
