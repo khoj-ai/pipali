@@ -70,33 +70,6 @@ export interface OnlineContext {
     organic?: OrganicContext[];
 }
 
-export interface Intent {
-    type: string;
-    query?: string;
-    inferredQueries?: string[];
-}
-
-export interface TrainOfThought {
-    type: string;
-    data: string;
-}
-
-export interface ChatMessage {
-    by: 'user' | 'assistant';
-    message: string | Record<string, any>;
-    trainOfThought?: TrainOfThought[];
-    context?: Context[];
-    onlineContext?: Record<string, OnlineContext>;
-    codeContext?: Record<string, CodeContextData>;
-    researchContext?: any[];
-    operatorContext?: any[];
-    created?: string;
-    queryImages?: string[];
-    queryFiles?: Record<string, any>[];
-    turnId?: string;
-    intent?: Intent;
-}
-
 export type ChatModelWithApi = {
     chatModel: typeof ChatModel.$inferSelect;
     aiModelApi: typeof AiModelApi.$inferSelect | null;

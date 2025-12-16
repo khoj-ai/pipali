@@ -13,14 +13,12 @@ import {
   ATIF_SCHEMA_VERSION,
 } from '../src/server/processor/conversation/atif/atif.types';
 import {
-  convertATIFToChatMessages,
   addStepToTrajectory,
   calculateFinalMetrics,
   validateATIFTrajectory,
   exportATIFTrajectory,
   importATIFTrajectory,
 } from '../src/server/processor/conversation/atif/atif.utils';
-import { type ChatMessage } from '../src/server/db/schema';
 
 describe('ATIF Type Definitions', () => {
   test('should create empty ATIF trajectory', () => {
@@ -61,44 +59,6 @@ describe('ATIF Type Definitions', () => {
     expect(isATIFTrajectory(null)).toBe(false);
     expect(isATIFTrajectory(undefined)).toBe(false);
     expect(isATIFTrajectory('string')).toBe(false);
-  });
-});
-
-describe('ATIF Conversion Utilities', () => {
-  test('should convert ATIF trajectory to ChatMessage array', () => {
-    const trajectory: ATIFTrajectory = {
-      schema_version: ATIF_SCHEMA_VERSION,
-      session_id: 'session-123',
-      agent: {
-        name: 'test-agent',
-        version: '1.0.0',
-        model_name: 'gpt-4',
-      },
-      steps: [
-        {
-          step_id: 1,
-          timestamp: '2024-01-01T10:00:00Z',
-          source: 'user',
-          message: 'Test message',
-        },
-        {
-          step_id: 2,
-          timestamp: '2024-01-01T10:00:30Z',
-          source: 'agent',
-          message: 'Response message',
-          reasoning_content: 'My reasoning',
-        },
-      ],
-    };
-
-    const messages = convertATIFToChatMessages(trajectory);
-
-    expect(messages).toHaveLength(2);
-    expect(messages[0]?.by).toBe('user');
-    expect(messages[0]?.message).toBe('Test message');
-    expect(messages[1]?.by).toBe('assistant');
-    expect(messages[1]?.message).toBe('Response message');
-    expect(messages[1]?.trainOfThought?.[0]?.data).toBe('My reasoning');
   });
 });
 
