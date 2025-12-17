@@ -1,14 +1,24 @@
 import path from 'path';
 import { homedir } from 'os';
 import fs from 'fs/promises';
+import { minimatch } from 'minimatch';
 import { clampInt, getExcludedDirNamesForRootDir, resolveCaseInsensitivePath, resolvePath, walkFilePaths } from './actor.utils';
 
-/** Arguments exposed to the agent via tool schema */
+/**
+ * Arguments for the grep_files tool.
+ */
 export interface GrepFilesArgs {
-    regex_pattern: string;
-    path_prefix?: string;
+    /** Regular expression pattern to search for */
+    pattern: string;
+    /** Directory or file path to search in (defaults to home directory) */
+    path?: string;
+    /** Glob pattern to filter which files to search (e.g., *.ts or *.{js,jsx}) */
+    include?: string;
+    /** Number of context lines to show before each match */
     lines_before?: number;
+    /** Number of context lines to show after each match */
     lines_after?: number;
+    /** Maximum number of results to return (default: 500, max: 5000) */
     max_results?: number;
 }
 
@@ -31,13 +41,20 @@ export interface GrepResult {
 }
 
 /**
- * Search for a regex pattern in files with optional path prefix and context lines
- * Defaults to home directory if path_prefix is not provided and no context lines
+ * Search for a regex pattern in files.
+ *
+ * Features:
+ * - Regex pattern search
+ * - Path filtering (directory or file)
+ * - Glob-based file type filtering via `include` parameter
+ * - Context lines (before/after matches)
+ * - Uses ripgrep when available for speed
  */
 export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
     const {
-        regex_pattern,
-        path_prefix = homedir(),
+        pattern,
+        path: searchPathArg = homedir(),
+        include,
         lines_before = 0,
         lines_after = 0,
         max_results,
@@ -46,7 +63,7 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
     // Internal defaults optimized for speed on large directories
     const config: SearchConfig = {
         maxResults: clampInt(max_results ?? 500, 1, 5000),
-        timeoutMs: 10_000,           // 60s hard cap
+        timeoutMs: 10_000,           // 10s hard cap
         includeHidden: false,        // Skip dotfiles/dirs for speed
         includeAppFolders: false,    // Skip ~/Library etc on macOS
         followSymlinks: false,       // Avoid cycles and huge expansions
@@ -58,33 +75,34 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
         // Compile the regex pattern
         let regex: RegExp;
         try {
-            regex = new RegExp(regex_pattern);
+            regex = new RegExp(pattern);
         } catch (e) {
             return {
-                query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after, config.maxResults),
-                file: path_prefix,
-                uri: path_prefix,
+                query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                file: searchPathArg,
+                uri: searchPathArg,
                 compiled: `Invalid regex pattern: ${e instanceof Error ? e.message : String(e)}`,
             };
         }
 
         // Determine search path.
-        let searchPath = resolvePath(path_prefix);
+        let searchPath = resolvePath(searchPathArg);
 
         // Normalize to on-disk casing when input casing differs (common on macOS).
-        // This ensures reported file paths are case-correct (e.g. Notes/... not notes/...).
         const caseResolvedSearchPath = await resolveCaseInsensitivePath(path.resolve(searchPath));
         if (caseResolvedSearchPath) {
             searchPath = caseResolvedSearchPath;
         }
+
         // Prefer ripgrep when available for speed
         if (config.preferRipgrep) {
             const rgPath = Bun.which('rg');
             if (rgPath) {
                 const rgResult = await grepWithRipgrep({
                     rgPath,
-                    pattern: regex_pattern,
+                    pattern,
                     searchPath,
+                    include,
                     linesBefore: lines_before,
                     linesAfter: lines_after,
                     maxOutputLines: config.maxResults,
@@ -107,35 +125,35 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
                         query: generateQuery(
                             rgResult.outputLines.length,
                             rgResult.matchedFiles.size,
-                            path_prefix,
-                            regex_pattern,
+                            searchPathArg,
+                            pattern,
+                            include,
                             lines_before,
                             lines_after,
                             config.maxResults,
                             rgResult.truncated || rgResult.timedOut
                         ),
-                        file: path_prefix,
-                        uri: path_prefix,
+                        file: searchPathArg,
+                        uri: searchPathArg,
                         compiled,
                     };
                 }
 
                 // If no output, distinguish "no files" vs "no matches".
-                // Important: file-path searches with no matches should say "No matches", not "No files".
                 const state = await getSearchPathState(searchPath);
                 if (state.kind === 'missing' || state.kind === 'empty-directory') {
                     return {
-                        query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after, config.maxResults),
-                        file: path_prefix,
-                        uri: path_prefix,
+                        query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                        file: searchPathArg,
+                        uri: searchPathArg,
                         compiled: 'No files found in specified path.',
                     };
                 }
 
                 return {
-                    query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after, config.maxResults),
-                    file: path_prefix,
-                    uri: path_prefix,
+                    query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                    file: searchPathArg,
+                    uri: searchPathArg,
                     compiled: 'No matches found.',
                 };
             }
@@ -144,9 +162,10 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
         // Fallback: stream-walk files and scan line-by-line
         const fallback = await grepWithFallbackWalker({
             regex,
-            pattern: regex_pattern,
+            pattern,
             searchPath,
-            pathPrefix: path_prefix,
+            pathPrefix: searchPathArg,
+            include,
             linesBefore: lines_before,
             linesAfter: lines_after,
             maxOutputLines: config.maxResults,
@@ -158,18 +177,18 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
 
         if (fallback.noFiles) {
             return {
-                query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after, config.maxResults),
-                file: path_prefix,
-                uri: path_prefix,
+                query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                file: searchPathArg,
+                uri: searchPathArg,
                 compiled: 'No files found in specified path.',
             };
         }
 
         if (fallback.outputLines.length === 0) {
             return {
-                query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after, config.maxResults),
-                file: path_prefix,
-                uri: path_prefix,
+                query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                file: searchPathArg,
+                uri: searchPathArg,
                 compiled: 'No matches found.',
             };
         }
@@ -185,15 +204,16 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
             query: generateQuery(
                 fallback.outputLines.length,
                 fallback.matchedFiles.size,
-                path_prefix,
-                regex_pattern,
+                searchPathArg,
+                pattern,
+                include,
                 lines_before,
                 lines_after,
                 config.maxResults,
                 fallback.truncated || fallback.timedOut
             ),
-            file: path_prefix,
-            uri: path_prefix,
+            file: searchPathArg,
+            uri: searchPathArg,
             compiled,
         };
     } catch (error) {
@@ -201,9 +221,9 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
         console.error(errorMsg, error);
 
         return {
-            query: generateQuery(0, 0, path_prefix, regex_pattern, lines_before, lines_after, config.maxResults),
-            file: path_prefix,
-            uri: path_prefix,
+            query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+            file: searchPathArg,
+            uri: searchPathArg,
             compiled: errorMsg,
         };
     }
@@ -214,14 +234,18 @@ function generateQuery(
     docCount: number,
     pathPrefix: string | undefined,
     pattern: string,
+    include: string | undefined,
     linesBefore: number,
     linesAfter: number,
     maxResults: number = 1000,
     isPartial: boolean = false
 ): string {
-    let query = `**Found ${lineCount} matches for '${pattern}' in ${docCount} documents**`;
+    let query = `**Found ${lineCount} matches for '${pattern}' in ${docCount} files**`;
     if (pathPrefix) {
         query += ` in ${pathPrefix}`;
+    }
+    if (include) {
+        query += ` (files matching: ${include})`;
     }
     if (linesBefore || linesAfter || isPartial || lineCount > maxResults) {
         query += ' Showing';
@@ -262,7 +286,6 @@ async function getSearchPathState(searchPath: string): Promise<SearchPathState> 
             const entries = await fs.readdir(searchPath);
             return entries.length === 0 ? { kind: 'empty-directory' } : { kind: 'non-empty-or-non-directory' };
         } catch {
-            // Directory exists but can't be listed; don't claim "No files".
             return { kind: 'not-accessible' };
         }
     } catch {
@@ -271,10 +294,8 @@ async function getSearchPathState(searchPath: string): Promise<SearchPathState> 
 }
 
 function buildRipgrepGlobExcludes(excludedDirNames: Set<string>): string[] {
-    // ripgrep globs are evaluated against paths; exclude directory trees.
     const globs: string[] = [];
     for (const dir of excludedDirNames) {
-        // Note: keep it broad; these are commonly huge and not useful for user-facing search.
         globs.push(`!**/${dir}/**`);
     }
     return globs;
@@ -284,6 +305,7 @@ async function grepWithRipgrep(params: {
     rgPath: string;
     pattern: string;
     searchPath: string;
+    include?: string;
     linesBefore: number;
     linesAfter: number;
     maxOutputLines: number;
@@ -319,6 +341,11 @@ async function grepWithRipgrep(params: {
     if (params.includeHidden) args.push('--hidden');
     if (params.followSymlinks) args.push('--follow');
     if (!params.respectIgnore) args.push('--no-ignore');
+
+    // Add include glob filter if specified (aligns with Gemini CLI's `include` parameter)
+    if (params.include) {
+        args.push(`--glob=${params.include}`);
+    }
 
     // Prefer PCRE2 if supported (closer to JS regex). If unsupported, we'll retry without.
     const baseArgs = [...args, '--pcre2', params.pattern, path.resolve(params.searchPath)];
@@ -467,6 +494,7 @@ async function grepWithFallbackWalker(params: {
     pattern: string;
     searchPath: string;
     pathPrefix: string;
+    include?: string;
     linesBefore: number;
     linesAfter: number;
     maxOutputLines: number;
@@ -498,6 +526,14 @@ async function grepWithFallbackWalker(params: {
         includeAppFolders: params.includeAppFolders,
         followSymlinks: params.followSymlinks,
     })) {
+        // Apply include filter if specified
+        if (params.include) {
+            const fileName = path.basename(filePath);
+            if (!minimatch(fileName, params.include, { dot: true })) {
+                continue;
+            }
+        }
+
         sawAnyFile = true;
         if (Date.now() - start > params.timeoutMs) {
             timedOut = true;
@@ -569,13 +605,7 @@ async function grepWithFallbackWalker(params: {
         }
     }
 
-    // If we had no readable files at all, treat as no files.
     const noFiles = !sawAnyFile;
-
-    // Keep fallback quiet; but if everything got skipped, surface a small hint.
-    if (!noFiles && outputLines.length === 0 && (skippedErrors + skippedBinary + skippedLarge) > 0) {
-        // no-op: main caller will return "No matches found."; the summary would be noise for normal usage.
-    }
 
     return { outputLines, matchedFiles, truncated, timedOut, noFiles };
 }

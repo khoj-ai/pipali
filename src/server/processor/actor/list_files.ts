@@ -3,9 +3,17 @@ import fs from 'fs/promises';
 import { minimatch } from 'minimatch';
 import { clampInt, resolvePath, walkFilePaths } from './actor.utils';
 
+/**
+ * Arguments for the list_files tool.
+ */
 export interface ListFilesArgs {
+    /** Directory path to list (absolute or relative to home directory) */
     path?: string;
+    /** Glob pattern to filter files (e.g., *.ts or **\/*.json) */
     pattern?: string;
+    /** Glob patterns to exclude from results */
+    ignore?: string[];
+    /** Maximum number of results to return (default: 500, max: 5000) */
     max_results?: number;
 }
 
@@ -16,6 +24,7 @@ interface ListConfig {
     includeHidden: boolean;
     includeAppFolders: boolean;
     followSymlinks: boolean;
+    ignorePatterns: string[];
 }
 
 export interface FileListResult {
@@ -26,18 +35,49 @@ export interface FileListResult {
 }
 
 /**
- * List files under a given path or glob pattern
+ * Check if a path should be ignored based on patterns
+ */
+function shouldIgnore(filePath: string, rootDir: string, ignorePatterns: string[]): boolean {
+    if (ignorePatterns.length === 0) return false;
+
+    const relativePath = path.relative(rootDir, filePath);
+    const fileName = path.basename(filePath);
+
+    for (const pattern of ignorePatterns) {
+        // Match against full relative path and filename
+        if (minimatch(relativePath, pattern, { dot: true }) ||
+            minimatch(fileName, pattern, { dot: true }) ||
+            minimatch(relativePath, `**/${pattern}`, { dot: true })) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * List files under a given path.
+ *
+ * Features:
+ * - Glob pattern filtering
+ * - Custom ignore patterns
+ * - Sorted output by modification time (newest first)
  */
 export async function listFiles(args: ListFilesArgs): Promise<FileListResult> {
-    const { path: searchPath = '', pattern, max_results } = args;
+    const {
+        path: searchPath = '',
+        pattern,
+        ignore = [],
+        max_results
+    } = args;
 
     // Internal defaults optimized for speed on large directories
     const config: ListConfig = {
         maxResults: clampInt(max_results ?? 500, 1, 5000),
-        timeoutMs: 10_000,           // 30s hard cap
+        timeoutMs: 10_000,           // 10s hard cap
         includeHidden: false,        // Skip dotfiles/dirs for speed
         includeAppFolders: false,    // Skip ~/Library etc on macOS
         followSymlinks: false,       // Avoid cycles and huge expansions
+        ignorePatterns: ignore,
     };
 
     try {
@@ -47,6 +87,7 @@ export async function listFiles(args: ListFilesArgs): Promise<FileListResult> {
         const result = await walkAndCollect({
             rootDir: normalizedPath,
             pattern,
+            ignorePatterns: config.ignorePatterns,
             maxResults: config.maxResults,
             timeoutMs: config.timeoutMs,
             includeHidden: config.includeHidden,
@@ -72,11 +113,10 @@ export async function listFiles(args: ListFilesArgs): Promise<FileListResult> {
             };
         }
 
-        // Format file list
-        let fileList = result.files
-            .sort()
-            .map(f => `- ${f}`)
-            .join('\n');
+        // Sort files by modification time (newest first)
+        const sortedFiles = result.files.sort((a, b) => b.mtime - a.mtime);
+
+        let fileList = sortedFiles.map(f => `- ${f.path}`).join('\n');
 
         if (result.truncated) {
             fileList += `\n\n... (showing first ${config.maxResults} files). Use a more specific path or pattern to narrow down results.`;
@@ -85,7 +125,13 @@ export async function listFiles(args: ListFilesArgs): Promise<FileListResult> {
         }
 
         return {
-            query: generateQuery(result.files.length, searchPath, pattern, config.maxResults, result.truncated || result.timedOut),
+            query: generateQuery(
+                result.files.length,
+                searchPath,
+                pattern,
+                config.maxResults,
+                result.truncated || result.timedOut
+            ),
             file: searchPath,
             uri: searchPath,
             compiled: fileList,
@@ -104,18 +150,18 @@ export async function listFiles(args: ListFilesArgs): Promise<FileListResult> {
 }
 
 function generateQuery(
-    docCount: number,
+    fileCount: number,
     searchPath?: string,
     pattern?: string,
     maxResults?: number,
     isPartial: boolean = false
 ): string {
-    let query = `**Found ${docCount} files**`;
+    let query = `**Found ${fileCount} files**`;
     if (searchPath && searchPath !== '.') {
         query += ` in ${searchPath}`;
     }
     if (pattern) {
-        query += ` filtered by ${pattern}`;
+        query += ` matching "${pattern}"`;
     }
     if (isPartial) {
         query += ` (showing first ${maxResults || 'few'} results)`;
@@ -136,8 +182,13 @@ async function getPathState(p: string): Promise<PathState> {
     }
 }
 
+interface FileEntry {
+    path: string;
+    mtime: number;
+}
+
 interface WalkResult {
-    files: string[];
+    files: FileEntry[];
     truncated: boolean;
     timedOut: boolean;
 }
@@ -145,13 +196,14 @@ interface WalkResult {
 async function walkAndCollect(params: {
     rootDir: string;
     pattern?: string;
+    ignorePatterns: string[];
     maxResults: number;
     timeoutMs: number;
     includeHidden: boolean;
     includeAppFolders: boolean;
     followSymlinks: boolean;
 }): Promise<WalkResult> {
-    const files: string[] = [];
+    const files: FileEntry[] = [];
     let truncated = false;
     let timedOut = false;
 
@@ -166,14 +218,31 @@ async function walkAndCollect(params: {
             timedOut = true;
             break;
         }
+
         if (files.length >= params.maxResults) {
             truncated = true;
             break;
         }
 
+        // Check ignore patterns
+        if (shouldIgnore(filePath, params.rootDir, params.ignorePatterns)) {
+            continue;
+        }
+
         const name = path.basename(filePath);
-        const matches = !params.pattern || minimatch(name, params.pattern);
-        if (matches) files.push(filePath);
+        const matches = !params.pattern || minimatch(name, params.pattern, { dot: true });
+
+        if (matches) {
+            // Get modification time for sorting
+            let mtime = 0;
+            try {
+                const stat = await fs.stat(filePath);
+                mtime = stat.mtimeMs;
+            } catch {
+                // Use 0 if stat fails
+            }
+            files.push({ path: filePath, mtime });
+        }
     }
 
     return { files, truncated, timedOut };

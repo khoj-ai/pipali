@@ -1053,8 +1053,11 @@ const formatToolArgs = (toolName: string, args: any): string => {
     // Tool-specific formatting for readability
     switch (toolName) {
         case 'view_file':
-            if (args.start_line && args.end_line) {
-                return `${args.path} (lines ${args.start_line}-${args.end_line})`;
+            if (args.offset || args.limit) {
+                const offsetStr = args.offset ? `offset=${args.offset}` : '';
+                const limitStr = args.limit ? `limit=${args.limit}` : '';
+                const params = [offsetStr, limitStr].filter(Boolean).join(', ');
+                return `${args.path} (${params})`;
             }
             return args.path || '';
 
@@ -1064,10 +1067,11 @@ const formatToolArgs = (toolName: string, args: any): string => {
             }
             return args.path || args.pattern || '';
 
-        case 'regex_search_files':
+        case 'grep_files':
             const parts = [];
-            if (args.regex_pattern) parts.push(`"${args.regex_pattern}"`);
-            if (args.path_prefix) parts.push(`in ${args.path_prefix}`);
+            if (args.pattern) parts.push(`"${args.pattern}"`);
+            if (args.path) parts.push(`in ${args.path}`);
+            if (args.include) parts.push(`(${args.include})`);
             return parts.join(' ');
 
         default:

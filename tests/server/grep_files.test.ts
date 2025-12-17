@@ -49,8 +49,8 @@ describe('grepFiles', () => {
 
     test('should find matches for simple regex pattern', async () => {
         const result = await grepFiles({
-            regex_pattern: 'test',
-            path_prefix: testDir,
+            pattern: 'test',
+            path: testDir,
         });
 
         expect(result.query).toContain('Found');
@@ -63,8 +63,8 @@ describe('grepFiles', () => {
 
     test('should find matches in multiple files', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Error',
-            path_prefix: testDir,
+            pattern: 'Error',
+            path: testDir,
         });
 
         expect(result.query).toContain('Found');
@@ -75,8 +75,8 @@ describe('grepFiles', () => {
 
     test('should handle case-sensitive searches', async () => {
         const result = await grepFiles({
-            regex_pattern: 'error',
-            path_prefix: testDir,
+            pattern: 'error',
+            path: testDir,
         });
 
         // Should not find 'Error' with capital E
@@ -85,8 +85,8 @@ describe('grepFiles', () => {
 
     test('should handle regex patterns with special characters', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Error.*line',
-            path_prefix: testDir,
+            pattern: 'Error.*line',
+            path: testDir,
         });
 
         expect(result.compiled).toContain('Error occurred at line 10');
@@ -94,8 +94,8 @@ describe('grepFiles', () => {
 
     test('should return error for invalid regex pattern', async () => {
         const result = await grepFiles({
-            regex_pattern: '[invalid(',
-            path_prefix: testDir,
+            pattern: '[invalid(',
+            path: testDir,
         });
 
         expect(result.compiled).toContain('Invalid regex pattern');
@@ -103,8 +103,8 @@ describe('grepFiles', () => {
 
     test('should show context lines before match', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Error in processing',
-            path_prefix: testDir,
+            pattern: 'Error in processing',
+            path: testDir,
             lines_before: 2,
         });
 
@@ -116,8 +116,8 @@ describe('grepFiles', () => {
 
     test('should show context lines after match', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Error occurred',
-            path_prefix: testDir,
+            pattern: 'Error occurred',
+            path: testDir,
             lines_after: 2,
         });
 
@@ -129,8 +129,8 @@ describe('grepFiles', () => {
 
     test('should show context lines before and after match', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Warning',
-            path_prefix: testDir,
+            pattern: 'Warning',
+            path: testDir,
             lines_before: 1,
             lines_after: 1,
         });
@@ -142,8 +142,8 @@ describe('grepFiles', () => {
 
     test('should include line numbers in output with context', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Warning',
-            path_prefix: testDir,
+            pattern: 'Warning',
+            path: testDir,
             lines_before: 1,
             lines_after: 1,
         });
@@ -156,8 +156,8 @@ describe('grepFiles', () => {
 
     test('should return no matches message when pattern not found', async () => {
         const result = await grepFiles({
-            regex_pattern: 'nonexistent-pattern-xyz',
-            path_prefix: testDir,
+            pattern: 'nonexistent-pattern-xyz',
+            path: testDir,
         });
 
         expect(result.compiled).toBe('No matches found.');
@@ -169,8 +169,8 @@ describe('grepFiles', () => {
         await fs.mkdir(emptyDir, { recursive: true });
 
         const result = await grepFiles({
-            regex_pattern: 'test',
-            path_prefix: emptyDir,
+            pattern: 'test',
+            path: emptyDir,
         });
 
         expect(result.compiled).toBe('No files found in specified path.');
@@ -194,8 +194,8 @@ describe('grepFiles', () => {
         }
 
         const result = await grepFiles({
-            regex_pattern: 'Needle',
-            path_prefix: notesDirWrongCase,
+            pattern: 'Needle',
+            path: notesDirWrongCase,
         });
 
         if (!caseInsensitive) {
@@ -209,8 +209,8 @@ describe('grepFiles', () => {
 
     test('should search in nested directories', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Nested',
-            path_prefix: testDir,
+            pattern: 'Nested',
+            path: testDir,
         });
 
         expect(result.compiled).toContain('nested.txt');
@@ -222,32 +222,32 @@ describe('grepFiles', () => {
         await fs.writeFile(noNewlineFile, 'Content without newline');
 
         const result = await grepFiles({
-            regex_pattern: 'Content',
-            path_prefix: testDir,
+            pattern: 'Content',
+            path: testDir,
         });
 
         expect(result.compiled).toContain('Content without newline');
     });
 
-    test('should limit results to maxResults (1000)', async () => {
+    test('should limit results to max_results (default 500)', async () => {
         const result = await grepFiles({
-            regex_pattern: 'Match',
-            path_prefix: testDir,
+            pattern: 'Match',
+            path: testDir,
         });
 
         // The 'many.txt' file has 50 matches (every other line)
-        // Should not trigger the maxResults limit
-        expect(result.compiled).not.toContain('showing first 1000');
+        // Should not trigger the max_results limit
+        expect(result.compiled).not.toContain('showing first 500');
     });
 
     test('should count matched files correctly', async () => {
         const result = await grepFiles({
-            regex_pattern: 'test',
-            path_prefix: testDir,
+            pattern: 'test',
+            path: testDir,
         });
 
         // Should find matches in file1.txt and nested.txt
-        expect(result.query).toMatch(/Found \d+ matches.*in \d+ documents/);
+        expect(result.query).toMatch(/Found \d+ matches.*in \d+ files/);
     });
 
     test('should handle empty files gracefully', async () => {
@@ -255,23 +255,23 @@ describe('grepFiles', () => {
         await fs.writeFile(emptyFile, '');
 
         const result = await grepFiles({
-            regex_pattern: 'test',
-            path_prefix: testDir,
+            pattern: 'test',
+            path: testDir,
         });
 
         // Should not throw error, just skip empty file
         expect(result.query).toContain('Found');
     });
 
-    test('should use home directory as default when path_prefix not provided', async () => {
+    test('should use home directory as default when path not provided', async () => {
         // Note: This test verifies the default behavior without actually searching
         // the entire home directory to avoid timeout issues
         const result = await grepFiles({
-            regex_pattern: 'test',
-            path_prefix: testDir, // Use test directory for practical testing
+            pattern: 'test',
+            path: testDir, // Use test directory for practical testing
         });
 
-        // The function defaults to os.homedir() when path_prefix is not provided,
+        // The function defaults to os.homedir() when path is not provided,
         // but searching entire home directory would timeout in tests
         expect(result.file).toBe(testDir);
         expect(result.uri).toBe(testDir);
@@ -279,8 +279,8 @@ describe('grepFiles', () => {
 
     test('should handle regex patterns with word boundaries', async () => {
         const result = await grepFiles({
-            regex_pattern: '\\btest\\b',
-            path_prefix: testDir,
+            pattern: '\\btest\\b',
+            path: testDir,
         });
 
         expect(result.compiled).toContain('test');
@@ -291,8 +291,8 @@ describe('grepFiles', () => {
         await fs.writeFile(multilineFile, 'Line 1\nLine 2\nLine 3\nLine 4\nLine 5');
 
         const result = await grepFiles({
-            regex_pattern: 'Line 3',
-            path_prefix: testDir,
+            pattern: 'Line 3',
+            path: testDir,
             lines_before: 1,
             lines_after: 1,
         });
@@ -306,8 +306,8 @@ describe('grepFiles', () => {
 
     test('should handle files at start of file for context', async () => {
         const result = await grepFiles({
-            regex_pattern: 'This is a test',
-            path_prefix: testDir,
+            pattern: 'This is a test',
+            path: testDir,
             lines_before: 5, // More than available
             lines_after: 1,
         });
@@ -319,8 +319,8 @@ describe('grepFiles', () => {
 
     test('should handle files at end of file for context', async () => {
         const result = await grepFiles({
-            regex_pattern: 'And some more lines',
-            path_prefix: testDir,
+            pattern: 'And some more lines',
+            path: testDir,
             lines_before: 1,
             lines_after: 5, // More than available
         });

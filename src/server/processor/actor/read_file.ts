@@ -6,10 +6,16 @@ import { DocxLoader } from '@langchain/community/document_loaders/fs/docx';
 import { PPTXLoader } from '@langchain/community/document_loaders/fs/pptx';
 import * as XLSX from 'xlsx';
 
+/**
+ * Arguments for the read_file tool.
+ */
 export interface ReadFileArgs {
+    /** The file path to read (absolute or relative to home directory) */
     path: string;
-    start_line?: number;
-    end_line?: number;
+    /** Starting line offset (0-based). For text files only. */
+    offset?: number;
+    /** Maximum number of lines to read. For text files only. */
+    limit?: number;
 }
 
 export interface FileContentResult {
@@ -19,6 +25,9 @@ export interface FileContentResult {
     compiled: string | Array<{ type: string; [key: string]: any }>;
     isImage?: boolean;
 }
+
+/** Default maximum lines to read when no limit is specified */
+const DEFAULT_LINE_LIMIT = 50;
 
 // Supported image formats
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -48,7 +57,7 @@ function isPdfFile(filePath: string): boolean {
 /**
  * Check if a file path is a Word document based on extension
  */
-function IsWordDoc(filePath: string): boolean {
+function isWordDoc(filePath: string): boolean {
     const ext = path.extname(filePath).toLowerCase();
     return DOCX_EXTENSIONS.includes(ext);
 }
@@ -84,14 +93,75 @@ function getMimeType(filePath: string): string {
 }
 
 /**
- * View the contents of a file with optional line range specification
+ * Result of applying line filtering to text content
+ */
+interface LineFilterResult {
+    content: string;
+    truncated: boolean;
+    totalLines: number;
+    startLine: number;
+    endLine: number;
+}
+
+/**
+ * Apply offset/limit filtering to lines of text.
+ *
+ * @param text - The raw text content
+ * @param offset - Starting line offset (0-based), defaults to 0
+ * @param limit - Maximum number of lines to read, defaults to DEFAULT_LINE_LIMIT
+ * @returns Filtered content with metadata
+ */
+function applyLineFilter(text: string, offset: number = 0, limit?: number): LineFilterResult {
+    const lines = text.split('\n');
+    const totalLines = lines.length;
+
+    // Clamp offset to valid range
+    const startIdx = Math.max(0, Math.min(offset, totalLines));
+
+    // Apply limit (default to DEFAULT_LINE_LIMIT if not specified)
+    const effectiveLimit = limit ?? DEFAULT_LINE_LIMIT;
+    const endIdx = Math.min(startIdx + effectiveLimit, totalLines);
+
+    const selectedLines = lines.slice(startIdx, endIdx);
+    const truncated = endIdx < totalLines;
+
+    return {
+        content: selectedLines.join('\n'),
+        truncated,
+        totalLines,
+        startLine: startIdx,
+        endLine: endIdx,
+    };
+}
+
+/**
+ * Format truncation message for output
+ */
+function formatTruncationMessage(result: LineFilterResult, fileType: string = 'File'): string {
+    if (!result.truncated) return '';
+    return `\n\n[${fileType} truncated: showing lines ${result.startLine + 1}-${result.endLine} of ${result.totalLines}. Use offset/limit parameters to view more.]`;
+}
+
+/**
+ * View the contents of a file with optional line range specification.
+ *
+ * Supports:
+ * - Text files with offset/limit filtering
+ * - Images (jpg, jpeg, png, webp) - returned as base64
+ * - PDFs - text extraction with offset/limit
+ * - Word documents (.docx, .doc)
+ * - Excel spreadsheets (.xlsx, .xls)
+ * - PowerPoint presentations (.pptx, .ppt)
  */
 export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
-    const { path: filePath, start_line, end_line } = args;
+    const { path: filePath, offset = 0, limit } = args;
 
     let query = `View file: ${filePath}`;
-    if (start_line && end_line) {
-        query += ` (lines ${start_line}-${end_line})`;
+    if (offset > 0 || limit) {
+        const parts: string[] = [];
+        if (offset > 0) parts.push(`offset=${offset}`);
+        if (limit) parts.push(`limit=${limit}`);
+        query += ` (${parts.join(', ')})`;
     }
 
     try {
@@ -127,12 +197,10 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
         // Check if file is an image
         if (isImageFile(resolvedPath)) {
             try {
-                // Read image as array buffer and convert to base64
                 console.log(`[Image] Reading: ${resolvedPath}`);
                 const arrayBuffer = await file.arrayBuffer();
                 const base64 = Buffer.from(arrayBuffer).toString('base64');
                 const mimeType = getMimeType(resolvedPath);
-                // const dataUrl = `data:${mimeType};base64,${base64}`;
                 console.log(`[Image] Encoded: ${(arrayBuffer.byteLength / 1024).toFixed(2)} KB as ${mimeType}`);
 
                 // Return multimodal content for vision-enabled models
@@ -170,7 +238,7 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
             try {
                 console.log(`[PDF] Reading: ${resolvedPath}`);
                 const loader = new PDFLoader(resolvedPath, {
-                    splitPages: false, // Load entire PDF as single document
+                    splitPages: false,
                 });
                 const docs = await loader.load();
 
@@ -183,35 +251,13 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
                     };
                 }
 
-                // Combine all document content
                 const pdfText = docs.map(doc => doc.pageContent).join('\n\n');
                 const pageCount = (docs[0]?.metadata as any)?.pdf?.totalPages || docs.length;
                 console.log(`[PDF] Extracted ${pdfText.length} characters from ${pageCount} page(s)`);
 
-                // Apply line range filtering if specified
-                const lines = pdfText.split('\n');
-                const startIdx = (start_line || 1) - 1;
-                const endIdx = end_line || lines.length;
-
-                if (startIdx < 0 || startIdx >= lines.length) {
-                    return {
-                        query,
-                        file: filePath,
-                        uri: filePath,
-                        compiled: `Invalid start_line: ${start_line}. PDF has ${lines.length} lines.`,
-                    };
-                }
-
-                let actualEndIdx = Math.min(endIdx, lines.length);
-                let truncationMessage = '';
-
-                if (actualEndIdx - startIdx > 50) {
-                    truncationMessage = '\n\n[Truncated after 50 lines! Use narrower line range to view complete section.]';
-                    actualEndIdx = startIdx + 50;
-                }
-
-                const selectedLines = lines.slice(startIdx, actualEndIdx);
-                const filteredText = `[PDF: ${pageCount} page(s)]\n\n` + selectedLines.join('\n') + truncationMessage;
+                const filterResult = applyLineFilter(pdfText, offset, limit);
+                const truncationMsg = formatTruncationMessage(filterResult, 'PDF');
+                const filteredText = `[PDF: ${pageCount} page(s), ${filterResult.totalLines} lines]\n\n${filterResult.content}${truncationMsg}`;
 
                 return {
                     query,
@@ -231,7 +277,7 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
         }
 
         // Check if file is a Word document
-        if (IsWordDoc(resolvedPath)) {
+        if (isWordDoc(resolvedPath)) {
             try {
                 console.log(`[DOCX] Reading: ${resolvedPath}`);
                 const loader = new DocxLoader(resolvedPath);
@@ -249,30 +295,9 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
                 const docText = docs.map(doc => doc.pageContent).join('\n\n');
                 console.log(`[DOCX] Extracted ${docText.length} characters`);
 
-                // Apply line range filtering if specified
-                const lines = docText.split('\n');
-                const startIdx = (start_line || 1) - 1;
-                const endIdx = end_line || lines.length;
-
-                if (startIdx < 0 || startIdx >= lines.length) {
-                    return {
-                        query,
-                        file: filePath,
-                        uri: filePath,
-                        compiled: `Invalid start_line: ${start_line}. Document has ${lines.length} lines.`,
-                    };
-                }
-
-                let actualEndIdx = Math.min(endIdx, lines.length);
-                let truncationMessage = '';
-
-                if (actualEndIdx - startIdx > 50) {
-                    truncationMessage = '\n\n[Truncated after 50 lines! Use narrower line range to view complete section.]';
-                    actualEndIdx = startIdx + 50;
-                }
-
-                const selectedLines = lines.slice(startIdx, actualEndIdx);
-                const filteredText = `[Word Document]\n\n` + selectedLines.join('\n') + truncationMessage;
+                const filterResult = applyLineFilter(docText, offset, limit);
+                const truncationMsg = formatTruncationMessage(filterResult, 'Document');
+                const filteredText = `[Word Document: ${filterResult.totalLines} lines]\n\n${filterResult.content}${truncationMsg}`;
 
                 return {
                     query,
@@ -321,30 +346,9 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
                 const xlsxText = sheetsText.join('\n\n');
                 console.log(`[XLSX] Extracted ${xlsxText.length} characters from ${sheetNames.length} sheet(s)`);
 
-                // Apply line range filtering if specified
-                const lines = xlsxText.split('\n');
-                const startIdx = (start_line || 1) - 1;
-                const endIdx = end_line || lines.length;
-
-                if (startIdx < 0 || startIdx >= lines.length) {
-                    return {
-                        query,
-                        file: filePath,
-                        uri: filePath,
-                        compiled: `Invalid start_line: ${start_line}. Spreadsheet has ${lines.length} lines.`,
-                    };
-                }
-
-                let actualEndIdx = Math.min(endIdx, lines.length);
-                let truncationMessage = '';
-
-                if (actualEndIdx - startIdx > 50) {
-                    truncationMessage = '\n\n[Truncated after 50 lines! Use narrower line range to view complete section.]';
-                    actualEndIdx = startIdx + 50;
-                }
-
-                const selectedLines = lines.slice(startIdx, actualEndIdx);
-                const filteredText = `[Excel: ${sheetNames.length} sheet(s)]\n\n` + selectedLines.join('\n') + truncationMessage;
+                const filterResult = applyLineFilter(xlsxText, offset, limit);
+                const truncationMsg = formatTruncationMessage(filterResult, 'Spreadsheet');
+                const filteredText = `[Excel: ${sheetNames.length} sheet(s), ${filterResult.totalLines} lines]\n\n${filterResult.content}${truncationMsg}`;
 
                 return {
                     query,
@@ -382,30 +386,9 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
                 const pptText = docs.map(doc => doc.pageContent).join('\n\n');
                 console.log(`[PPT] Extracted ${pptText.length} characters`);
 
-                // Apply line range filtering if specified
-                const lines = pptText.split('\n');
-                const startIdx = (start_line || 1) - 1;
-                const endIdx = end_line || lines.length;
-
-                if (startIdx < 0 || startIdx >= lines.length) {
-                    return {
-                        query,
-                        file: filePath,
-                        uri: filePath,
-                        compiled: `Invalid start_line: ${start_line}. Presentation has ${lines.length} lines.`,
-                    };
-                }
-
-                let actualEndIdx = Math.min(endIdx, lines.length);
-                let truncationMessage = '';
-
-                if (actualEndIdx - startIdx > 50) {
-                    truncationMessage = '\n\n[Truncated after 50 lines! Use narrower line range to view complete section.]';
-                    actualEndIdx = startIdx + 50;
-                }
-
-                const selectedLines = lines.slice(startIdx, actualEndIdx);
-                const filteredText = `[PowerPoint Presentation]\n\n` + selectedLines.join('\n') + truncationMessage;
+                const filterResult = applyLineFilter(pptText, offset, limit);
+                const truncationMsg = formatTruncationMessage(filterResult, 'Presentation');
+                const filteredText = `[PowerPoint: ${filterResult.totalLines} lines]\n\n${filterResult.content}${truncationMsg}`;
 
                 return {
                     query,
@@ -424,35 +407,11 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
             }
         }
 
-        // Read file content as text
+        // Read file content as text (default handler)
         const rawText = await file.text();
-        const lines = rawText.split('\n');
-
-        // Apply line range filtering if specified
-        const startIdx = (start_line || 1) - 1; // Convert to 0-based index
-        const endIdx = end_line || lines.length;
-
-        // Validate line range
-        if (startIdx < 0 || startIdx >= lines.length) {
-            return {
-                query,
-                file: filePath,
-                uri: filePath,
-                compiled: `Invalid start_line: ${start_line}. File has ${lines.length} lines.`,
-            };
-        }
-
-        // Limit to first 50 lines if more than 50 lines are requested
-        let actualEndIdx = Math.min(endIdx, lines.length);
-        let truncationMessage = '';
-
-        if (actualEndIdx - startIdx > 50) {
-            truncationMessage = '\n\n[Truncated after 50 lines! Use narrower line range to view complete section.]';
-            actualEndIdx = startIdx + 50;
-        }
-
-        const selectedLines = lines.slice(startIdx, actualEndIdx);
-        const filteredText = selectedLines.join('\n') + truncationMessage;
+        const filterResult = applyLineFilter(rawText, offset, limit);
+        const truncationMsg = formatTruncationMessage(filterResult, 'File');
+        const filteredText = filterResult.content + truncationMsg;
 
         return {
             query,

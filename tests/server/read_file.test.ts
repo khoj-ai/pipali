@@ -47,14 +47,14 @@ describe('readFile', () => {
         expect(result.compiled).toContain('Line 5');
     });
 
-    test('should read file with line range', async () => {
+    test('should read file with offset and limit', async () => {
         const result = await readFile({
             path: testFile,
-            start_line: 2,
-            end_line: 4,
+            offset: 1,  // 0-based, so skip line 1
+            limit: 3,   // read 3 lines (lines 2, 3, 4)
         });
 
-        expect(result.query).toBe(`View file: ${testFile} (lines 2-4)`);
+        expect(result.query).toBe(`View file: ${testFile} (offset=1, limit=3)`);
         expect(result.compiled).toContain('Line 2');
         expect(result.compiled).toContain('Line 3');
         expect(result.compiled).toContain('Line 4');
@@ -62,10 +62,10 @@ describe('readFile', () => {
         expect(result.compiled).not.toContain('Line 5');
     });
 
-    test('should read from start_line to end of file if end_line not specified', async () => {
+    test('should read from offset with default limit', async () => {
         const result = await readFile({
             path: testFile,
-            start_line: 3,
+            offset: 2,  // 0-based, skip first 2 lines
         });
 
         expect(result.compiled).toContain('Line 3');
@@ -83,64 +83,64 @@ describe('readFile', () => {
         expect(result.compiled).toContain('not found');
     });
 
-    test('should return error when start_line is invalid', async () => {
+    test('should handle offset beyond file length gracefully', async () => {
         const result = await readFile({
             path: testFile,
-            start_line: 100,
+            offset: 100,  // offset is clamped, so this returns empty content
         });
 
-        expect(result.compiled).toContain('Invalid start_line');
-        expect(result.compiled).toContain('File has 5 lines');
+        // When offset exceeds file length, it returns empty content (clamped to end)
+        expect(result.compiled).toBe('');
     });
 
-    test('should use default line 1 when start_line is 0', async () => {
-        // start_line: 0 is falsy, so it defaults to 1
+    test('should start from beginning when offset is 0', async () => {
         const result = await readFile({
             path: testFile,
-            start_line: 0,
+            offset: 0,
         });
 
         expect(result.compiled).toContain('Line 1');
         expect(result.compiled).toContain('Line 5');
     });
 
-    test('should truncate to 50 lines when more than 50 lines requested', async () => {
+    test('should truncate to default 50 lines when no limit specified', async () => {
         const result = await readFile({
             path: longFile,
-            start_line: 1,
-            end_line: 100,
+            offset: 0,
         });
 
         expect(result.compiled).toContain('Line 1');
         expect(result.compiled).toContain('Line 50');
         expect(result.compiled).not.toContain('Line 51');
-        expect(result.compiled).toContain('[Truncated after 50 lines!');
-        expect(result.compiled).toContain('Use narrower line range to view complete section');
+        expect(result.compiled).toContain('[File truncated');
+        expect(result.compiled).toContain('Use offset/limit parameters to view more');
     });
 
     test('should handle truncation starting from middle of file', async () => {
         const result = await readFile({
             path: longFile,
-            start_line: 25,
-            end_line: 100,
+            offset: 24,  // 0-based, so this starts at line 25
         });
 
         expect(result.compiled).toContain('Line 25');
-        expect(result.compiled).toContain('Line 74'); // 25 + 49 = 74 (50 lines total)
+        expect(result.compiled).toContain('Line 74'); // 24 + 50 = 74 (50 lines total)
         expect(result.compiled).not.toContain('Line 75');
-        expect(result.compiled).toContain('[Truncated after 50 lines!');
+        expect(result.compiled).toContain('[File truncated');
     });
 
-    test('should not truncate when exactly 50 lines requested', async () => {
+    test('should show truncation message when file has more lines than limit', async () => {
+        // File has 100 lines, requesting 50
         const result = await readFile({
             path: longFile,
-            start_line: 1,
-            end_line: 50,
+            offset: 0,
+            limit: 50,
         });
 
         expect(result.compiled).toContain('Line 1');
         expect(result.compiled).toContain('Line 50');
-        expect(result.compiled).not.toContain('[Truncated after 50 lines!');
+        // Should show truncation since file has more lines
+        expect(result.compiled).toContain('[File truncated');
+        expect(result.compiled).toContain('showing lines 1-50 of 100');
     });
 
     test('should handle relative paths by resolving them', async () => {

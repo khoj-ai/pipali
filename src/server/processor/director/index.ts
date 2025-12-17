@@ -26,21 +26,23 @@ interface ResearchConfig {
 const tools: ToolDefinition[] = [
     {
         name: 'view_file',
-        description: 'To view the contents of specific files including text and images. For text files, specify a line range to efficiently read relevant sections (up to 50 lines at a time). For images (jpg, jpeg, png, webp), the full image will be provided for analysis.',
+        description: 'To view the contents of specific files including text, images, PDFs, and Office documents. For text files, use offset and limit to efficiently read large files. Supports images (jpg, jpeg, png, webp), PDFs, Word docs, Excel spreadsheets, and PowerPoint presentations.',
         schema: {
             type: 'object',
             properties: {
                 path: {
                     type: 'string',
-                    description: 'The file path to view (can be absolute or relative). Supports text files and image files (jpg, jpeg, png, webp).',
+                    description: 'The file path to view (can be absolute or relative to home directory).',
                 },
-                start_line: {
+                offset: {
                     type: 'integer',
-                    description: 'Optional starting line number for viewing a specific range of text files (1-indexed). Ignored for image files.',
+                    description: 'Optional starting line offset (0-based) for text files. Default is 0.',
+                    minimum: 0,
                 },
-                end_line: {
+                limit: {
                     type: 'integer',
-                    description: 'Optional ending line number for viewing a specific range of text files (1-indexed). Ignored for image files.',
+                    description: 'Optional maximum number of lines to read for text files. Default is 50.',
+                    minimum: 1,
                 },
             },
             required: ['path'],
@@ -48,34 +50,43 @@ const tools: ToolDefinition[] = [
     },
     {
         name: 'list_files',
-        description: 'To list files under a specified path. Use the path parameter to only show files under the specified path. Use the pattern parameter to filter by glob patterns.',
+        description: 'To list files under a specified path. Supports glob pattern filtering. Returns files sorted by modification time (newest first).',
         schema: {
             type: 'object',
             properties: {
                 path: {
                     type: 'string',
-                    description: 'The directory path to list files from.',
+                    description: 'The directory path to list files from (absolute or relative to home directory).',
                 },
                 pattern: {
                     type: 'string',
-                    description: "Optional glob pattern to filter files (e.g., '*.md').",
+                    description: "Optional glob pattern to filter files (e.g., '*.md', '*.ts').",
+                },
+                ignore: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: "Optional glob patterns to exclude from results (e.g., ['node_modules', '*.log']).",
                 },
             },
         },
     },
     {
-        name: 'regex_search_files',
-        description: 'To search through files under specified path using regex patterns. Returns all lines matching the pattern. Use this when you need to find all relevant files. The regex pattern will ONLY match content on a single line. Use lines_before, lines_after to show context around matches.',
+        name: 'grep_files',
+        description: 'A grep-like line oriented search tool. Search through files under specified path using regex patterns. Returns all lines matching the pattern. Use this when you need to find all relevant files. The regex pattern will ONLY match content on a single line. Use lines_before, lines_after to show context around matches.',
         schema: {
             type: 'object',
             properties: {
-                regex_pattern: {
+                pattern: {
                     type: 'string',
                     description: 'The regex pattern to search for content in files.',
                 },
-                path_prefix: {
+                path: {
                     type: 'string',
-                    description: 'Optional path prefix to limit the search to files under a specified path. Default is home directory.',
+                    description: 'Optional directory or file path to search in. Default is home directory.',
+                },
+                include: {
+                    type: 'string',
+                    description: 'Optional glob pattern to filter which files to search (e.g., "*.ts", "*.{js,jsx}").',
                 },
                 lines_before: {
                     type: 'integer',
@@ -96,7 +107,7 @@ const tools: ToolDefinition[] = [
                     maximum: 5000,
                 },
             },
-            required: ['regex_pattern'],
+            required: ['pattern'],
         },
     },
     {
@@ -232,7 +243,7 @@ async function executeTool(toolCall: ATIFToolCall): Promise<string | Array<{ typ
                 const result = await readFile(toolCall.arguments as ReadFileArgs);
                 return result.compiled;
             }
-            case 'regex_search_files': {
+            case 'grep_files': {
                 const result = await grepFiles(toolCall.arguments as GrepFilesArgs);
                 return result.compiled;
             }
