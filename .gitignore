@@ -35,7 +35,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .DS_Store
 
 # AI assistants
-.cursor
-CLAUDE.md
 AGENTS.md
+CLAUDE.md
 GEMINI.md
+.cursor
+.claude
+.gemini
