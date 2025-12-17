@@ -206,7 +206,7 @@ async function pickNextTool(
         }
 
         return {
-            toolCalls: newToolCalls.length > 0 ? newToolCalls : toolCalls,
+            toolCalls: newToolCalls,
             thought: response.message,
         };
     } catch (error) {
@@ -282,10 +282,19 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
 
         const iteration = await pickNextTool(config);
 
-        // Check for warnings or no tool calls
-        if (iteration.warning || iteration.toolCalls.length === 0) {
+        // Stop research if no tool calls
+        if (iteration.toolCalls.length === 0) {
             yield iteration;
             break;
+        }
+
+        // Add warning to trajectory and skip tool execution
+        if (iteration.warning) {
+            const warningObservations: ATIFObservationResult[] = iteration.toolCalls.map(tc => ({ source_call_id: tc.tool_call_id, content: `Skipped due to warning: ${iteration.warning}` }));
+            addStepToTrajectory(config.chatHistory, 'agent', '', iteration.toolCalls, { results: warningObservations });
+            iteration.toolResults = warningObservations;
+            yield iteration;
+            continue;
         }
 
         // Check if done (text tool = final response)
