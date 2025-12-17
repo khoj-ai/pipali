@@ -5,6 +5,8 @@ import type { ResearchIteration, ToolCall, ToolResult } from './types';
 import { listFiles, type ListFilesArgs } from '../actor/list_files';
 import { readFile, type ReadFileArgs } from '../actor/read_file';
 import { grepFiles, type GrepFilesArgs } from '../actor/grep_files';
+import { editFile, type EditFileArgs } from '../actor/edit_file';
+import { writeFile, type WriteFileArgs } from '../actor/write_file';
 import * as prompts from './prompts';
 import type { ATIFObservationResult, ATIFStep, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
 import { addStepToTrajectory } from '../conversation/atif/atif.utils';
@@ -108,6 +110,54 @@ const tools: ToolDefinition[] = [
                 },
             },
             required: ['pattern'],
+        },
+    },
+    {
+        name: 'edit_file',
+        description: 'Edit files using exact string replacements. The old_string must be unique in the file unless replace_all is true. Use this to modify existing files. REQUIRED: Must read the file before editing to ensure accurate updates. Provide at least 3 lines of context before and after the target text to ensure accurate matching.',
+        schema: {
+            type: 'object',
+            properties: {
+                file_path: {
+                    type: 'string',
+                    description: 'The absolute path to the file to modify.',
+                },
+                old_string: {
+                    type: 'string',
+                    description: `The exact literal text to replace.
+
+REQUIRED:
+- The text must be unique in the file unless replace_all is true.
+- Include at least 3 lines of context immediately before and 3 lines immediately after the target text, matching whitespace and indentation exactly.`,
+                },
+                new_string: {
+                    type: 'string',
+                    description: 'The literal text to replace old_string with. Must be different from old_string.',
+                },
+                replace_all: {
+                    type: 'boolean',
+                    description: 'If true, replace all occurrences of old_string. Default is false.',
+                },
+            },
+            required: ['file_path', 'old_string', 'new_string'],
+        },
+    },
+    {
+        name: 'write_file',
+        description: 'Creates a new file or overwrites an existing file with the specified content. Creates parent directories if needed.',
+        schema: {
+            type: 'object',
+            properties: {
+                file_path: {
+                    type: 'string',
+                    description: 'The absolute path to the file to write.',
+                },
+                content: {
+                    type: 'string',
+                    description: 'The content to write to the file.',
+                },
+            },
+            required: ['file_path', 'content'],
         },
     },
     {
@@ -245,6 +295,18 @@ async function executeTool(toolCall: ATIFToolCall): Promise<string | Array<{ typ
             }
             case 'grep_files': {
                 const result = await grepFiles(toolCall.arguments as GrepFilesArgs);
+                return result.compiled;
+            }
+            case 'edit_file': {
+                const result = await editFile(
+                    toolCall.arguments as EditFileArgs,
+                );
+                return result.compiled;
+            }
+            case 'write_file': {
+                const result = await writeFile(
+                    toolCall.arguments as WriteFileArgs,
+                );
                 return result.compiled;
             }
             case 'text': {
