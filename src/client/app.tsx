@@ -1086,6 +1086,7 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
                                 "grep_files": "Search",
                                 "edit_file": "Edit",
                                 "write_file": "Write",
+                                "bash_command": "Shell",
                             }[toolName] || formatToolName(toolName);
 
                             // Check if this is an edit/write operation with diff info
@@ -1093,6 +1094,7 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
                             const isWriteOp = toolName === 'write_file' && thought.toolArgs?.content;
                             const isGrepOp = toolName === 'grep_files' && thought.toolResult;
                             const isListOp = toolName === 'list_files' && thought.toolResult;
+                            const isBashOp = toolName === 'bash_command' && thought.toolArgs?.command;
 
                             // Determine success/error status for step indicator
                             const stepStatus = getToolResultStatus(thought.toolResult, toolName);
@@ -1128,8 +1130,17 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
                                         {isListOp && thought.toolResult && (
                                             <ListResultView result={thought.toolResult} />
                                         )}
+                                        {/* Show bash command view */}
+                                        {isBashOp && (
+                                            <BashCommandView
+                                                command={thought.toolArgs.command}
+                                                justification={thought.toolArgs.justification}
+                                                cwd={thought.toolArgs.cwd}
+                                                result={thought.toolResult}
+                                            />
+                                        )}
                                         {/* Show regular result for other tools */}
-                                        {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && thought.toolResult && (
+                                        {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isBashOp && thought.toolResult && (
                                             <pre className="thought-result">
                                                 {thought.toolResult.slice(0, 200)}
                                                 {thought.toolResult.length > 200 && '...'}
@@ -1183,6 +1194,9 @@ const formatToolArgs = (toolName: string, args: any): string => {
         case 'edit_file':
         case 'write_file':
             return args.file_path || '';
+
+        case 'bash_command':
+            return args.justification || '';
 
         default:
             // Generic formatting: show key values in a readable way
@@ -1445,6 +1459,60 @@ const ListResultView = ({ result }: { result: string }) => {
 };
 
 /**
+ * Bash command view for the thoughts section
+ * Shows command, justification, working directory, and output
+ */
+const BashCommandView = ({ command, justification, cwd, result }: {
+    command: string;
+    justification?: string;
+    cwd?: string;
+    result?: string;
+}) => {
+    const [expanded, setExpanded] = useState(false);
+    const hasOutput = result && result.length > 0;
+    const isError = result?.toLowerCase().includes('error') ||
+                    result?.toLowerCase().includes('cancelled') ||
+                    result?.includes('[Exit code:');
+    const outputPreview = result?.slice(0, 150) || '';
+    const needsTruncation = result && result.length > 150;
+
+    // Shorten home directory path for display
+    const displayCwd = cwd?.replace(/^\/Users\/[^/]+/, '~') || '~';
+
+    return (
+        <div className="thought-bash">
+            <div className="bash-command-block">
+                <div className="bash-command-header">
+                    <code className="bash-cwd">{displayCwd}</code>
+                    <span className="bash-prompt">$</span>
+                </div>
+                <pre className="bash-command-text"><code>{command}</code></pre>
+            </div>
+            {hasOutput && (
+                <div className={`bash-output ${isError ? 'error' : 'success'}`}>
+                    <div
+                        className="bash-output-header"
+                        onClick={() => needsTruncation && setExpanded(!expanded)}
+                        style={{ cursor: needsTruncation ? 'pointer' : 'default' }}
+                    >
+                        <span className="bash-label">Output</span>
+                        {needsTruncation && (
+                            <span className="bash-expand-hint">
+                                {expanded ? '▼ collapse' : '▶ expand'}
+                            </span>
+                        )}
+                    </div>
+                    <pre className="bash-output-text">
+                        {expanded ? result : outputPreview}
+                        {!expanded && needsTruncation && '...'}
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+};
+
+/**
  * Determine if a tool result indicates success or failure
  */
 const getToolResultStatus = (toolResult: string | undefined, toolName: string | undefined): 'success' | 'error' | 'neutral' => {
@@ -1468,6 +1536,14 @@ const getToolResultStatus = (toolResult: string | undefined, toolName: string | 
         } else {
             return 'error';
         }
+    }
+
+    // For bash_command, check for errors or non-zero exit codes
+    if (toolName === 'bash_command') {
+        if (lowerResult.includes('cancelled') || lowerResult.includes('[exit code:') || lowerResult.startsWith('error')) {
+            return 'error';
+        }
+        return 'success';
     }
 
     return 'neutral';
@@ -1699,6 +1775,36 @@ const ConfirmationDialog = ({
         }
     };
 
+    // Parse command execution message into structured sections
+    const parseCommandMessage = (message: string): { reason?: string; command?: string; workdir?: string } | null => {
+        if (!message.includes('**Why:**') && !message.includes('**Command:**')) {
+            return null;
+        }
+        const result: { reason?: string; command?: string; workdir?: string } = {};
+
+        // Extract reason (after **Why:** until **Command:**)
+        const whyMatch = message.match(/\*\*Why:\*\*\s*([\s\S]*?)(?=\*\*Command:\*\*|$)/);
+        if (whyMatch && whyMatch[1]) {
+            result.reason = whyMatch[1].trim();
+        }
+
+        // Extract command (after **Command:** until **Working directory:**)
+        const cmdMatch = message.match(/\*\*Command:\*\*\s*([\s\S]*?)(?=\*\*Working directory:\*\*|$)/);
+        if (cmdMatch && cmdMatch[1]) {
+            result.command = cmdMatch[1].trim();
+        }
+
+        // Extract working directory
+        const wdMatch = message.match(/\*\*Working directory:\*\*\s*([\s\S]*?)$/);
+        if (wdMatch && wdMatch[1]) {
+            result.workdir = wdMatch[1].trim();
+        }
+
+        return result;
+    };
+
+    const commandInfo = request.message ? parseCommandMessage(request.message) : null;
+
     return (
         <div className="confirmation-container">
             <div className="confirmation-dialog">
@@ -1712,11 +1818,47 @@ const ConfirmationDialog = ({
                 </div>
 
                 <div className="confirmation-body">
+                    {/* Structured command execution view */}
+                    {commandInfo ? (
+                        <div className="command-confirmation">
+                            {commandInfo.reason && (
+                                <div className="command-section">
+                                    <div className="command-section-label">Reason</div>
+                                    <div className="command-section-content reason-content">
+                                        {commandInfo.reason}
+                                    </div>
+                                </div>
+                            )}
+                            {commandInfo.command && (
+                                <div className="command-section">
+                                    <div className="command-section-header">
+                                        <span className="command-section-label">Command</span>
+                                        {commandInfo.workdir && (
+                                            <code className="workdir-pill" title={commandInfo.workdir}>
+                                                in {commandInfo.workdir.replace(/^\/Users\/[^/]+/, '~')}
+                                            </code>
+                                        )}
+                                    </div>
+                                    <pre className="command-section-content command-content">
+                                        <code>{commandInfo.command}</code>
+                                    </pre>
+                                </div>
+                            )}
+                        </div>
+                    ) : request.message ? (
+                        /* Fallback: plain message for non-command operations */
+                        <div className="confirmation-message">
+                            {request.message.split('\n').map((line, idx) => (
+                                <p key={idx}>{line || <br />}</p>
+                            ))}
+                        </div>
+                    ) : null}
+
                     {/* Diff view for showing changes */}
                     {request.diff && <DiffView diff={request.diff} />}
 
-                    {/* File path if no diff */}
-                    {!request.diff && request.context?.affectedFiles && request.context.affectedFiles.length > 0 && (
+                    {/* File path if no diff and no message */}
+                    {!request.diff && !request.message && request.context?.affectedFiles && request.context.affectedFiles.length > 0 && (
                         <div className="confirmation-files">
                             <span className="files-label">Affected files:</span>
                             <ul className="files-list">

@@ -830,6 +830,140 @@ body {
     border-top: 1px solid var(--border-color);
 }
 
+/* Bash command results view */
+.thought-bash {
+    margin-top: 6px;
+    font-size: 12px;
+}
+
+.bash-justification {
+    display: flex;
+    gap: 6px;
+    padding: 6px 8px;
+    background: var(--bg-tertiary);
+    border-radius: 4px;
+    margin-bottom: 6px;
+    font-size: 11px;
+    line-height: 1.4;
+}
+
+.bash-label {
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    font-size: 10px;
+    flex-shrink: 0;
+}
+
+.bash-justification-text {
+    color: var(--text-secondary);
+}
+
+.bash-command-block {
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    overflow: hidden;
+    background: #1e1e1e;
+}
+
+.bash-command-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 8px;
+    background: #2d2d2d;
+    border-bottom: 1px solid #3d3d3d;
+}
+
+.bash-cwd {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: #6a9955;
+    background: none;
+    padding: 0;
+}
+
+.bash-prompt {
+    color: #569cd6;
+    font-weight: bold;
+    font-size: 11px;
+}
+
+.bash-command-text {
+    margin: 0;
+    padding: 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    color: #d4d4d4;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 120px;
+    overflow-y: auto;
+}
+
+.bash-command-text code {
+    font-family: inherit;
+    background: none;
+    padding: 0;
+    color: inherit;
+}
+
+.bash-output {
+    margin-top: 6px;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--border-color);
+}
+
+.bash-output.success {
+    border-color: #22c55e40;
+}
+
+.bash-output.error {
+    border-color: #ef444440;
+}
+
+.bash-output-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.bash-output.success .bash-output-header {
+    background: #22c55e10;
+}
+
+.bash-output.error .bash-output-header {
+    background: #ef444410;
+}
+
+.bash-expand-hint {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.bash-output-text {
+    margin: 0;
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-secondary);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 150px;
+    overflow-y: auto;
+    background: var(--bg-primary);
+}
+
+.bash-output.error .bash-output-text {
+    color: #ef4444;
+}
+
 /* Input Area */
 .input-area {
     flex-shrink: 0;
@@ -1095,12 +1229,17 @@ body {
 
 .confirmation-body {
     padding: 20px;
+    max-height: 300px;
+    overflow-y: auto;
 }
 
 .confirmation-message {
     color: var(--text-secondary);
     font-size: 14px;
     line-height: 1.6;
+    font-family: var(--font-mono);
+    white-space: pre-wrap;
+    word-break: break-word;
 }
 
 .confirmation-message p {
@@ -1115,6 +1254,82 @@ body {
     color: var(--text-primary);
     font-weight: 600;
     word-break: break-all;
+}
+
+/* Command execution confirmation styles */
+.command-confirmation {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.command-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.command-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.command-section-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.workdir-pill {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-secondary);
+    background: var(--bg-secondary);
+    padding: 3px 8px;
+    border-radius: 12px;
+    border: 1px solid var(--border-light);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 250px;
+}
+
+.command-section-content {
+    margin: 0;
+}
+
+.reason-content {
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    padding: 12px;
+    background: var(--bg-tertiary, #f0fdf4);
+    border-radius: 8px;
+    border-left: 3px solid #22c55e;
+}
+
+.command-content {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--text-primary);
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: 8px;
+    border: 1px solid var(--border-light);
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.command-content code {
+    font-family: inherit;
+    background: none;
+    padding: 0;
 }
 
 .confirmation-files {

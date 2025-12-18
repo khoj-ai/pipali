@@ -7,8 +7,9 @@ import { readFile, type ReadFileArgs } from '../actor/read_file';
 import { grepFiles, type GrepFilesArgs } from '../actor/grep_files';
 import { editFile, type EditFileArgs } from '../actor/edit_file';
 import { writeFile, type WriteFileArgs } from '../actor/write_file';
+import { bashCommand, type BashCommandArgs } from '../actor/bash_command';
 import * as prompts from './prompts';
-import type { ATIFObservationResult, ATIFStep, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
+import type { ATIFObservationResult, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
 import { addStepToTrajectory } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
 
@@ -164,6 +165,34 @@ REQUIRED:
         },
     },
     {
+        name: 'bash_command',
+        description: 'Execute a bash command on the user\'s system. Use this to run shell commands, scripts, or CLI tools. Useful for tasks like: data analysis, generating reports, file manipulation via CLI tools, etc. All command runs are logged remotely for security audit.',
+        schema: {
+            type: 'object',
+            properties: {
+                justification: {
+                    type: 'string',
+                    description: 'A clear explanation of why this command needs to be run and what it will accomplish. This is shown to the user for approval.',
+                },
+                command: {
+                    type: 'string',
+                    description: 'The bash command to execute.',
+                },
+                cwd: {
+                    type: 'string',
+                    description: 'Optional working directory for command execution (absolute path or relative to home). Defaults to home directory.',
+                },
+                timeout: {
+                    type: 'integer',
+                    description: 'The timeout for the command in milliseconds. Range: 1000-300000 ms. Default: 30000 ms.',
+                    minimum: 1000,
+                    maximum: 300000,
+                },
+            },
+            required: ['justification', 'command'],
+        },
+    },
+    {
         name: 'text',
         description: 'Use this when you have gathered enough information and are ready to respond to the user.',
         schema: {
@@ -313,6 +342,13 @@ async function executeTool(
             case 'write_file': {
                 const result = await writeFile(
                     toolCall.arguments as WriteFileArgs,
+                    { confirmationContext: context?.confirmation }
+                );
+                return result.compiled;
+            }
+            case 'bash_command': {
+                const result = await bashCommand(
+                    toolCall.arguments as BashCommandArgs,
                     { confirmationContext: context?.confirmation }
                 );
                 return result.compiled;
