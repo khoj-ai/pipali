@@ -238,6 +238,7 @@ async function pickNextTool(
         day_of_week: dayOfWeek ?? new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         location: location ?? 'Unknown',
         username: username ?? 'User',
+        os_info: `${process.platform} ${process.arch}`,
         max_iterations: String(config.maxIterations)
     });
 
