@@ -1078,19 +1078,58 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
                         } else if (thought.type === 'tool_call') {
                             // Count tool call position (excluding reasoning thoughts)
                             const toolCallIdx = thoughts.slice(0, idx).filter(t => t.type === 'tool_call').length + 1;
-                            const formattedArgs = formatToolArgs(thought.toolName || '', thought.toolArgs);
+                            const toolName = thought.toolName || '';
+                            const formattedArgs = formatToolArgs(toolName, thought.toolArgs);
+                            const friendlyToolName = {
+                                "view_file": "Read",
+                                "list_files": "List",
+                                "grep_files": "Search",
+                                "edit_file": "Edit",
+                                "write_file": "Write",
+                            }[toolName] || formatToolName(toolName);
+
+                            // Check if this is an edit/write operation with diff info
+                            const isEditOp = toolName === 'edit_file' && thought.toolArgs?.old_string && thought.toolArgs?.new_string;
+                            const isWriteOp = toolName === 'write_file' && thought.toolArgs?.content;
+                            const isGrepOp = toolName === 'grep_files' && thought.toolResult;
+                            const isListOp = toolName === 'list_files' && thought.toolResult;
+
+                            // Determine success/error status for step indicator
+                            const stepStatus = getToolResultStatus(thought.toolResult, toolName);
 
                             return (
                                 <div key={thought.id} className="thought-item">
-                                    <div className="thought-step">{toolCallIdx}</div>
+                                    <div className={`thought-step ${stepStatus}`}>{toolCallIdx}</div>
                                     <div className="thought-content">
                                         <div className="thought-tool">
-                                            {formatToolName(thought.toolName || '')}
+                                            {friendlyToolName}
                                             {formattedArgs && (
                                                 <span className="thought-args"> {formattedArgs}</span>
                                             )}
                                         </div>
-                                        {thought.toolResult && (
+                                        {/* Show diff view for edit operations */}
+                                        {isEditOp && (
+                                            <ThoughtDiffView
+                                                oldText={thought.toolArgs.old_string}
+                                                newText={thought.toolArgs.new_string}
+                                            />
+                                        )}
+                                        {/* Show content preview for write operations */}
+                                        {isWriteOp && (
+                                            <ThoughtWriteView
+                                                content={thought.toolArgs.content}
+                                            />
+                                        )}
+                                        {/* Show formatted grep results */}
+                                        {isGrepOp && thought.toolResult && (
+                                            <GrepResultView result={thought.toolResult} />
+                                        )}
+                                        {/* Show formatted list results */}
+                                        {isListOp && thought.toolResult && (
+                                            <ListResultView result={thought.toolResult} />
+                                        )}
+                                        {/* Show regular result for other tools */}
+                                        {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && thought.toolResult && (
                                             <pre className="thought-result">
                                                 {thought.toolResult.slice(0, 200)}
                                                 {thought.toolResult.length > 200 && '...'}
@@ -1121,10 +1160,10 @@ const formatToolArgs = (toolName: string, args: any): string => {
     switch (toolName) {
         case 'view_file':
             if (args.offset || args.limit) {
-                const offsetStr = args.offset ? `offset=${args.offset}` : '';
-                const limitStr = args.limit ? `limit=${args.limit}` : '';
-                const params = [offsetStr, limitStr].filter(Boolean).join(', ');
-                return `${args.path} (${params})`;
+                const offsetStr = args.offset ? `${args.offset}` : '1';
+                const limitStr = args.limit ? `${args.offset + args.limit}` : '';
+                const params = [offsetStr, limitStr].filter(Boolean).join('-');
+                return `${args.path} (lines ${params})`;
             }
             return args.path || '';
 
@@ -1141,6 +1180,10 @@ const formatToolArgs = (toolName: string, args: any): string => {
             if (args.include) parts.push(`(${args.include})`);
             return parts.join(' ');
 
+        case 'edit_file':
+        case 'write_file':
+            return args.file_path || '';
+
         default:
             // Generic formatting: show key values in a readable way
             return Object.entries(args)
@@ -1156,14 +1199,392 @@ const formatToolArgs = (toolName: string, args: any): string => {
 };
 
 /**
+ * Compact diff view for edit operations in thoughts section
+ */
+const ThoughtDiffView = ({ oldText, newText }: { oldText: string; newText: string }) => {
+    const diffLines = computeUnifiedDiff(oldText, newText);
+    const maxLines = 10;
+    const truncated = diffLines.length > maxLines;
+    const displayLines = truncated ? diffLines.slice(0, maxLines) : diffLines;
+
+    return (
+        <div className="thought-diff">
+            {displayLines.map((line, idx) => (
+                <div key={idx} className={`thought-diff-line ${line.type}`}>
+                    <span className="thought-diff-indicator">
+                        {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
+                    </span>
+                    <span className="thought-diff-content">{line.content || ' '}</span>
+                </div>
+            ))}
+            {truncated && (
+                <div className="thought-diff-truncated">
+                    ... {diffLines.length - maxLines} more lines
+                </div>
+            )}
+        </div>
+    );
+};
+
+/**
+ * Compact content preview for write operations in thoughts section
+ */
+const ThoughtWriteView = ({ content }: { content: string }) => {
+    const lines = content.split('\n');
+    const maxLines = 8;
+    const truncated = lines.length > maxLines;
+    const displayLines = truncated ? lines.slice(0, maxLines) : lines;
+
+    return (
+        <div className="thought-diff">
+            {displayLines.map((line, idx) => (
+                <div key={idx} className="thought-diff-line added">
+                    <span className="thought-diff-indicator">+</span>
+                    <span className="thought-diff-content">{line || ' '}</span>
+                </div>
+            ))}
+            {truncated && (
+                <div className="thought-diff-truncated">
+                    ... {lines.length - maxLines} more lines
+                </div>
+            )}
+        </div>
+    );
+};
+
+/**
+ * Formatted grep results view for the thoughts section
+ * Groups results by file with filename as heading and line numbers in gutter
+ */
+const GrepResultView = ({ result }: { result: string }) => {
+    const lines = result.split('\n').filter(Boolean);
+
+    // Parse grep result line: /full/path/to/file:linenum:matched text (or -text for context)
+    type ParsedLine = { filename: string; lineNum: string; text: string; isMatch: boolean };
+
+    const parseLine = (line: string): ParsedLine | null => {
+        const match = line.match(/^(.+?):(\d+)([:|-])(.*)$/);
+        if (match && match[1] && match[2] && match[3] && match[4] !== undefined) {
+            const fullPath = match[1];
+            const lineNum = match[2];
+            const separator = match[3];
+            const text = match[4];
+            const filename = fullPath.split('/').pop() || fullPath;
+            const isMatch = separator === ':';
+            return { filename, lineNum, text, isMatch };
+        }
+        return null;
+    };
+
+    // Group lines by filename
+    type FileGroup = { filename: string; lines: Array<{ lineNum: string; text: string; isMatch: boolean }> };
+    const fileGroups: FileGroup[] = [];
+    let currentGroup: FileGroup | null = null;
+
+    for (const line of lines) {
+        if (!line || line === '--') continue;
+        const parsed = parseLine(line);
+        if (parsed) {
+            if (!currentGroup || currentGroup.filename !== parsed.filename) {
+                currentGroup = { filename: parsed.filename, lines: [] };
+                fileGroups.push(currentGroup);
+            }
+            currentGroup.lines.push({ lineNum: parsed.lineNum, text: parsed.text, isMatch: parsed.isMatch });
+        }
+    }
+
+    // Calculate total lines for truncation message
+    const totalLines = fileGroups.reduce((sum, g) => sum + g.lines.length, 0);
+    const maxTotalLines = 12;
+    let lineCount = 0;
+    let truncated = false;
+
+    return (
+        <div className="thought-grep">
+            {fileGroups.map((group, groupIdx) => {
+                if (lineCount >= maxTotalLines) {
+                    truncated = true;
+                    return null;
+                }
+
+                const remainingLines = maxTotalLines - lineCount;
+                const linesToShow = group.lines.slice(0, remainingLines);
+                lineCount += linesToShow.length;
+
+                if (linesToShow.length < group.lines.length) {
+                    truncated = true;
+                }
+
+                return (
+                    <div key={groupIdx} className="grep-file-group">
+                        <div className="grep-file-header">{group.filename}</div>
+                        {linesToShow.map((line, lineIdx) => (
+                            <div key={lineIdx} className={`grep-result-line ${line.isMatch ? 'match' : 'context'}`}>
+                                <span className="grep-line-num">{line.lineNum}</span>
+                                <span className="grep-text">{line.text}</span>
+                            </div>
+                        ))}
+                    </div>
+                );
+            })}
+            {truncated && (
+                <div className="grep-result-truncated">
+                    ... {totalLines - maxTotalLines} more matches
+                </div>
+            )}
+        </div>
+    );
+};
+
+/**
+ * Formatted list files view for the thoughts section
+ * Groups files by directory with directory as heading and filenames below
+ */
+const ListResultView = ({ result }: { result: string }) => {
+    const lines = result.split('\n').filter(Boolean);
+
+    // Parse list result line: "- /full/path/to/file"
+    type ParsedFile = { dir: string; filename: string; fullPath: string };
+
+    const parseFile = (line: string): ParsedFile | null => {
+        // Match lines starting with "- " followed by a path
+        const match = line.match(/^- (.+)$/);
+        if (match && match[1]) {
+            const fullPath = match[1];
+            const lastSlash = fullPath.lastIndexOf('/');
+            if (lastSlash >= 0) {
+                const dir = fullPath.substring(0, lastSlash) || '/';
+                const filename = fullPath.substring(lastSlash + 1);
+                return { dir, filename, fullPath };
+            }
+            return { dir: '', filename: fullPath, fullPath };
+        }
+        return null;
+    };
+
+    // Group files by full directory path (not short name) using a Map
+    const dirMap = new Map<string, Array<{ filename: string; fullPath: string }>>();
+    let truncationMessage = '';
+
+    for (const line of lines) {
+        if (!line) continue;
+        // Check for truncation message
+        if (line.startsWith('...')) {
+            truncationMessage = line;
+            continue;
+        }
+        const parsed = parseFile(line);
+        if (parsed) {
+            // Use full dir path as key to keep different directories separate
+            const existing = dirMap.get(parsed.dir);
+            if (existing) {
+                existing.push({ filename: parsed.filename, fullPath: parsed.fullPath });
+            } else {
+                dirMap.set(parsed.dir, [{ filename: parsed.filename, fullPath: parsed.fullPath }]);
+            }
+        }
+    }
+
+    // Convert to array and sort by directory name
+    type DirGroup = { dir: string; displayDir: string; files: Array<{ filename: string; fullPath: string }> };
+
+    // Get a short display name for directory
+    const getShortDir = (dir: string): string => {
+        const parts = dir.split('/').filter(Boolean);
+        // Show last 2-3 parts of the path
+        if (parts.length <= 2) return dir;
+        return '.../' + parts.slice(-2).join('/');
+    };
+
+    const dirGroups: DirGroup[] = Array.from(dirMap.entries())
+        .map(([dir, files]) => ({ dir, displayDir: getShortDir(dir), files }))
+        .sort((a, b) => a.dir.localeCompare(b.dir));
+
+    // Calculate total files for truncation message
+    const totalFiles = dirGroups.reduce((sum, g) => sum + g.files.length, 0);
+
+    // Limit total files shown
+    const maxTotalFiles = 15;
+    let fileCount = 0;
+    let truncated = false;
+
+    return (
+        <div className="thought-list">
+            {dirGroups.map((group) => {
+                if (fileCount >= maxTotalFiles) {
+                    truncated = true;
+                    return null;
+                }
+
+                const remainingFiles = maxTotalFiles - fileCount;
+                const filesToShow = group.files.slice(0, remainingFiles);
+                fileCount += filesToShow.length;
+
+                if (filesToShow.length < group.files.length) {
+                    truncated = true;
+                }
+
+                return (
+                    <div key={group.dir} className="list-dir-group">
+                        <div className="list-dir-header">{group.displayDir}</div>
+                        {filesToShow.map((file, fileIdx) => (
+                            <div key={fileIdx} className="list-file-item">
+                                <span className="list-file-name">{file.filename}</span>
+                            </div>
+                        ))}
+                    </div>
+                );
+            })}
+            {(truncated || truncationMessage) && (
+                <div className="list-result-truncated">
+                    {truncationMessage || `... ${totalFiles - maxTotalFiles} more files`}
+                </div>
+            )}
+        </div>
+    );
+};
+
+/**
+ * Determine if a tool result indicates success or failure
+ */
+const getToolResultStatus = (toolResult: string | undefined, toolName: string | undefined): 'success' | 'error' | 'neutral' => {
+    if (!toolResult) return 'neutral';
+
+    const lowerResult = toolResult.toLowerCase();
+
+    // Tool-specific success indicators
+    if (toolName === 'edit_file' || toolName === 'write_file') {
+        if (lowerResult.includes('success') || lowerResult.includes('updated') || lowerResult.includes('created') || lowerResult.includes('wrote')) {
+            return 'success';
+        } else {
+            return 'error';
+        }
+    }
+
+    // For read/list/grep, having content usually means success
+    if (toolName === 'view_file' || toolName === 'list_files' || toolName === 'grep_files') {
+        if (toolResult.length > 0 && !lowerResult.startsWith('error')) {
+            return 'success';
+        } else {
+            return 'error';
+        }
+    }
+
+    return 'neutral';
+};
+
+/**
+ * Compute unified diff lines from old and new text
+ * Returns lines with type: 'context' | 'removed' | 'added'
+ */
+function computeUnifiedDiff(oldText: string, newText: string): Array<{ type: 'context' | 'removed' | 'added'; content: string }> {
+    const oldLines = oldText.split('\n');
+    const newLines = newText.split('\n');
+    const result: Array<{ type: 'context' | 'removed' | 'added'; content: string }> = [];
+
+    // Simple LCS-based diff
+    const lcs = computeLCS(oldLines, newLines);
+
+    let oldIdx = 0;
+    let newIdx = 0;
+    let lcsIdx = 0;
+
+    while (oldIdx < oldLines.length || newIdx < newLines.length) {
+        const oldLine = oldLines[oldIdx];
+        const newLine = newLines[newIdx];
+        const lcsLine = lcs[lcsIdx];
+
+        if (lcsIdx < lcs.length && oldIdx < oldLines.length && oldLine === lcsLine) {
+            // This line is in both - check if new also matches
+            if (newIdx < newLines.length && newLine === lcsLine) {
+                result.push({ type: 'context', content: oldLine ?? '' });
+                oldIdx++;
+                newIdx++;
+                lcsIdx++;
+            } else if (newLine !== undefined) {
+                // New has different line before matching LCS
+                result.push({ type: 'added', content: newLine });
+                newIdx++;
+            }
+        } else if (oldIdx < oldLines.length && oldLine !== undefined && (lcsIdx >= lcs.length || oldLine !== lcsLine)) {
+            // Old line not in LCS - it was removed
+            result.push({ type: 'removed', content: oldLine });
+            oldIdx++;
+        } else if (newIdx < newLines.length && newLine !== undefined) {
+            // New line not yet processed
+            result.push({ type: 'added', content: newLine });
+            newIdx++;
+        } else {
+            // Safety break to prevent infinite loop
+            break;
+        }
+    }
+
+    return result;
+}
+
+/**
+ * Compute Longest Common Subsequence of two string arrays
+ */
+function computeLCS(a: string[], b: string[]): string[] {
+    const m = a.length;
+    const n = b.length;
+    const dp: number[][] = [];
+    for (let i = 0; i <= m; i++) {
+        const row: number[] = [];
+        for (let j = 0; j <= n; j++) {
+            row[j] = 0;
+        }
+        dp[i] = row;
+    }
+
+    for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+            const aVal = a[i - 1];
+            const bVal = b[j - 1];
+            const prevDiag = dp[i - 1]?.[j - 1] ?? 0;
+            const prevUp = dp[i - 1]?.[j] ?? 0;
+            const prevLeft = dp[i]?.[j - 1] ?? 0;
+
+            if (aVal === bVal) {
+                dp[i][j] = prevDiag + 1;
+            } else {
+                dp[i][j] = Math.max(prevUp, prevLeft);
+            }
+        }
+    }
+
+    // Backtrack to find LCS
+    const lcs: string[] = [];
+    let i = m, j = n;
+    while (i > 0 && j > 0) {
+        const aVal = a[i - 1];
+        const bVal = b[j - 1];
+        const prevUp = dp[i - 1]?.[j] ?? 0;
+        const prevLeft = dp[i]?.[j - 1] ?? 0;
+
+        if (aVal === bVal && aVal !== undefined) {
+            lcs.unshift(aVal);
+            i--;
+            j--;
+        } else if (prevUp > prevLeft) {
+            i--;
+        } else {
+            j--;
+        }
+    }
+
+    return lcs;
+}
+
+/**
  * Diff View Component
- * Shows inline diff of changes that will be made to a file
+ * Shows unified inline diff of changes that will be made to a file
  */
 const DiffView = ({ diff }: { diff: DiffInfo }) => {
-    // For edit operations, show inline diff with file path
+    // For edit operations, show unified inline diff with file path
     if (diff.oldText !== undefined && diff.newText !== undefined) {
-        const oldLines = diff.oldText.split('\n');
-        const newLines = diff.newText.split('\n');
+        const diffLines = computeUnifiedDiff(diff.oldText, diff.newText);
 
         return (
             <div className="diff-container">
@@ -1171,16 +1592,12 @@ const DiffView = ({ diff }: { diff: DiffInfo }) => {
                     <span className="diff-file-path">{diff.filePath}</span>
                 </div>
                 <div className="diff-inline">
-                    {oldLines.map((line, idx) => (
-                        <div key={`old-${idx}`} className="diff-line removed">
-                            <span className="diff-line-indicator">−</span>
-                            <span className="diff-line-content">{line || ' '}</span>
-                        </div>
-                    ))}
-                    {newLines.map((line, idx) => (
-                        <div key={`new-${idx}`} className="diff-line added">
-                            <span className="diff-line-indicator">+</span>
-                            <span className="diff-line-content">{line || ' '}</span>
+                    {diffLines.map((line, idx) => (
+                        <div key={idx} className={`diff-line ${line.type}`}>
+                            <span className="diff-line-indicator">
+                                {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
+                            </span>
+                            <span className="diff-line-content">{line.content || ' '}</span>
                         </div>
                     ))}
                 </div>
