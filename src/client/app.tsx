@@ -53,6 +53,8 @@ const App = () => {
     // Refs
     const wsRef = useRef<WebSocket | null>(null);
     const prevConversationIdRef = useRef<string | undefined>(undefined);
+    // Track current conversationId for WebSocket handler (avoids stale closure)
+    const conversationIdRef = useRef<string | undefined>(undefined);
     // Track pending background task message (sent before conversation_created is received)
     const pendingBackgroundMessageRef = useRef<string | null>(null);
 
@@ -78,6 +80,11 @@ const App = () => {
             }
         };
     }, []);
+
+    // Keep conversationIdRef in sync with state (for WebSocket handler)
+    useEffect(() => {
+        conversationIdRef.current = conversationId;
+    }, [conversationId]);
 
     // Focus textarea on various state changes
     useEffect(() => { scheduleTextareaFocus(); }, []);
@@ -334,7 +341,7 @@ const App = () => {
                     return next;
                 });
             }
-            if (!msgConversationId || msgConversationId === conversationId) {
+            if (!msgConversationId || msgConversationId === conversationIdRef.current) {
                 setIsProcessing(false);
                 setIsPaused(false);
                 setMessages(prev => [...prev, {
@@ -364,16 +371,15 @@ const App = () => {
                     }
                     next.set(msgConversationId, {
                         isProcessing: true,
-                        isPaused: false,
+                        isPaused: existing?.isPaused ?? false, // Preserve paused state
                         latestReasoning: existing?.latestReasoning,
                         messages: msgs,
                     });
                     return next;
                 });
             }
-            if (!msgConversationId || msgConversationId === conversationId) {
+            if (!msgConversationId || msgConversationId === conversationIdRef.current) {
                 setIsProcessing(true);
-                setIsPaused(false);
             }
             return;
         }
@@ -392,7 +398,7 @@ const App = () => {
                     return next;
                 });
             }
-            if (!msgConversationId || msgConversationId === conversationId) {
+            if (!msgConversationId || msgConversationId === conversationIdRef.current) {
                 setIsPaused(true);
             }
             return;
@@ -510,13 +516,14 @@ const App = () => {
                 return msgs;
             };
 
-            const isCurrentConversation = !msgConversationId || msgConversationId === conversationId || !conversationId;
+            const currentConvId = conversationIdRef.current;
+            const isCurrentConversation = !msgConversationId || msgConversationId === currentConvId || !currentConvId;
 
             if (isCurrentConversation) {
                 setMessages(prev => updateMessagesWithThoughts(prev));
             }
 
-            const targetConvId = msgConversationId || conversationId;
+            const targetConvId = msgConversationId || currentConvId;
             if (targetConvId) {
                 setConversationStates(prev => {
                     const next = new Map(prev);
@@ -534,7 +541,7 @@ const App = () => {
 
                     next.set(targetConvId, {
                         isProcessing: true,
-                        isPaused: false,
+                        isPaused: existing?.isPaused ?? false, // Preserve paused state
                         latestReasoning: newReasoning || existing?.latestReasoning,
                         messages: updateMessagesWithThoughts(existingMessages),
                     });
@@ -564,7 +571,8 @@ const App = () => {
                 }];
             };
 
-            const isCurrentConversation = !completedConvId || completedConvId === conversationId || !conversationId;
+            const currentConvId = conversationIdRef.current;
+            const isCurrentConversation = !completedConvId || completedConvId === currentConvId || !currentConvId;
 
             if (isCurrentConversation) {
                 setConversationId(data.conversationId);
@@ -708,11 +716,31 @@ const App = () => {
 
     const pauseResearch = () => {
         if (!isConnected || !isProcessing || isPaused || !conversationId) return;
+        // Optimistically update UI immediately for better responsiveness
+        setIsPaused(true);
+        setConversationStates(prev => {
+            const next = new Map(prev);
+            const existing = next.get(conversationId);
+            if (existing) {
+                next.set(conversationId, { ...existing, isPaused: true });
+            }
+            return next;
+        });
         wsRef.current?.send(JSON.stringify({ type: 'pause', conversationId }));
     };
 
     const resumeResearch = (withMessage?: string) => {
         if (!isConnected || !isPaused || !conversationId) return;
+        // Optimistically update UI immediately for better responsiveness
+        setIsPaused(false);
+        setConversationStates(prev => {
+            const next = new Map(prev);
+            const existing = next.get(conversationId);
+            if (existing) {
+                next.set(conversationId, { ...existing, isPaused: false });
+            }
+            return next;
+        });
         wsRef.current?.send(JSON.stringify({ type: 'resume', message: withMessage, conversationId }));
     };
 
