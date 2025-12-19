@@ -13,6 +13,7 @@ import type {
     ConfirmationRequest,
     ConversationSummary,
     ConversationState,
+    ActiveTask,
 } from "./types";
 
 // Hooks
@@ -25,6 +26,7 @@ import { formatToolCallsForSidebar } from "./utils/formatting";
 import { Header, Sidebar, InputArea } from "./components/layout";
 import { MessageList } from "./components/messages";
 import { ToastContainer } from "./components/confirmation";
+import { HomePage } from "./components/home";
 
 const App = () => {
     // Core state
@@ -37,6 +39,11 @@ const App = () => {
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [exportingConversationId, setExportingConversationId] = useState<string | null>(null);
+    // Home page state - show home when no conversationId in URL
+    const [showHomePage, setShowHomePage] = useState<boolean>(() => {
+        const params = new URLSearchParams(window.location.search);
+        return !params.get('conversationId');
+    });
 
     // Multiple pending confirmations - one per conversation
     const [pendingConfirmations, setPendingConfirmations] = useState<Map<string, ConfirmationRequest>>(new Map());
@@ -46,6 +53,8 @@ const App = () => {
     // Refs
     const wsRef = useRef<WebSocket | null>(null);
     const prevConversationIdRef = useRef<string | undefined>(undefined);
+    // Track pending background task message (sent before conversation_created is received)
+    const pendingBackgroundMessageRef = useRef<string | null>(null);
 
     // Hooks
     const { textareaRef, scheduleTextareaFocus } = useFocusManagement();
@@ -391,21 +400,45 @@ const App = () => {
 
         if (message.type === 'conversation_created') {
             const newConvId = message.conversationId;
-            setConversationId(newConvId);
+            const isBackgroundTask = pendingBackgroundMessageRef.current !== null;
+            const pendingMsg = pendingBackgroundMessageRef.current;
+            pendingBackgroundMessageRef.current = null; // Clear the pending message
+
+            // For background tasks, don't switch to the new conversation
+            if (!isBackgroundTask) {
+                setConversationId(newConvId);
+            }
+
             if (newConvId) {
-                setMessages(currentMessages => {
-                    setConversationStates(prevStates => {
-                        const next = new Map(prevStates);
-                        next.set(newConvId, {
-                            isProcessing: true,
-                            isPaused: false,
-                            latestReasoning: undefined,
-                            messages: currentMessages,
-                        });
-                        return next;
+                // Build initial messages for the new conversation
+                let initialMessages: Message[] = [];
+
+                if (isBackgroundTask && pendingMsg) {
+                    // For background task: create user message + streaming assistant message
+                    initialMessages = [
+                        { id: crypto.randomUUID(), role: 'user', content: pendingMsg },
+                        { id: crypto.randomUUID(), role: 'assistant', content: '', thoughts: [], isStreaming: true },
+                    ];
+                } else {
+                    // For foreground: use current messages (already set by sendMessage)
+                    initialMessages = messages;
+                }
+
+                setConversationStates(prevStates => {
+                    const next = new Map(prevStates);
+                    next.set(newConvId, {
+                        isProcessing: true,
+                        isPaused: false,
+                        latestReasoning: undefined,
+                        messages: initialMessages,
                     });
-                    return currentMessages;
+                    return next;
                 });
+
+                // For foreground, also update local messages
+                if (!isBackgroundTask) {
+                    setMessages(initialMessages);
+                }
             }
             fetchConversations();
             return;
@@ -567,7 +600,37 @@ const App = () => {
 
     // ===== Conversation Actions =====
 
-    const selectConversation = (id: string) => {
+    // Derive active tasks from conversationStates for home page display
+    const getActiveTasks = (): ActiveTask[] => {
+        const activeTasks: ActiveTask[] = [];
+
+        conversationStates.forEach((state, convId) => {
+            if (state.isProcessing) {
+                const conv = conversations.find(c => c.id === convId);
+                // Get latest user message from conversation messages or title
+                const latestUserMessage = state.messages
+                    .filter(m => m.role === 'user')
+                    .pop()?.content || conv?.title || 'New task';
+
+                // Count tool calls (steps) from the streaming assistant message
+                const streamingMsg = state.messages.find(m => m.role === 'assistant' && m.isStreaming);
+                const stepCount = streamingMsg?.thoughts?.filter(t => t.type === 'tool_call').length || 0;
+
+                activeTasks.push({
+                    conversationId: convId,
+                    title: latestUserMessage,
+                    reasoning: state.latestReasoning,
+                    isPaused: state.isPaused,
+                    stepCount,
+                });
+            }
+        });
+
+        return activeTasks;
+    };
+
+    const goToHomePage = () => {
+        // Save current conversation state if needed
         if (conversationId) {
             const currentState = conversationStates.get(conversationId);
             if (currentState?.isProcessing) {
@@ -582,6 +645,33 @@ const App = () => {
             }
         }
 
+        setShowHomePage(true);
+        setConversationId(undefined);
+        setMessages([]);
+        setIsProcessing(false);
+        setIsPaused(false);
+
+        // Update URL to root
+        window.history.pushState({}, '', window.location.pathname);
+    };
+
+    const selectConversation = (id: string) => {
+        // Save current conversation state if it's processing
+        if (conversationId) {
+            const currentState = conversationStates.get(conversationId);
+            if (currentState?.isProcessing) {
+                setConversationStates(prev => {
+                    const next = new Map(prev);
+                    const existing = next.get(conversationId);
+                    if (existing) {
+                        next.set(conversationId, { ...existing, messages });
+                    }
+                    return next;
+                });
+            }
+        }
+
+        setShowHomePage(false);
         setConversationId(id);
         const convState = conversationStates.get(id);
         setIsProcessing(convState?.isProcessing ?? false);
@@ -593,6 +683,7 @@ const App = () => {
     };
 
     const startNewConversation = () => {
+        setShowHomePage(false);
         setConversationId(undefined);
         setIsProcessing(false);
         setIsPaused(false);
@@ -775,6 +866,22 @@ const App = () => {
         }
     };
 
+    // Send message as a new background task (Cmd+Enter)
+    const sendAsBackgroundTask = () => {
+        if (!input.trim() || !isConnected) return;
+
+        const userMsg = input.trim();
+        setInput("");
+
+        // Store pending message to associate when conversation_created arrives
+        pendingBackgroundMessageRef.current = userMsg;
+
+        // Send as a new conversation (no conversationId forces new task)
+        wsRef.current?.send(JSON.stringify({ message: userMsg }));
+
+        scheduleTextareaFocus();
+    };
+
     // ===== Render =====
 
     return (
@@ -802,9 +909,17 @@ const App = () => {
                     showModelDropdown={showModelDropdown}
                     setShowModelDropdown={setShowModelDropdown}
                     onSelectModel={selectModel}
+                    onGoHome={goToHomePage}
                 />
 
-                <MessageList messages={messages} />
+                {showHomePage ? (
+                    <HomePage
+                        activeTasks={getActiveTasks()}
+                        onSelectTask={selectConversation}
+                    />
+                ) : (
+                    <MessageList messages={messages} />
+                )}
 
                 <InputArea
                     input={input}
@@ -820,6 +935,7 @@ const App = () => {
                     pendingConfirmation={conversationId ? pendingConfirmations.get(conversationId) : undefined}
                     onConfirmationRespond={sendCurrentConfirmationResponse}
                     textareaRef={textareaRef}
+                    onBackgroundSend={sendAsBackgroundTask}
                 />
             </div>
 

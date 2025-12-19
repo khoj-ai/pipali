@@ -13,6 +13,7 @@ interface HeaderProps {
     showModelDropdown: boolean;
     setShowModelDropdown: (show: boolean) => void;
     onSelectModel: (model: ChatModelInfo) => void;
+    onGoHome: () => void;
 }
 
 export function Header({
@@ -24,6 +25,7 @@ export function Header({
     showModelDropdown,
     setShowModelDropdown,
     onSelectModel,
+    onGoHome,
 }: HeaderProps) {
     const modelDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -48,7 +50,20 @@ export function Header({
                     >
                         {sidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeft size={20} />}
                     </button>
-                    <h1 className="logo">Panini</h1>
+                    <h1
+                        className="logo clickable"
+                        onClick={onGoHome}
+                        role="button"
+                        tabIndex={0}
+                        onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                                e.preventDefault();
+                                onGoHome();
+                            }
+                        }}
+                    >
+                        Panini
+                    </h1>
                 </div>
 
                 <div className="header-right">

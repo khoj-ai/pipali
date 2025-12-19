@@ -19,6 +19,7 @@ interface InputAreaProps {
     pendingConfirmation?: ConfirmationRequest;
     onConfirmationRespond: (optionId: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
+    onBackgroundSend?: () => void;
 }
 
 export function InputArea({
@@ -34,6 +35,7 @@ export function InputArea({
     pendingConfirmation,
     onConfirmationRespond,
     textareaRef,
+    onBackgroundSend,
 }: InputAreaProps) {
     // Auto-resize textarea
     useEffect(() => {
@@ -59,7 +61,16 @@ export function InputArea({
                         ref={textareaRef}
                         value={input}
                         onChange={(e) => onInputChange(e.target.value)}
-                        onKeyDown={onKeyDown}
+                        onKeyDown={(e) => {
+                            // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux): background task
+                            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
+                                e.preventDefault();
+                                onBackgroundSend?.();
+                                return;
+                            }
+                            // Pass through to parent handler for other cases
+                            onKeyDown(e);
+                        }}
                         placeholder={isPaused ? "Type to resume with a message, or click play..." : isProcessing ? "Type to interrupt with a message..." : "Ask anything..."}
                         rows={1}
                         disabled={!isConnected}
@@ -125,7 +136,7 @@ export function InputArea({
                         ? "Research paused. Send a message or click play to resume."
                         : isProcessing
                             ? "Type to interrupt, or press Esc to pause"
-                            : "Press Enter to send, Shift + Enter for new line"
+                            : "Enter to send, Cmd+Enter for background task"
                     }
                 </p>
             </div>
