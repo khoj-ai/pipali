@@ -1037,7 +1037,7 @@ const MessageItem = ({ message }: { message: Message }) => {
 
             {/* Thoughts / Reasoning */}
             {message.thoughts && message.thoughts.length > 0 && (
-                <ThoughtsSection thoughts={message.thoughts} />
+                <ThoughtsSection thoughts={message.thoughts} isStreaming={message.isStreaming} />
             )}
 
             {/* Message Content */}
@@ -1056,13 +1056,16 @@ const MessageItem = ({ message }: { message: Message }) => {
     );
 };
 
-const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
+const ThoughtsSection = ({ thoughts, isStreaming }: { thoughts: Thought[], isStreaming?: boolean }) => {
     const [isExpanded, setIsExpanded] = useState(false);
 
     if (thoughts.length === 0) return null;
 
     const toolCallCount = thoughts.filter(t => t.type === 'tool_call').length;
     const thoughtCount = thoughts.filter(t => t.type === 'thought').length;
+
+    // Get the most recent thought/tool_call for streaming preview
+    const latestThought = thoughts.length > 0 ? thoughts[thoughts.length - 1] : null;
 
     // Build summary text
     const getSummary = () => {
@@ -1072,6 +1075,97 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
             return 'Reasoning';
         }
         return '';
+    };
+
+    // Render a single thought item (reusable for both expanded list and streaming preview)
+    const renderThoughtItem = (thought: Thought, idx: number, isPreview: boolean = false) => {
+        if (thought.type === 'thought' && thought.content) {
+            return (
+                <div key={thought.id} className={`thought-item reasoning ${thought.isInternalThought ? 'internal' : ''} ${isPreview ? 'preview' : ''}`}>
+                    <div className="thought-step">💭</div>
+                    <div className="thought-content">
+                        <div className={`thought-reasoning ${thought.isInternalThought ? 'italic' : ''}`}>
+                            {thought.content}
+                        </div>
+                    </div>
+                </div>
+            );
+        } else if (thought.type === 'tool_call') {
+            // Count tool call position (excluding reasoning thoughts)
+            const toolCallIdx = thoughts.slice(0, idx).filter(t => t.type === 'tool_call').length + 1;
+            const toolName = thought.toolName || '';
+            const formattedArgs = formatToolArgs(toolName, thought.toolArgs);
+            const friendlyToolName = {
+                "view_file": "Read",
+                "list_files": "List",
+                "grep_files": "Search",
+                "edit_file": "Edit",
+                "write_file": "Write",
+                "bash_command": "Shell",
+            }[toolName] || formatToolName(toolName);
+
+            // Check if this is an edit/write operation with diff info
+            const isEditOp = toolName === 'edit_file' && thought.toolArgs?.old_string && thought.toolArgs?.new_string;
+            const isWriteOp = toolName === 'write_file' && thought.toolArgs?.content;
+            const isGrepOp = toolName === 'grep_files' && thought.toolResult;
+            const isListOp = toolName === 'list_files' && thought.toolResult;
+            const isBashOp = toolName === 'bash_command' && thought.toolArgs?.command;
+
+            // Determine success/error status for step indicator
+            const stepStatus = getToolResultStatus(thought.toolResult, toolName);
+
+            return (
+                <div key={thought.id} className={`thought-item ${isPreview ? 'preview' : ''}`}>
+                    <div className={`thought-step ${stepStatus}`}>{toolCallIdx}</div>
+                    <div className="thought-content">
+                        <div className="thought-tool">
+                            {friendlyToolName}
+                            {formattedArgs && (
+                                <span className="thought-args"> {formattedArgs}</span>
+                            )}
+                        </div>
+                        {/* Show diff view for edit operations */}
+                        {isEditOp && (
+                            <ThoughtDiffView
+                                oldText={thought.toolArgs.old_string}
+                                newText={thought.toolArgs.new_string}
+                            />
+                        )}
+                        {/* Show content preview for write operations */}
+                        {isWriteOp && (
+                            <ThoughtWriteView
+                                content={thought.toolArgs.content}
+                            />
+                        )}
+                        {/* Show formatted grep results */}
+                        {isGrepOp && thought.toolResult && (
+                            <GrepResultView result={thought.toolResult} />
+                        )}
+                        {/* Show formatted list results */}
+                        {isListOp && thought.toolResult && (
+                            <ListResultView result={thought.toolResult} />
+                        )}
+                        {/* Show bash command view */}
+                        {isBashOp && (
+                            <BashCommandView
+                                command={thought.toolArgs.command}
+                                justification={thought.toolArgs.justification}
+                                cwd={thought.toolArgs.cwd}
+                                result={thought.toolResult}
+                            />
+                        )}
+                        {/* Show regular result for other tools */}
+                        {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isBashOp && thought.toolResult && (
+                            <pre className="thought-result">
+                                {thought.toolResult.slice(0, 200)}
+                                {thought.toolResult.length > 200 && '...'}
+                            </pre>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+        return null;
     };
 
     return (
@@ -1089,98 +1183,17 @@ const ThoughtsSection = ({ thoughts }: { thoughts: Thought[] }) => {
                 />
             </button>
 
+            {/* Show streaming preview of latest thought when not expanded */}
+            {isStreaming && !isExpanded && latestThought && (
+                <div className="thoughts-preview">
+                    {renderThoughtItem(latestThought, thoughts.length - 1, true)}
+                </div>
+            )}
+
             {isExpanded && (
                 <div className="thoughts-list">
                     {/* Render thoughts in the order they appear */}
-                    {thoughts.map((thought, idx) => {
-                        if (thought.type === 'thought' && thought.content) {
-                            return (
-                                <div key={thought.id} className={`thought-item reasoning ${thought.isInternalThought ? 'internal' : ''}`}>
-                                    <div className="thought-step">💭</div>
-                                    <div className="thought-content">
-                                        <div className={`thought-reasoning ${thought.isInternalThought ? 'italic' : ''}`}>
-                                            {thought.content}
-                                        </div>
-                                    </div>
-                                </div>
-                            );
-                        } else if (thought.type === 'tool_call') {
-                            // Count tool call position (excluding reasoning thoughts)
-                            const toolCallIdx = thoughts.slice(0, idx).filter(t => t.type === 'tool_call').length + 1;
-                            const toolName = thought.toolName || '';
-                            const formattedArgs = formatToolArgs(toolName, thought.toolArgs);
-                            const friendlyToolName = {
-                                "view_file": "Read",
-                                "list_files": "List",
-                                "grep_files": "Search",
-                                "edit_file": "Edit",
-                                "write_file": "Write",
-                                "bash_command": "Shell",
-                            }[toolName] || formatToolName(toolName);
-
-                            // Check if this is an edit/write operation with diff info
-                            const isEditOp = toolName === 'edit_file' && thought.toolArgs?.old_string && thought.toolArgs?.new_string;
-                            const isWriteOp = toolName === 'write_file' && thought.toolArgs?.content;
-                            const isGrepOp = toolName === 'grep_files' && thought.toolResult;
-                            const isListOp = toolName === 'list_files' && thought.toolResult;
-                            const isBashOp = toolName === 'bash_command' && thought.toolArgs?.command;
-
-                            // Determine success/error status for step indicator
-                            const stepStatus = getToolResultStatus(thought.toolResult, toolName);
-
-                            return (
-                                <div key={thought.id} className="thought-item">
-                                    <div className={`thought-step ${stepStatus}`}>{toolCallIdx}</div>
-                                    <div className="thought-content">
-                                        <div className="thought-tool">
-                                            {friendlyToolName}
-                                            {formattedArgs && (
-                                                <span className="thought-args"> {formattedArgs}</span>
-                                            )}
-                                        </div>
-                                        {/* Show diff view for edit operations */}
-                                        {isEditOp && (
-                                            <ThoughtDiffView
-                                                oldText={thought.toolArgs.old_string}
-                                                newText={thought.toolArgs.new_string}
-                                            />
-                                        )}
-                                        {/* Show content preview for write operations */}
-                                        {isWriteOp && (
-                                            <ThoughtWriteView
-                                                content={thought.toolArgs.content}
-                                            />
-                                        )}
-                                        {/* Show formatted grep results */}
-                                        {isGrepOp && thought.toolResult && (
-                                            <GrepResultView result={thought.toolResult} />
-                                        )}
-                                        {/* Show formatted list results */}
-                                        {isListOp && thought.toolResult && (
-                                            <ListResultView result={thought.toolResult} />
-                                        )}
-                                        {/* Show bash command view */}
-                                        {isBashOp && (
-                                            <BashCommandView
-                                                command={thought.toolArgs.command}
-                                                justification={thought.toolArgs.justification}
-                                                cwd={thought.toolArgs.cwd}
-                                                result={thought.toolResult}
-                                            />
-                                        )}
-                                        {/* Show regular result for other tools */}
-                                        {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isBashOp && thought.toolResult && (
-                                            <pre className="thought-result">
-                                                {thought.toolResult.slice(0, 200)}
-                                                {thought.toolResult.length > 200 && '...'}
-                                            </pre>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        }
-                        return null;
-                    })}
+                    {thoughts.map((thought, idx) => renderThoughtItem(thought, idx, false))}
                 </div>
             )}
         </div>

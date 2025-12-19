@@ -617,6 +617,30 @@ body {
     transform: rotate(180deg);
 }
 
+/* Streaming preview - shows latest thought while streaming */
+.thoughts-preview {
+    margin-top: 12px;
+    padding-left: 8px;
+    border-left: 2px solid var(--border-color);
+}
+
+.thoughts-preview .thought-item {
+    padding-left: 12px;
+}
+
+.thoughts-preview .thought-step {
+    animation: pulse-step 1s ease-in-out infinite;
+}
+
+@keyframes pulse-step {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.4;
+    }
+}
+
 .thoughts-list {
     margin-top: 12px;
     padding-left: 8px;
