@@ -416,34 +416,39 @@ const App = () => {
             }
 
             if (newConvId) {
-                // Build initial messages for the new conversation
-                let initialMessages: Message[] = [];
-
                 if (isBackgroundTask && pendingMsg) {
                     // For background task: create user message + streaming assistant message
-                    initialMessages = [
-                        { id: crypto.randomUUID(), role: 'user', content: pendingMsg },
-                        { id: crypto.randomUUID(), role: 'assistant', content: '', thoughts: [], isStreaming: true },
+                    const initialMessages = [
+                        { id: crypto.randomUUID(), role: 'user' as const, content: pendingMsg },
+                        { id: crypto.randomUUID(), role: 'assistant' as const, content: '', thoughts: [], isStreaming: true },
                     ];
-                } else {
-                    // For foreground: use current messages (already set by sendMessage)
-                    initialMessages = messages;
-                }
-
-                setConversationStates(prevStates => {
-                    const next = new Map(prevStates);
-                    next.set(newConvId, {
-                        isProcessing: true,
-                        isPaused: false,
-                        latestReasoning: undefined,
-                        messages: initialMessages,
+                    setConversationStates(prevStates => {
+                        const next = new Map(prevStates);
+                        next.set(newConvId, {
+                            isProcessing: true,
+                            isPaused: false,
+                            latestReasoning: undefined,
+                            messages: initialMessages,
+                        });
+                        return next;
                     });
-                    return next;
-                });
-
-                // For foreground, also update local messages
-                if (!isBackgroundTask) {
-                    setMessages(initialMessages);
+                } else {
+                    // For foreground: use current messages state (via functional update to avoid stale closure)
+                    // Don't overwrite messages - they were already set by sendMessage()
+                    // Just sync conversationStates with current messages
+                    setMessages(currentMessages => {
+                        setConversationStates(prevStates => {
+                            const next = new Map(prevStates);
+                            next.set(newConvId, {
+                                isProcessing: true,
+                                isPaused: false,
+                                latestReasoning: undefined,
+                                messages: currentMessages,
+                            });
+                            return next;
+                        });
+                        return currentMessages; // Return unchanged - don't overwrite
+                    });
                 }
             }
             fetchConversations();
