@@ -2,8 +2,8 @@ import type { ToolDefinition, ChatMessage } from "../conversation";
 import type { ToolDefinition as LcToolDefinition } from '@langchain/core/language_models/base';
 import { HumanMessage, ToolMessage } from '@langchain/core/messages';
 
-export function toOpenaiTools(tools?: ToolDefinition[]): LcToolDefinition[] {
-    if (!tools) return [];
+export function toOpenaiTools(tools?: ToolDefinition[]): LcToolDefinition[] | undefined {
+    if (!tools) return undefined;
     return tools.map((tool) => ({
         type: "function",
         function: {

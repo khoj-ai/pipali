@@ -26,7 +26,7 @@ export async function sendMessageToGpt(
         },
     }).withConfig({
         tools: lcTools,
-        tool_choice: toolChoice,
+        tool_choice: lcTools ? toolChoice : undefined,
     });
 
     const response = await chat.invoke(formattedMessages, modelKwargs);
