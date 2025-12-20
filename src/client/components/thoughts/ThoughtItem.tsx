@@ -42,12 +42,14 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
         const isListOp = toolName === 'list_files' && thought.toolResult;
         const isBashOp = toolName === 'bash_command' && thought.toolArgs?.command;
 
-        // Determine success/error status for step indicator
-        const stepStatus = getToolResultStatus(thought.toolResult, toolName);
+        // Determine success/error status for step indicator (pending takes precedence)
+        const stepStatus = thought.isPending ? 'pending' : getToolResultStatus(thought.toolResult, toolName);
 
         return (
-            <div className={`thought-item ${isPreview ? 'preview' : ''}`}>
-                <div className={`thought-step ${stepStatus}`}>{stepNumber}</div>
+            <div className={`thought-item ${isPreview ? 'preview' : ''} ${thought.isPending ? 'pending' : ''}`}>
+                <div className={`thought-step ${stepStatus}`}>
+                    {stepNumber}
+                </div>
                 <div className="thought-content">
                     <div className="thought-tool">
                         {friendlyToolName}

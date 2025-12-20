@@ -25,6 +25,8 @@ export interface ResearchIteration {
         requestId: string;
         toolCallId: string;
     };
+    /** True when yielding tool calls before execution (no results yet) */
+    isToolCallStart?: boolean;
 }
 
 /**

@@ -467,11 +467,13 @@ const App = () => {
             return;
         }
 
-        if (message.type === 'iteration') {
+        // Handle tool call start - add pending tool calls before execution
+        if (message.type === 'tool_call_start') {
             const { data } = message;
 
-            const createThoughts = (): Thought[] => {
+            const createPendingThoughts = (): Thought[] => {
                 const newThoughts: Thought[] = [];
+                // Add thought/message if present
                 if (data.message && data.toolCalls?.length > 0) {
                     newThoughts.push({
                         id: crypto.randomUUID(),
@@ -487,29 +489,25 @@ const App = () => {
                     });
                 }
 
-                for (const toolCall of data.toolCalls) {
-                    const toolResult = data.toolResults?.find(
-                        (tr: any) => tr.source_call_id === toolCall.tool_call_id
-                    )?.content;
-                    const matchingToolContent = !!toolResult && typeof toolResult !== 'string' ? JSON.stringify(toolResult) : toolResult;
-
+                // Add tool calls as pending (no results yet)
+                for (const toolCall of data.toolCalls || []) {
                     newThoughts.push({
                         id: toolCall.tool_call_id || crypto.randomUUID(),
                         type: 'tool_call',
                         content: '',
                         toolName: toolCall.function_name,
                         toolArgs: toolCall.arguments,
-                        toolResult: matchingToolContent,
+                        isPending: true,
                     });
                 }
 
                 return newThoughts;
             };
 
-            const updateMessagesWithThoughts = (msgs: Message[]): Message[] => {
+            const updateMessagesWithPendingThoughts = (msgs: Message[]): Message[] => {
                 const lastMsg = msgs[msgs.length - 1];
                 if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-                    const newThoughts = createThoughts();
+                    const newThoughts = createPendingThoughts();
                     return msgs.map(msg =>
                         msg.id === lastMsg.id
                             ? { ...msg, thoughts: [...(msg.thoughts || []), ...newThoughts] }
@@ -523,7 +521,7 @@ const App = () => {
             const isCurrentConversation = !msgConversationId || msgConversationId === currentConvId || !currentConvId;
 
             if (isCurrentConversation) {
-                setMessages(prev => updateMessagesWithThoughts(prev));
+                setMessages(prev => updateMessagesWithPendingThoughts(prev));
             }
 
             const targetConvId = msgConversationId || currentConvId;
@@ -546,7 +544,62 @@ const App = () => {
                         isProcessing: true,
                         isPaused: existing?.isPaused ?? false, // Preserve paused state
                         latestReasoning: newReasoning || existing?.latestReasoning,
-                        messages: updateMessagesWithThoughts(existingMessages),
+                        messages: updateMessagesWithPendingThoughts(existingMessages),
+                    });
+                    return next;
+                });
+            }
+            return;
+        }
+
+        // Handle iteration with results - update pending tool calls with results
+        if (message.type === 'iteration') {
+            const { data } = message;
+
+            const updateMessagesWithResults = (msgs: Message[]): Message[] => {
+                const lastMsg = msgs[msgs.length - 1];
+                if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
+                    // Update existing pending tool calls with results
+                    const updatedThoughts = (lastMsg.thoughts || []).map(thought => {
+                        if (thought.type === 'tool_call' && thought.isPending) {
+                            const toolResult = data.toolResults?.find(
+                                (tr: any) => tr.source_call_id === thought.id
+                            )?.content;
+                            if (toolResult !== undefined) {
+                                const matchingToolContent = typeof toolResult !== 'string' ? JSON.stringify(toolResult) : toolResult;
+                                return { ...thought, toolResult: matchingToolContent, isPending: false };
+                            }
+                        }
+                        return thought;
+                    });
+                    return msgs.map(msg =>
+                        msg.id === lastMsg.id
+                            ? { ...msg, thoughts: updatedThoughts }
+                            : msg
+                    );
+                }
+                return msgs;
+            };
+
+            const currentConvId = conversationIdRef.current;
+            const isCurrentConversation = !msgConversationId || msgConversationId === currentConvId || !currentConvId;
+
+            if (isCurrentConversation) {
+                setMessages(prev => updateMessagesWithResults(prev));
+            }
+
+            const targetConvId = msgConversationId || currentConvId;
+            if (targetConvId) {
+                setConversationStates(prev => {
+                    const next = new Map(prev);
+                    const existing = next.get(targetConvId);
+                    const existingMessages = existing?.messages || [];
+
+                    next.set(targetConvId, {
+                        isProcessing: true,
+                        isPaused: false,
+                        latestReasoning: existing?.latestReasoning,
+                        messages: updateMessagesWithResults(existingMessages),
                     });
                     return next;
                 });

@@ -490,6 +490,9 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             throw new ResearchPausedError();
         }
 
+        // Yield tool calls before execution so UI can show current step
+        yield { ...iteration, isToolCallStart: true };
+
         // Execute all tools in parallel with confirmation context
         const executionContext: ToolExecutionContext = {
             confirmation: config.confirmationContext,

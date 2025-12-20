@@ -990,6 +990,23 @@ body {
     color: var(--text-secondary);
 }
 
+.thought-step.pending {
+    background: #fef3c7;
+    color: #92400e;
+    animation: pulse-pending 1s ease-in-out infinite;
+}
+
+@keyframes pulse-pending {
+    0%, 100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+    50% {
+        opacity: 0.5;
+        transform: scale(0.8);
+    }
+}
+
 /* Grep results view */
 .thought-grep {
     margin-top: 8px;

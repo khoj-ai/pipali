@@ -16,4 +16,5 @@ export type Thought = {
     toolArgs?: any;
     toolResult?: string;
     isInternalThought?: boolean; // True for model's internal reasoning (rendered in italics)
+    isPending?: boolean; // True for tool calls that are currently executing (no results yet)
 };

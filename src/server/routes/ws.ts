@@ -192,6 +192,19 @@ async function runResearch(
                 console.warn(`[WS] ⚠️ Warning: ${iteration.warning}`);
             }
 
+            // Handle tool call start (before execution) - send immediately to show current step
+            if (iteration.isToolCallStart) {
+                sendToClient(ws, {
+                    type: 'tool_call_start',
+                    data: {
+                        thought: iteration.thought,
+                        message: iteration.message,
+                        toolCalls: iteration.toolCalls,
+                    }
+                }, conversationId);
+                continue;
+            }
+
             // Check for text tool (final response)
             const textTool = iteration.toolCalls.find(tc => tc.function_name === 'text');
             if (textTool) {
@@ -223,7 +236,7 @@ async function runResearch(
                     iteration.thought,
                 );
 
-                // Send iteration update to client
+                // Send iteration update to client with results
                 sendToClient(ws, { type: 'iteration', data: iteration }, conversationId);
             } else {
                 console.warn(`[WS] ⚠️ No tool calls or results in iteration`);
