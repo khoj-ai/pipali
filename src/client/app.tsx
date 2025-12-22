@@ -27,6 +27,10 @@ import { Header, Sidebar, InputArea } from "./components/layout";
 import { MessageList } from "./components/messages";
 import { ToastContainer } from "./components/confirmation";
 import { HomePage } from "./components/home";
+import { SkillsPage } from "./components/skills";
+
+// Page types
+type PageType = 'home' | 'chat' | 'skills';
 
 // UUID generator that works in non-secure contexts (e.g., HTTP on non-localhost)
 function generateUUID(): string {
@@ -53,10 +57,12 @@ const App = () => {
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [sidebarOpen, setSidebarOpen] = useState(true);
     const [exportingConversationId, setExportingConversationId] = useState<string | null>(null);
-    // Home page state - show home when no conversationId in URL
-    const [showHomePage, setShowHomePage] = useState<boolean>(() => {
+    // Current page state - determine from URL
+    const [currentPage, setCurrentPage] = useState<PageType>(() => {
+        const path = window.location.pathname;
+        if (path === '/skills') return 'skills';
         const params = new URLSearchParams(window.location.search);
-        return !params.get('conversationId');
+        return params.get('conversationId') ? 'chat' : 'home';
     });
 
     // Multiple pending confirmations - one per conversation
@@ -723,14 +729,40 @@ const App = () => {
             }
         }
 
-        setShowHomePage(true);
+        setCurrentPage('home');
         setConversationId(undefined);
         setMessages([]);
         setIsProcessing(false);
         setIsPaused(false);
 
         // Update URL to root
-        window.history.pushState({}, '', window.location.pathname);
+        window.history.pushState({}, '', '/');
+    };
+
+    const goToSkillsPage = () => {
+        // Save current conversation state if needed
+        if (conversationId) {
+            const currentState = conversationStates.get(conversationId);
+            if (currentState?.isProcessing) {
+                setConversationStates(prev => {
+                    const next = new Map(prev);
+                    const existing = next.get(conversationId);
+                    if (existing) {
+                        next.set(conversationId, { ...existing, messages });
+                    }
+                    return next;
+                });
+            }
+        }
+
+        setCurrentPage('skills');
+        setConversationId(undefined);
+        setMessages([]);
+        setIsProcessing(false);
+        setIsPaused(false);
+
+        // Update URL to /skills
+        window.history.pushState({}, '', '/skills');
     };
 
     const selectConversation = (id: string) => {
@@ -749,7 +781,7 @@ const App = () => {
             }
         }
 
-        setShowHomePage(false);
+        setCurrentPage('chat');
         setConversationId(id);
         const convState = conversationStates.get(id);
         setIsProcessing(convState?.isProcessing ?? false);
@@ -761,7 +793,7 @@ const App = () => {
     };
 
     const startNewConversation = () => {
-        setShowHomePage(false);
+        setCurrentPage('chat');
         setConversationId(undefined);
         setIsProcessing(false);
         setIsPaused(false);
@@ -939,7 +971,7 @@ const App = () => {
         setMessages(newMessages);
         setIsProcessing(true);
         // Switch to conversation view when sending from home page
-        setShowHomePage(false);
+        setCurrentPage('chat');
 
         if (conversationId) {
             setConversationStates(prev => {
@@ -993,10 +1025,12 @@ const App = () => {
                 pendingConfirmations={pendingConfirmations}
                 currentConversationId={conversationId}
                 exportingConversationId={exportingConversationId}
+                currentPage={currentPage}
                 onNewChat={startNewConversation}
                 onSelectConversation={selectConversation}
                 onDeleteConversation={deleteConversation}
                 onExportConversation={exportConversationAsATIF}
+                onGoToSkills={goToSkillsPage}
                 onClose={() => setSidebarOpen(false)}
             />
 
@@ -1013,12 +1047,16 @@ const App = () => {
                     onGoHome={goToHomePage}
                 />
 
-                {showHomePage ? (
+                {currentPage === 'home' && (
                     <HomePage
                         activeTasks={getActiveTasks()}
                         onSelectTask={selectConversation}
                     />
-                ) : (
+                )}
+                {currentPage === 'skills' && (
+                    <SkillsPage />
+                )}
+                {currentPage === 'chat' && (
                     <MessageList messages={messages} />
                 )}
 

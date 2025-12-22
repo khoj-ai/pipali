@@ -11,7 +11,7 @@ import { getDefaultUser, maxIterations } from '../utils';
 import { research } from '../processor/director';
 import { atifConversationService } from '../processor/conversation/atif/atif.service';
 import { getActiveStatus } from '../sessions';
-import { loadSkills, getLoadedSkills } from '../skills';
+import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill } from '../skills';
 
 const api = new Hono().basePath('/api');
 
@@ -404,6 +404,87 @@ api.post('/skills/reload', async (c) => {
         skills: result.skills,
         errors: result.errors,
     });
+});
+
+// Create a new skill
+const createSkillSchema = z.object({
+    name: z.string().min(1).max(64),
+    description: z.string().min(1).max(1024),
+    instructions: z.string().optional(),
+    source: z.enum(['global', 'local']),
+});
+
+api.post('/skills', zValidator('json', createSkillSchema), async (c) => {
+    const input = c.req.valid('json');
+    console.log(`[API] ✨ Creating skill "${input.name}" (${input.source})`);
+
+    const result = await createSkill(input);
+
+    if (!result.success) {
+        console.warn(`[API] ⚠️  Failed to create skill: ${result.error}`);
+        return c.json({ error: result.error }, 400);
+    }
+
+    // Reload skills to include the new one
+    await loadSkills();
+
+    console.log(`[API] 🎯 Created skill "${input.name}"`);
+    return c.json({ success: true, skill: result.skill });
+});
+
+// Get a specific skill with its instructions
+api.get('/skills/:name', async (c) => {
+    const name = c.req.param('name');
+    console.log(`[API] 📖 Getting skill "${name}"`);
+
+    const result = await getSkill(name);
+
+    if (!result.success) {
+        return c.json({ error: result.error }, 404);
+    }
+
+    return c.json({
+        skill: result.skill,
+        instructions: result.instructions,
+    });
+});
+
+// Update a skill
+const updateSkillSchema = z.object({
+    description: z.string().min(1).max(1024),
+    instructions: z.string().optional(),
+});
+
+api.put('/skills/:name', zValidator('json', updateSkillSchema), async (c) => {
+    const name = c.req.param('name');
+    const input = c.req.valid('json');
+    console.log(`[API] ✏️  Updating skill "${name}"`);
+
+    const result = await updateSkill(name, input);
+
+    if (!result.success) {
+        console.warn(`[API] ⚠️  Failed to update skill: ${result.error}`);
+        return c.json({ error: result.error }, 400);
+    }
+
+    console.log(`[API] ✅ Updated skill "${name}"`);
+    return c.json({ success: true, skill: result.skill });
+});
+
+// Delete a skill
+api.delete('/skills/:name', async (c) => {
+    const name = c.req.param('name');
+    console.log(`[API] 🗑️  Deleting skill "${name}"`);
+
+    const result = await deleteSkill(name);
+
+    if (!result.success) {
+        console.warn(`[API] ⚠️  Failed to delete skill: ${result.error}`);
+        return c.json({ error: result.error }, 400);
+    }
+
+    console.log(`[API] ✅ Deleted skill "${name}"`);
+    return c.json({ success: true });
 });
 
 // Mount the OpenAPI documentation
