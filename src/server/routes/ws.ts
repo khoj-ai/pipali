@@ -387,6 +387,8 @@ export const websocketHandler = {
     },
     open(_ws: ServerWebSocket<WebSocketData>) {
         console.log("[WS] 🔌 Client connected");
+        // Reset mock state for test isolation (no-op in production)
+        globalThis.__paniniMockReset?.();
     },
     close(ws: ServerWebSocket<WebSocketData>) {
         console.log("[WS] 🔌 Client disconnected");

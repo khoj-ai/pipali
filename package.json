@@ -11,9 +11,14 @@
     "build:darwin-x64": "bun run scripts/build.ts --target=bun-darwin-x64",
     "build:linux-x64": "bun run scripts/build.ts --target=bun-linux-x64",
     "build:linux-arm64": "bun run scripts/build.ts --target=bun-linux-arm64",
-    "build:windows-x64": "bun run scripts/build.ts --target=bun-windows-x64"
+    "build:windows-x64": "bun run scripts/build.ts --target=bun-windows-x64",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:debug": "playwright test --debug"
   },
   "devDependencies": {
+    "@playwright/test": "^1.48.0",
     "@types/bun": "latest",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3"

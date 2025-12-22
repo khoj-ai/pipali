@@ -5,6 +5,15 @@ import { generateChatmlMessagesWithContext } from './utils';
 import { sendMessageToGpt } from './openai';
 import type { ATIFTrajectory } from './atif/atif.types';
 
+// Test mock interface - set by E2E test preload scripts via globalThis
+declare global {
+    var __paniniMockLLM: ((query: string) => {
+        message?: string;
+        raw: Array<{ name: string; args: Record<string, unknown>; id: string }>;
+        thought?: string;
+    }) | undefined;
+}
+
 export async function sendMessageToModel(
     // Context
     query: string,
@@ -20,6 +29,13 @@ export async function sendMessageToModel(
     fastMode: boolean = false,
     user?: typeof User.$inferSelect,
 ) {
+    // Check for test mock (E2E tests inject this via preload)
+    if (globalThis.__paniniMockLLM) {
+        const actualQuery = query || history?.steps?.findLast(s => s.source === 'user')?.message || '';
+        console.log(`[Model] 🧪 Using mock for: "${actualQuery.substring(0, 50)}..."`);
+        return globalThis.__paniniMockLLM(actualQuery);
+    }
+
     const chatModelWithApi: ChatModelWithApi | undefined = await getDefaultChatModel(user);
 
     if (!chatModelWithApi) {

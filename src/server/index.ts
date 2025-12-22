@@ -152,6 +152,10 @@ async function main() {
         console.log("Running in compiled mode - using embedded assets.");
     }
 
+  // Disable development mode (hot reload) in test mode or compiled binary
+  // This prevents Bun from restarting the server when files change during tests
+  const isDevelopmentMode = !IS_COMPILED_BINARY && process.env.PANINI_TEST_MODE !== 'true';
+
   const server = Bun.serve<WebSocketData, any>({
     async fetch(req, server) {
         const url = new URL(req.url);
@@ -182,7 +186,7 @@ async function main() {
     websocket: websocketHandler,
     hostname: config.host,
     port: config.port,
-    development: !IS_COMPILED_BINARY,
+    development: isDevelopmentMode,
   });
 
   console.log(`Server listening on http://${config.host}:${server.port}`);
