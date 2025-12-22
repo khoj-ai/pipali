@@ -34,7 +34,13 @@ if (IS_COMPILED_BINARY) {
 } else {
     // Development mode - serve from disk
     app.get('/', serveStatic({ path: './src/client/index.html' }));
+    // Serve static files (CSS, JS, etc.)
     app.get('*', serveStatic({ root: './src/client' }));
+    // Fallback for SPA routing - serve index.html for any unmatched routes
+    app.get('*', async (c) => {
+        const html = await Bun.file('./src/client/index.html').text();
+        return c.html(html);
+    });
 }
 
 export default app;
