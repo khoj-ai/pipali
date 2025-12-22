@@ -87,8 +87,10 @@ export interface ConfirmationRequest {
 export interface ConfirmationResponse {
     /** Must match the requestId from ConfirmationRequest */
     requestId: string;
-    /** ID of the selected option */
+    /** ID of the selected option ('yes', 'yes_dont_ask', 'no', or 'guidance') */
     selectedOptionId: string;
+    /** User-provided guidance/alternative instructions (sent when selectedOptionId is 'guidance') */
+    guidance?: string;
     /** Additional data for extended input types */
     inputData?: {
         /** For multi_select: array of selected option IDs */
@@ -111,6 +113,7 @@ export const CONFIRMATION_OPTIONS = {
     YES: 'yes',
     YES_DONT_ASK: 'yes_dont_ask',
     NO: 'no',
+    GUIDANCE: 'guidance',  // User provided alternative instructions (implicitly declines)
 } as const;
 
 /**
@@ -139,6 +142,7 @@ export function createStandardConfirmationOptions(): ConfirmationOption[] {
         },
     ];
 }
+
 
 /**
  * Result of a confirmation check

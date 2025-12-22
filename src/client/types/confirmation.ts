@@ -34,3 +34,16 @@ export type ConfirmationRequest = {
     defaultOptionId?: string;
     timeoutMs?: number;
 };
+
+// Source of the confirmation - determines visual treatment and response channel
+export type ConfirmationSource =
+    | { type: 'chat'; conversationId: string; conversationTitle: string }
+    | { type: 'automation'; confirmationId: string; automationId: string; automationName: string; executionId: string };
+
+// Pending confirmation type for both chat and automation confirmations
+export type PendingConfirmation = {
+    key: string;                    // Unique key for React
+    request: ConfirmationRequest;
+    source: ConfirmationSource;
+    expiresAt?: string;             // Optional expiration (automations have this)
+};

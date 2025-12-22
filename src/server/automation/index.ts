@@ -14,6 +14,7 @@ export {
     cancelExecution,
     getRunningExecutionCount,
     getQueueLength,
+    cleanupOrphanedExecutions,
 } from './executor';
 
 export {
@@ -36,6 +37,11 @@ export {
  * Start the automation system
  */
 export async function startAutomationSystem(): Promise<void> {
+    // Clean up any orphaned executions from previous server instance
+    const { cleanupOrphanedExecutions } = await import('./executor');
+    await cleanupOrphanedExecutions();
+
+    // Start the schedulers
     const { startSchedulers } = await import('./scheduler');
     await startSchedulers();
     console.log('[Automation] System started');

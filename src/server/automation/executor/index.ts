@@ -13,7 +13,8 @@ import { atifConversationService } from '../../processor/conversation/atif/atif.
 import type { TriggerEventData } from '../types';
 import type { ConfirmationContext } from '../../processor/confirmation';
 import { createEmptyPreferences } from '../../processor/confirmation';
-import type { ConfirmationRequest, ConfirmationResponse, ConfirmationPreferences } from '../../processor/confirmation/confirmation.types';
+import type { ConfirmationRequest, ConfirmationResponse } from '../../processor/confirmation/confirmation.types';
+import { createStandardConfirmationOptions } from '../../processor/confirmation/confirmation.types';
 
 // Max concurrent executions
 const MAX_CONCURRENT = 3;
@@ -245,12 +246,18 @@ function createAutomationConfirmationContext(executionId: string): ConfirmationC
                 .set({ status: 'awaiting_confirmation' })
                 .where(eq(AutomationExecution.id, executionId));
 
+            // Use standard options (guidance is now sent independently via the guidance field)
+            const automationRequest: ConfirmationRequest = {
+                ...request,
+                options: createStandardConfirmationOptions(),
+            };
+
             // Store pending confirmation in database
             const expiresAt = new Date(Date.now() + CONFIRMATION_TIMEOUT_MS);
             const insertResult = await db.insert(PendingConfirmation)
                 .values({
                     executionId,
-                    request,
+                    request: automationRequest,
                     status: 'pending',
                     expiresAt,
                 })
@@ -459,49 +466,55 @@ export async function respondToConfirmation(
     confirmationId: string,
     response: ConfirmationResponse
 ): Promise<boolean> {
-    const pending = pendingConfirmations.get(confirmationId);
-    if (!pending) {
-        // Check if it exists in DB but expired
-        const [dbPending] = await db.select()
-            .from(PendingConfirmation)
-            .where(eq(PendingConfirmation.id, confirmationId));
+    // Check if it exists in DB first
+    const [dbPending] = await db.select()
+        .from(PendingConfirmation)
+        .where(eq(PendingConfirmation.id, confirmationId));
 
-        if (!dbPending) {
-            console.error(`[Automation] Confirmation not found: ${confirmationId}`);
-            return false;
-        }
-
-        if (dbPending.status !== 'pending') {
-            console.error(`[Automation] Confirmation already processed: ${confirmationId}`);
-            return false;
-        }
-
-        // Expired but not cleaned up yet
+    if (!dbPending) {
+        console.error(`[Automation] Confirmation not found: ${confirmationId}`);
         return false;
     }
 
-    // Update database
-    const status = response.selectedOptionId === 'yes' || response.selectedOptionId === 'yes_dont_ask'
-        ? 'approved'
-        : 'denied';
+    if (dbPending.status !== 'pending') {
+        console.error(`[Automation] Confirmation already processed: ${confirmationId}`);
+        return false;
+    }
+
+    // Determine status based on response
+    const isApproved = response.selectedOptionId === 'yes' || response.selectedOptionId === 'yes_dont_ask';
+    const hasGuidance = response.selectedOptionId === 'guidance';
+    const confirmationStatus = isApproved || hasGuidance ? 'approved' : 'denied';
 
     await db.update(PendingConfirmation)
         .set({
-            status,
+            status: confirmationStatus,
             respondedAt: new Date(),
         })
         .where(eq(PendingConfirmation.id, confirmationId));
 
-    // Update execution status back to running if approved
-    if (status === 'approved') {
+    // Update execution status based on response
+    if (isApproved || hasGuidance) {
+        // Either approved or has guidance - continue execution
         await db.update(AutomationExecution)
             .set({ status: 'running' })
-            .where(eq(AutomationExecution.id, pending.executionId));
+            .where(eq(AutomationExecution.id, dbPending.executionId));
+    } else {
+        // Hard denial - mark execution as cancelled
+        await db.update(AutomationExecution)
+            .set({ status: 'cancelled', completedAt: new Date(), errorMessage: 'User denied confirmation' })
+            .where(eq(AutomationExecution.id, dbPending.executionId));
     }
 
-    // Resolve the promise
-    pendingConfirmations.delete(confirmationId);
-    pending.resolve(response);
+    // If we have an in-memory promise waiting, resolve it
+    const pending = pendingConfirmations.get(confirmationId);
+    if (pending) {
+        pendingConfirmations.delete(confirmationId);
+        pending.resolve(response);
+    } else {
+        // Server may have restarted - the execution is orphaned but DB is updated
+        console.log(`[Automation] Confirmation ${confirmationId} responded but no in-memory promise (server restart?)`);
+    }
 
     return true;
 }
@@ -512,6 +525,7 @@ export async function respondToConfirmation(
 export async function getPendingConfirmations(userId: number): Promise<Array<{
     id: string;
     executionId: string;
+    automationId: string;
     automationName: string;
     request: ConfirmationRequest;
     expiresAt: Date;
@@ -521,6 +535,7 @@ export async function getPendingConfirmations(userId: number): Promise<Array<{
         executionId: PendingConfirmation.executionId,
         request: PendingConfirmation.request,
         expiresAt: PendingConfirmation.expiresAt,
+        automationId: Automation.id,
         automationName: Automation.name,
     })
         .from(PendingConfirmation)
@@ -534,6 +549,7 @@ export async function getPendingConfirmations(userId: number): Promise<Array<{
     return results.map(r => ({
         id: r.id,
         executionId: r.executionId,
+        automationId: r.automationId,
         automationName: r.automationName,
         request: r.request as ConfirmationRequest,
         expiresAt: r.expiresAt,
@@ -564,4 +580,38 @@ export function getRunningExecutionCount(): number {
  */
 export function getQueueLength(): number {
     return executionQueue.length;
+}
+
+/**
+ * Clean up orphaned executions on server startup
+ * Marks any executions stuck in 'running' or 'awaiting_confirmation' as cancelled
+ * since they can't continue after a server restart (the async process was lost)
+ */
+export async function cleanupOrphanedExecutions(): Promise<number> {
+    // Find executions that were interrupted by server restart
+    const orphanedStatuses = ['running', 'awaiting_confirmation', 'pending'] as const;
+
+    const result = await db.update(AutomationExecution)
+        .set({
+            status: 'cancelled',
+            completedAt: new Date(),
+            errorMessage: 'Execution interrupted by server restart',
+        })
+        .where(
+            sql`${AutomationExecution.status} IN (${sql.join(orphanedStatuses.map(s => sql`${s}`), sql`, `)})`
+        )
+        .returning({ id: AutomationExecution.id });
+
+    // Also clean up any pending confirmations for these executions
+    if (result.length > 0) {
+        await db.update(PendingConfirmation)
+            .set({ status: 'expired' })
+            .where(eq(PendingConfirmation.status, 'pending'));
+    }
+
+    if (result.length > 0) {
+        console.log(`[Automation] Cleaned up ${result.length} orphaned execution(s) from previous server instance`);
+    }
+
+    return result.length;
 }

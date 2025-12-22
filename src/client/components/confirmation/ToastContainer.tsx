@@ -1,45 +1,42 @@
-// Toast container for confirmation notifications from background conversations
+// Toast container for confirmation notifications from background tasks
 
-import React from 'react';
-import type { ConfirmationRequest, ConversationSummary } from '../../types';
+import type { PendingConfirmation } from '../../types/confirmation';
 import { ConfirmationToast } from './ConfirmationToast';
 
 interface ToastContainerProps {
-    confirmations: Map<string, ConfirmationRequest>;
-    conversations: ConversationSummary[];
+    confirmations: PendingConfirmation[];
     currentConversationId?: string;
-    onRespond: (convId: string, optionId: string) => void;
-    onDismiss: (convId: string) => void;
+    onRespond: (confirmation: PendingConfirmation, optionId: string, guidance?: string) => void;
+    onDismiss: (confirmation: PendingConfirmation) => void;
 }
 
 export function ToastContainer({
     confirmations,
-    conversations,
     currentConversationId,
     onRespond,
     onDismiss,
 }: ToastContainerProps) {
     // Filter out confirmations for current conversation (shown inline instead)
-    const toastConfirmations = Array.from(confirmations.entries())
-        .filter(([convId]) => convId !== currentConversationId);
+    const toastConfirmations = confirmations.filter(c => {
+        if (c.source.type === 'chat') {
+            return c.source.conversationId !== currentConversationId;
+        }
+        // Always show automation confirmations as toasts
+        return true;
+    });
 
     if (toastConfirmations.length === 0) return null;
 
     return (
         <div className="toast-container">
-            {toastConfirmations.map(([convId, request]) => {
-                const conv = conversations.find(c => c.id === convId);
-                return (
-                    <ConfirmationToast
-                        key={request.requestId}
-                        convId={convId}
-                        convTitle={conv?.title || 'Background Task'}
-                        request={request}
-                        onRespond={onRespond}
-                        onDismiss={onDismiss}
-                    />
-                );
-            })}
+            {toastConfirmations.map((confirmation) => (
+                <ConfirmationToast
+                    key={confirmation.key}
+                    confirmation={confirmation}
+                    onRespond={(key, optionId, guidance) => onRespond(confirmation, optionId, guidance)}
+                    onDismiss={() => onDismiss(confirmation)}
+                />
+            ))}
         </div>
     );
 }

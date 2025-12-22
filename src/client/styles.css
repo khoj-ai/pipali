@@ -3223,6 +3223,30 @@ body {
     color: #991b1b;
 }
 
+.automation-status-badge.awaiting-confirmation {
+    background: #fef3c7;
+    color: #b45309;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    animation: pulse-attention 2s ease-in-out infinite;
+}
+
+@keyframes pulse-attention {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+/* Automation card awaiting confirmation state */
+.automation-card.awaiting-confirmation {
+    border-left: 3px solid #f59e0b;
+    background: linear-gradient(to right, rgba(245, 158, 11, 0.05), var(--bg-secondary));
+}
+
+.automation-card.awaiting-confirmation:hover {
+    border-color: #f59e0b;
+}
+
 .automation-card-actions {
     display: flex;
     align-items: center;
@@ -3593,6 +3617,275 @@ body {
 .btn-play:hover {
     background: #dcfce7;
     border-color: #bbf7d0;
+}
+
+/* Automation Confirmation Section in Detail Modal */
+.automation-confirmation-section {
+    background: linear-gradient(to right, rgba(245, 158, 11, 0.1), rgba(245, 158, 11, 0.02));
+    border: 1px solid #fcd34d;
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+}
+
+.automation-confirmation-section .confirmation-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    color: #b45309;
+}
+
+.automation-confirmation-section .confirmation-header h3 {
+    margin: 0;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.automation-confirmation-section .confirmation-content {
+    margin-bottom: 16px;
+}
+
+.automation-confirmation-section .confirmation-title {
+    font-weight: 500;
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.automation-confirmation-section .confirmation-reason {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin-bottom: 12px;
+}
+
+.automation-confirmation-section .confirmation-message {
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.automation-confirmation-section .confirmation-command-section {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    margin-top: 8px;
+}
+
+.automation-confirmation-section .confirmation-command-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.automation-confirmation-section .confirmation-command-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.automation-confirmation-section .confirmation-workdir {
+    font-size: 11px;
+    color: var(--text-tertiary);
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+}
+
+.automation-confirmation-section .confirmation-command-code {
+    margin: 0;
+    font-size: 12px;
+    background: var(--bg-tertiary);
+    padding: 8px;
+    border-radius: var(--radius-sm);
+    overflow-x: auto;
+}
+
+.automation-confirmation-section .confirmation-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.automation-confirmation-section .btn-confirmation {
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.automation-confirmation-section .btn-confirmation.primary {
+    background: var(--accent);
+    color: white;
+    border: none;
+}
+
+.automation-confirmation-section .btn-confirmation.primary:hover {
+    background: var(--accent-subtle);
+}
+
+.automation-confirmation-section .btn-confirmation.secondary {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border-color);
+}
+
+.automation-confirmation-section .btn-confirmation.secondary:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+}
+
+.automation-confirmation-section .btn-confirmation.danger {
+    background: #fee2e2;
+    color: #991b1b;
+    border: 1px solid #fca5a5;
+}
+
+.automation-confirmation-section .btn-confirmation.danger:hover {
+    background: #fecaca;
+}
+
+.automation-confirmation-section .btn-confirmation.warning {
+    background: #fef3c7;
+    color: #92400e;
+    border: 1px solid #fcd34d;
+}
+
+.automation-confirmation-section .btn-confirmation.warning:hover {
+    background: #fde68a;
+}
+
+/* Guidance input in confirmation section */
+.confirmation-guidance-section {
+    margin-top: 12px;
+}
+
+.confirmation-guidance-input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    resize: none;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+}
+
+.confirmation-guidance-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.confirmation-guidance-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.confirmation-guidance-actions .btn-confirmation {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+/* Toast with automation source styling */
+.confirmation-toast--automation {
+    border-left: 3px solid #f59e0b;
+}
+
+.confirmation-toast--automation .automation-source {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: #b45309;
+}
+
+.toast-expiry {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 11px;
+    color: var(--text-tertiary);
+    padding: 2px 6px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+/* Guidance input section for confirmations */
+.toast-guidance-section {
+    padding: 12px;
+    border-top: 1px solid var(--border-subtle);
+}
+
+.toast-guidance-input {
+    width: 100%;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+    resize: none;
+    margin-bottom: 8px;
+    box-sizing: border-box;
+}
+
+.toast-guidance-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.toast-guidance-actions {
+    display: flex;
+    gap: 8px;
+    justify-content: flex-end;
+}
+
+.toast-guidance-actions .toast-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.toast-guidance-actions .toast-btn svg {
+    margin-right: 4px;
+}
+
+/* Toast - guidance input row with send button */
+.toast-guidance-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.toast-guidance-input-row .toast-guidance-input {
+    flex: 1;
+    margin-bottom: 0;
+    padding: 6px 10px;
+    font-size: 12px;
+}
+
+.toast-guidance-send {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px 10px !important;
+    min-width: 32px;
+}
+
+.toast-guidance-send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 @media (max-width: 640px) {

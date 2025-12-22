@@ -2,17 +2,23 @@
 
 import React, { useState, useEffect } from 'react';
 import { RefreshCw, Plus } from 'lucide-react';
-import type { AutomationInfo } from '../../types/automations';
+import type { AutomationInfo, AutomationPendingConfirmation } from '../../types/automations';
 import { AutomationCard } from './AutomationCard';
 import { AutomationsEmpty } from './AutomationsEmpty';
 import { CreateAutomationModal } from './CreateAutomationModal';
 import { AutomationDetailModal } from './AutomationDetailModal';
 
 interface AutomationsPageProps {
+    pendingConfirmations: AutomationPendingConfirmation[];
+    onConfirmationRespond: (confirmationId: string, optionId: string, guidance?: string) => void;
+    onConfirmationDismiss: (confirmationId: string) => void;
     onViewConversation: (conversationId: string) => void;
 }
 
 export function AutomationsPage({
+    pendingConfirmations,
+    onConfirmationRespond,
+    onConfirmationDismiss,
     onViewConversation,
 }: AutomationsPageProps) {
     const [automations, setAutomations] = useState<AutomationInfo[]>([]);
@@ -38,6 +44,12 @@ export function AutomationsPage({
             setIsLoading(false);
         }
     };
+
+    // Create a map of automationId -> pending confirmation for quick lookup
+    const confirmationsByAutomation = new Map<string, AutomationPendingConfirmation>();
+    for (const confirmation of pendingConfirmations) {
+        confirmationsByAutomation.set(confirmation.automationId, confirmation);
+    }
 
     const handleRefresh = async () => {
         setIsRefreshing(true);
@@ -111,6 +123,7 @@ export function AutomationsPage({
                                 <AutomationCard
                                     key={automation.id}
                                     automation={automation}
+                                    pendingConfirmation={confirmationsByAutomation.get(automation.id)}
                                     onClick={() => setSelectedAutomation(automation)}
                                 />
                             ))}
@@ -129,9 +142,11 @@ export function AutomationsPage({
             {selectedAutomation && (
                 <AutomationDetailModal
                     automation={selectedAutomation}
+                    pendingConfirmation={confirmationsByAutomation.get(selectedAutomation.id)}
                     onClose={() => setSelectedAutomation(null)}
                     onUpdated={handleAutomationUpdated}
                     onDeleted={handleAutomationDeleted}
+                    onConfirmationRespond={onConfirmationRespond}
                     onViewConversation={(convId) => {
                         setSelectedAutomation(null);
                         onViewConversation(convId);

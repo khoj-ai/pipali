@@ -145,11 +145,21 @@ export function processConfirmationResponse(
 
     const skipFutureConfirmations = response.selectedOptionId === CONFIRMATION_OPTIONS.YES_DONT_ASK;
 
+    // Build denial reason, including guidance if provided
+    let denialReason: string | undefined;
+    if (!approved) {
+        if (response.selectedOptionId === CONFIRMATION_OPTIONS.GUIDANCE && response.guidance) {
+            denialReason = `User denied the operation with guidance: ${response.guidance}`;
+        } else {
+            denialReason = 'User denied the operation';
+        }
+    }
+
     return {
         approved,
         selectedOption: response.selectedOptionId,
         skipFutureConfirmations,
-        denialReason: approved ? undefined : 'User denied the operation',
+        denialReason,
     };
 }
 

@@ -1,15 +1,19 @@
 // Modal for viewing, editing, and deleting an automation
 
 import React, { useState, useEffect } from 'react';
-import type { AutomationInfo, FrequencyType, DayOfWeek } from '../../types/automations';
-import { X, Loader2, Trash2, Play, Pause, Calendar, Clock, MessageSquare } from 'lucide-react';
+import { X, Loader2, Trash2, Play, Pause, Calendar, Clock, Pencil, Save, AlertCircle, Send, MessageSquare } from 'lucide-react';
+import type { AutomationInfo, FrequencyType, DayOfWeek, AutomationPendingConfirmation } from '../../types/automations';
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
+import { DiffView } from '../tool-views/DiffView';
+import { parseCommandMessage, shortenHomePath } from '../../utils/parseCommand';
 
 interface AutomationDetailModalProps {
     automation: AutomationInfo;
+    pendingConfirmation?: AutomationPendingConfirmation;
     onClose: () => void;
     onUpdated: () => void;
     onDeleted: () => void;
+    onConfirmationRespond?: (confirmationId: string, optionId: string, guidance?: string) => void;
     onViewConversation?: (conversationId: string) => void;
 }
 
@@ -138,9 +142,11 @@ function formatSchedule(automation: AutomationInfo): string {
 
 export function AutomationDetailModal({
     automation,
+    pendingConfirmation,
     onClose,
     onUpdated,
     onDeleted,
+    onConfirmationRespond,
     onViewConversation,
 }: AutomationDetailModalProps) {
     const [isEditing, setIsEditing] = useState(false);
@@ -149,6 +155,10 @@ export function AutomationDetailModal({
     const [isSaving, setIsSaving] = useState(false);
     const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    // Confirmation guidance state
+    const [showGuidanceInput, setShowGuidanceInput] = useState(false);
+    const [guidanceText, setGuidanceText] = useState('');
 
     // Edit form state
     const initialParsed = automation.triggerConfig.type === 'cron'
@@ -282,9 +292,16 @@ export function AutomationDetailModal({
                 <div className="modal-header">
                     <div className="automation-detail-header-content">
                         <h2>{automation.name}</h2>
-                        <span className={`automation-status-badge ${automation.status}`}>
-                            {automation.status}
-                        </span>
+                        {pendingConfirmation ? (
+                            <span className="automation-status-badge awaiting-confirmation">
+                                <AlertCircle size={10} />
+                                needs approval
+                            </span>
+                        ) : (
+                            <span className={`automation-status-badge ${automation.status}`}>
+                                {automation.status}
+                            </span>
+                        )}
                     </div>
                     <button onClick={onClose} className="modal-close">
                         <X size={18} />
@@ -292,6 +309,102 @@ export function AutomationDetailModal({
                 </div>
 
                 <div className="automation-detail-content">
+                    {/* Pending confirmation section - shown at top when there's a confirmation */}
+                    {pendingConfirmation && onConfirmationRespond && (
+                        <div className="automation-confirmation-section">
+                            <div className="confirmation-header">
+                                <AlertCircle size={16} />
+                                <h3>Action Required</h3>
+                            </div>
+                            <div className="confirmation-content">
+                                <p className="confirmation-title">{pendingConfirmation.request.title}</p>
+                                {(() => {
+                                    const commandInfo = pendingConfirmation.request.message
+                                        ? parseCommandMessage(pendingConfirmation.request.message)
+                                        : null;
+                                    return (
+                                        <>
+                                            {commandInfo?.reason && (
+                                                <p className="confirmation-reason">{commandInfo.reason}</p>
+                                            )}
+                                            {commandInfo?.command && (
+                                                <div className="confirmation-command-section">
+                                                    <div className="confirmation-command-header">
+                                                        <span className="confirmation-command-label">Command</span>
+                                                        {commandInfo.workdir && (
+                                                            <code className="confirmation-workdir">
+                                                                in {shortenHomePath(commandInfo.workdir)}
+                                                            </code>
+                                                        )}
+                                                    </div>
+                                                    <pre className="confirmation-command-code">
+                                                        <code>{commandInfo.command}</code>
+                                                    </pre>
+                                                </div>
+                                            )}
+                                            {!commandInfo && pendingConfirmation.request.message && (
+                                                <p className="confirmation-message">{pendingConfirmation.request.message}</p>
+                                            )}
+                                        </>
+                                    );
+                                })()}
+                                {pendingConfirmation.request.diff && (
+                                    <DiffView diff={pendingConfirmation.request.diff} />
+                                )}
+                            </div>
+                            {showGuidanceInput ? (
+                                <div className="confirmation-guidance-section">
+                                    <textarea
+                                        className="confirmation-guidance-input"
+                                        placeholder="Provide guidance for a different approach..."
+                                        value={guidanceText}
+                                        onChange={(e) => setGuidanceText(e.target.value)}
+                                        autoFocus
+                                        rows={3}
+                                    />
+                                    <div className="confirmation-guidance-actions">
+                                        <button
+                                            className="btn-confirmation secondary"
+                                            onClick={() => {
+                                                setShowGuidanceInput(false);
+                                                setGuidanceText('');
+                                            }}
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button
+                                            className="btn-confirmation primary"
+                                            onClick={() => onConfirmationRespond(pendingConfirmation.id, 'guidance', guidanceText)}
+                                            disabled={!guidanceText.trim()}
+                                        >
+                                            <Send size={14} />
+                                            Send Guidance
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div className="confirmation-actions">
+                                    {pendingConfirmation.request.options.map((option) => (
+                                        <button
+                                            key={option.id}
+                                            className={`btn-confirmation ${option.style === 'primary' ? 'primary' : option.style === 'danger' ? 'danger' : option.style === 'warning' ? 'warning' : 'secondary'}`}
+                                            onClick={() => {
+                                                if (option.id === 'guidance') {
+                                                    setShowGuidanceInput(true);
+                                                } else {
+                                                    onConfirmationRespond(pendingConfirmation.id, option.id);
+                                                }
+                                            }}
+                                            title={option.description}
+                                        >
+                                            {option.label}
+                                        </button>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     {!isEditing ? (
                         // View mode
                         <>
@@ -301,7 +414,7 @@ export function AutomationDetailModal({
                                     <Calendar size={16} />
                                     <span>{formatSchedule(automation)}</span>
                                 </div>
-                                {automation.nextScheduledAt && isActive && (
+                                {automation.nextScheduledAt && isActive && !pendingConfirmation && (
                                     <div className="automation-detail-next-run">
                                         <Clock size={14} />
                                         <span>Next run: {new Date(automation.nextScheduledAt).toLocaleString()}</span>

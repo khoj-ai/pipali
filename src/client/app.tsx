@@ -1,7 +1,7 @@
 /// <reference lib="dom" />
 /// <reference lib="dom.iterable" />
 
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { createRoot } from "react-dom/client";
 import "katex/dist/katex.min.css";
 
@@ -15,6 +15,7 @@ import type {
     ConversationState,
     ActiveTask,
 } from "./types";
+import type { PendingConfirmation } from "./types/confirmation";
 
 // Hooks
 import { useFocusManagement, useModels } from "./hooks";
@@ -25,10 +26,11 @@ import { formatToolCallsForSidebar } from "./utils/formatting";
 // Components
 import { Header, Sidebar, InputArea } from "./components/layout";
 import { MessageList } from "./components/messages";
-import { ToastContainer } from "./components/confirmation";
+import { ToastContainer } from "./components/confirmation/ToastContainer";
 import { HomePage } from "./components/home";
 import { SkillsPage } from "./components/skills";
 import { AutomationsPage } from "./components/automations";
+import type { AutomationPendingConfirmation } from "./types/automations";
 
 // Page types
 type PageType = 'home' | 'chat' | 'skills' | 'automations';
@@ -69,6 +71,8 @@ const App = () => {
 
     // Multiple pending confirmations - one per conversation
     const [pendingConfirmations, setPendingConfirmations] = useState<Map<string, ConfirmationRequest>>(new Map());
+    // Pending confirmations from automations
+    const [automationConfirmations, setAutomationConfirmations] = useState<AutomationPendingConfirmation[]>([]);
     // Per-conversation state for tracking active tasks across all conversations
     const [conversationStates, setConversationStates] = useState<Map<string, ConversationState>>(new Map());
 
@@ -88,6 +92,7 @@ const App = () => {
     useEffect(() => {
         connectWebSocket();
         fetchConversations();
+        fetchAutomationConfirmations();
 
         // Check URL for conversationId
         const params = new URLSearchParams(window.location.search);
@@ -96,10 +101,14 @@ const App = () => {
             setConversationId(cid);
         }
 
+        // Poll for automation confirmations every 30 seconds
+        const pollInterval = setInterval(fetchAutomationConfirmations, 30000);
+
         return () => {
             if (wsRef.current) {
                 wsRef.current.close();
             }
+            clearInterval(pollInterval);
         };
     }, []);
 
@@ -190,6 +199,47 @@ const App = () => {
         } catch (e) {
             console.error("Failed to fetch conversations", e);
         }
+    };
+
+    const fetchAutomationConfirmations = async () => {
+        try {
+            const res = await fetch('/api/automations/confirmations/pending');
+            if (res.ok) {
+                const data = await res.json();
+                setAutomationConfirmations(data.confirmations || []);
+            }
+        } catch (e) {
+            console.error("Failed to fetch automation confirmations", e);
+        }
+    };
+
+    const respondToAutomationConfirmation = async (confirmationId: string, optionId: string, guidance?: string) => {
+        try {
+            const body: { selectedOptionId: string; guidance?: string } = { selectedOptionId: optionId };
+            if (guidance) {
+                body.guidance = guidance;
+            }
+            const res = await fetch(`/api/automations/confirmations/${confirmationId}/respond`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body),
+            });
+            if (res.ok) {
+                // Remove from local state
+                setAutomationConfirmations(prev =>
+                    prev.filter(c => c.id !== confirmationId)
+                );
+            }
+        } catch (e) {
+            console.error("Failed to respond to automation confirmation", e);
+        }
+    };
+
+    const dismissAutomationConfirmation = (confirmationId: string) => {
+        // Just remove from local state - doesn't actually respond
+        setAutomationConfirmations(prev =>
+            prev.filter(c => c.id !== confirmationId)
+        );
     };
 
     const fetchHistory = async (id: string) => {
@@ -874,7 +924,7 @@ const App = () => {
         wsRef.current?.send(JSON.stringify({ type: 'resume', message: withMessage, conversationId }));
     };
 
-    const sendConfirmationResponse = (convId: string, optionId: string) => {
+    const sendConfirmationResponse = (convId: string, optionId: string, guidance?: string) => {
         const pendingConfirmation = pendingConfirmations.get(convId);
         if (!pendingConfirmation || !isConnected) return;
 
@@ -884,6 +934,7 @@ const App = () => {
             data: {
                 requestId: pendingConfirmation.requestId,
                 selectedOptionId: optionId,
+                guidance,
                 timestamp: new Date().toISOString(),
             }
         };
@@ -897,9 +948,63 @@ const App = () => {
         });
     };
 
-    const sendCurrentConfirmationResponse = (optionId: string) => {
+    const sendCurrentConfirmationResponse = (optionId: string, guidance?: string) => {
         if (conversationId) {
-            sendConfirmationResponse(conversationId, optionId);
+            sendConfirmationResponse(conversationId, optionId, guidance);
+        }
+    };
+
+    // Transform chat confirmation to standard format
+    const toChatConfirmation = useCallback((convId: string, request: ConfirmationRequest, convTitle: string): PendingConfirmation => ({
+        key: `chat-${convId}-${request.requestId}`,
+        request,
+        source: { type: 'chat', conversationId: convId, conversationTitle: convTitle },
+    }), []);
+
+    // Transform automation confirmation to standard format
+    const toAutomationConfirmation = useCallback((confirmation: AutomationPendingConfirmation): PendingConfirmation => ({
+        key: `automation-${confirmation.id}`,
+        request: confirmation.request,
+        source: {
+            type: 'automation',
+            confirmationId: confirmation.id,
+            automationId: confirmation.automationId,
+            automationName: confirmation.automationName,
+            executionId: confirmation.executionId,
+        },
+        expiresAt: confirmation.expiresAt,
+    }), []);
+
+    // Compute list of all pending confirmations
+    const allConfirmations = useMemo((): PendingConfirmation[] => {
+        const chatConfirmations = Array.from(pendingConfirmations.entries()).map(([convId, request]) => {
+            const conv = conversations.find(c => c.id === convId);
+            return toChatConfirmation(convId, request, conv?.title || 'Background Task');
+        });
+        const automationConfirmationsList = automationConfirmations.map(toAutomationConfirmation);
+        return [...chatConfirmations, ...automationConfirmationsList];
+    }, [pendingConfirmations, automationConfirmations, conversations, toChatConfirmation, toAutomationConfirmation]);
+
+    // Confirmation response handler
+    const handleConfirmationResponse = (confirmation: PendingConfirmation, optionId: string, guidance?: string) => {
+        if (confirmation.source.type === 'chat') {
+            sendConfirmationResponse(confirmation.source.conversationId, optionId, guidance);
+        } else {
+            respondToAutomationConfirmation(confirmation.source.confirmationId, optionId, guidance);
+        }
+    };
+
+    // Confirmation dismiss handler
+    const handleConfirmationDismiss = (confirmation: PendingConfirmation) => {
+        const { source } = confirmation;
+        if (source.type === 'chat') {
+            setPendingConfirmations(prev => {
+                const next = new Map(prev);
+                next.delete(source.conversationId);
+                return next;
+            });
+        } else {
+            dismissAutomationConfirmation(source.confirmationId);
         }
     };
 
@@ -1087,6 +1192,9 @@ const App = () => {
                 )}
                 {currentPage === 'automations' && (
                     <AutomationsPage
+                        pendingConfirmations={automationConfirmations}
+                        onConfirmationRespond={respondToAutomationConfirmation}
+                        onConfirmationDismiss={dismissAutomationConfirmation}
                         onViewConversation={selectConversation}
                     />
                 )}
@@ -1113,17 +1221,10 @@ const App = () => {
             </div>
 
             <ToastContainer
-                confirmations={pendingConfirmations}
-                conversations={conversations}
+                confirmations={allConfirmations}
                 currentConversationId={conversationId}
-                onRespond={sendConfirmationResponse}
-                onDismiss={(convId) => {
-                    setPendingConfirmations(prev => {
-                        const next = new Map(prev);
-                        next.delete(convId);
-                        return next;
-                    });
-                }}
+                onRespond={handleConfirmationResponse}
+                onDismiss={handleConfirmationDismiss}
             />
         </div>
     );

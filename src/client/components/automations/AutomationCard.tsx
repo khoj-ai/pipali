@@ -1,11 +1,12 @@
 // Individual automation card for automations page gallery
 
 import React from 'react';
-import { ChevronRight, Clock, Calendar } from 'lucide-react';
-import type { AutomationInfo } from '../../types/automations';
+import { ChevronRight, Clock, Calendar, AlertCircle } from 'lucide-react';
+import type { AutomationInfo, AutomationPendingConfirmation } from '../../types/automations';
 
 interface AutomationCardProps {
     automation: AutomationInfo;
+    pendingConfirmation?: AutomationPendingConfirmation;
     onClick?: () => void;
 }
 
@@ -90,15 +91,23 @@ function formatNextRun(nextScheduledAt?: string): string | null {
     return 'soon';
 }
 
-export function AutomationCard({ automation, onClick }: AutomationCardProps) {
+export function AutomationCard({ automation, pendingConfirmation, onClick }: AutomationCardProps) {
     const isActive = automation.status === 'active';
     const isPaused = automation.status === 'paused';
+    const hasConfirmation = !!pendingConfirmation;
     const schedule = formatSchedule(automation);
     const nextRun = formatNextRun(automation.nextScheduledAt);
 
+    // Determine card classes
+    const cardClasses = [
+        'automation-card',
+        isPaused ? 'paused' : '',
+        hasConfirmation ? 'awaiting-confirmation' : '',
+    ].filter(Boolean).join(' ');
+
     return (
         <div
-            className={`automation-card ${isPaused ? 'paused' : ''}`}
+            className={cardClasses}
             onClick={onClick}
             role="button"
             tabIndex={0}
@@ -110,9 +119,16 @@ export function AutomationCard({ automation, onClick }: AutomationCardProps) {
             }}
         >
             <div className="automation-card-header">
-                <div className={`automation-status-badge ${automation.status}`}>
-                    {automation.status}
-                </div>
+                {hasConfirmation ? (
+                    <div className="automation-status-badge awaiting-confirmation">
+                        <AlertCircle size={10} />
+                        needs approval
+                    </div>
+                ) : (
+                    <div className={`automation-status-badge ${automation.status}`}>
+                        {automation.status}
+                    </div>
+                )}
             </div>
 
             <h3 className="automation-card-title">{automation.name}</h3>
@@ -128,7 +144,7 @@ export function AutomationCard({ automation, onClick }: AutomationCardProps) {
                     <Calendar size={12} />
                     <span>{schedule}</span>
                 </div>
-                {nextRun && isActive && (
+                {nextRun && isActive && !hasConfirmation && (
                     <div className="automation-next-run">
                         <Clock size={12} />
                         <span>Next: {nextRun}</span>

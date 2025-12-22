@@ -1,5 +1,7 @@
 // Automation types for the frontend client
 
+import type { ConfirmationRequest } from './confirmation';
+
 export type TriggerType = 'cron' | 'file_watch';
 
 export type CronTriggerConfig = {
@@ -77,3 +79,12 @@ export const MINUTE_OPTIONS = Array.from({ length: 4 }, (_, i) => ({
     label: `:${(i*15).toString().padStart(2, '0')}`,
 }));
 
+// Pending confirmation from an automation execution (API response type)
+export type AutomationPendingConfirmation = {
+    id: string;
+    executionId: string;
+    automationId: string;
+    automationName: string;
+    request: ConfirmationRequest;
+    expiresAt: string;
+};

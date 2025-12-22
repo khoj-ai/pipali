@@ -59,6 +59,7 @@ const createAutomationSchema = z.object({
 const confirmationResponseSchema = z.object({
     selectedOptionId: z.string(),
     persistPreference: z.boolean().optional(),
+    guidance: z.string().optional(),
 });
 
 // ============== STATIC ROUTES (must come before /:id routes) ==============
@@ -88,7 +89,12 @@ automations.get('/confirmations/pending', async (c) => {
     if (!user) return c.json({ error: 'User not found' }, 404);
 
     const pending = await getPendingConfirmations(user.id);
-    return c.json({ confirmations: pending });
+    // Serialize dates for JSON response
+    const serialized = pending.map(p => ({
+        ...p,
+        expiresAt: p.expiresAt.toISOString(),
+    }));
+    return c.json({ confirmations: serialized });
 });
 
 // Respond to a pending confirmation
@@ -105,6 +111,7 @@ automations.post('/confirmations/:id/respond', zValidator('json', confirmationRe
     const success = await respondToConfirmation(id, {
         requestId: id,
         selectedOptionId: data.selectedOptionId,
+        guidance: data.guidance,
         persistPreference: data.persistPreference,
         timestamp: new Date().toISOString(),
     });
@@ -113,7 +120,7 @@ automations.post('/confirmations/:id/respond', zValidator('json', confirmationRe
         return c.json({ error: 'Confirmation not found or already processed' }, 404);
     }
 
-    console.log(`[API] Confirmation ${id} responded: ${data.selectedOptionId}`);
+    console.log(`[API] Confirmation ${id} responded: ${data.selectedOptionId}${data.guidance ? ' with guidance' : ''}`);
     return c.json({ success: true });
 });
 
