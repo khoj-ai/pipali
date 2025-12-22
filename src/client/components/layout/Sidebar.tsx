@@ -17,6 +17,7 @@ interface SidebarProps {
     onSelectConversation: (id: string) => void;
     onDeleteConversation: (id: string, e: React.MouseEvent) => void;
     onExportConversation: (id: string) => void;
+    onClose?: () => void;
 }
 
 export function Sidebar({
@@ -30,6 +31,7 @@ export function Sidebar({
     onSelectConversation,
     onDeleteConversation,
     onExportConversation,
+    onClose,
 }: SidebarProps) {
     const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
     const [openMenuContext, setOpenMenuContext] = useState<'sidebar' | 'modal' | null>(null);
@@ -263,12 +265,29 @@ export function Sidebar({
 
     return (
         <>
+            {/* Mobile backdrop overlay */}
+            {isOpen && (
+                <div
+                    className="sidebar-backdrop"
+                    onClick={onClose}
+                    aria-hidden="true"
+                />
+            )}
             <aside className={`sidebar ${isOpen ? 'open' : 'closed'}`}>
                 <div className="sidebar-header">
-                    <button className="new-chat-btn" onClick={onNewChat}>
-                        <Plus size={18} />
-                        <span>New chat</span>
-                    </button>
+                    <div className="sidebar-header-row">
+                        <button className="new-chat-btn" onClick={onNewChat}>
+                            <Plus size={18} />
+                            <span>New chat</span>
+                        </button>
+                        <button
+                            className="sidebar-close-btn"
+                            onClick={onClose}
+                            aria-label="Close sidebar"
+                        >
+                            <X size={20} />
+                        </button>
+                    </div>
                 </div>
 
                 <div className="conversations-list">

@@ -983,6 +983,7 @@ const App = () => {
                 onSelectConversation={selectConversation}
                 onDeleteConversation={deleteConversation}
                 onExportConversation={exportConversationAsATIF}
+                onClose={() => setSidebarOpen(false)}
             />
 
             <div className="app-container">

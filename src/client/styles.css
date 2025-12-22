@@ -65,9 +65,45 @@ body {
     border-right: none;
 }
 
+/* Mobile backdrop - hidden on desktop */
+.sidebar-backdrop {
+    display: none;
+}
+
 .sidebar-header {
     padding: 12px;
     border-bottom: 1px solid var(--border-subtle);
+}
+
+.sidebar-header-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.sidebar-header-row .new-chat-btn {
+    flex: 1;
+}
+
+/* Close button - hidden on desktop, shown on mobile */
+.sidebar-close-btn {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all var(--transition);
+    flex-shrink: 0;
+}
+
+.sidebar-close-btn:hover {
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
 }
 
 .new-chat-btn {
@@ -1611,17 +1647,38 @@ body {
 
 /* Responsive */
 @media (max-width: 768px) {
+    /* Mobile backdrop overlay */
+    .sidebar-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.4);
+        z-index: 40;
+        animation: fade-in 0.15s ease;
+    }
+
+    @keyframes fade-in {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
     .sidebar {
         position: fixed;
         left: 0;
         top: 0;
         z-index: 50;
         box-shadow: var(--shadow-md);
+        width: min(var(--sidebar-width), 85vw);
     }
 
     .sidebar.closed {
         margin-left: 0;
         transform: translateX(-100%);
+    }
+
+    /* Show close button on mobile */
+    .sidebar-close-btn {
+        display: flex;
     }
 
     .model-name {
