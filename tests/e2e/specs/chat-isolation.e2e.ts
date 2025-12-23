@@ -265,4 +265,101 @@ test.describe('Chat Isolation', () => {
         expect(userMessages2).toContain(secondMessage);
         expect(userMessages2).not.toContain(firstMessage);
     });
+
+    test('should not render response from running task into new chat after clicking New Chat', async ({
+        page,
+    }) => {
+        const chatPage = new ChatPage(page);
+        await chatPage.goto();
+
+        // Start a slow task (triggers slowPausableScenario with 10 iterations, 1s each)
+        await chatPage.sendMessage('do a very slow analysis');
+
+        // Wait for conversation ID to be set in URL (server created the conversation)
+        const runningConvId = await chatPage.waitForConversationId();
+        expect(runningConvId).toBeTruthy();
+
+        // Wait for processing to start (ensures task is running)
+        await chatPage.waitForProcessing();
+
+        // Click "New Chat" while the slow task is still running
+        await chatPage.startNewChat();
+
+        // Wait for new chat page to be ready
+        await chatPage.waitForConnection();
+
+        // Verify we're on a fresh new chat (no conversation ID in URL yet)
+        const newChatConvId = await chatPage.getConversationId();
+        expect(newChatConvId).toBeNull();
+
+        // The new chat should have no messages initially
+        const initialMessageCount = await chatPage.getMessageCount();
+        expect(initialMessageCount.user).toBe(0);
+        expect(initialMessageCount.assistant).toBe(0);
+
+        // Wait for the background task to potentially complete and try to render
+        // This gives time for the bug to manifest if it exists
+        await page.waitForTimeout(5000);
+
+        // After waiting, the new chat should still have no messages
+        // (the response from the old task should NOT appear here)
+        const finalMessageCount = await chatPage.getMessageCount();
+        expect(finalMessageCount.user).toBe(0);
+        expect(finalMessageCount.assistant).toBe(0);
+
+        // Verify no thoughts section appeared (from the old task)
+        const thoughtsVisible = await chatPage.thoughtsSection.isVisible();
+        expect(thoughtsVisible).toBe(false);
+
+        // Now navigate back to the original conversation and verify it completed there
+        await page.goto(`/?conversationId=${runningConvId}`);
+        await chatPage.waitForConnection();
+        await page.waitForTimeout(1000);
+
+        // The original conversation should have the response
+        const originalMessageCount = await chatPage.getMessageCount();
+        expect(originalMessageCount.user).toBe(1);
+        expect(originalMessageCount.assistant).toBe(1);
+    });
+
+    test('should not render response from running task into new chat after clicking logo', async ({
+        page,
+    }) => {
+        const chatPage = new ChatPage(page);
+        await chatPage.goto();
+
+        // Start a slow task (triggers slowPausableScenario with 10 iterations, 1s each)
+        await chatPage.sendMessage('do a very slow analysis');
+
+        // Wait for conversation ID to be set in URL (server created the conversation)
+        const runningConvId = await chatPage.waitForConversationId();
+
+        // Wait for processing to start (ensures task is running)
+        await chatPage.waitForProcessing();
+
+        // Click logo while the slow task is still running
+        await chatPage.goHome();
+        await chatPage.waitForConnection();
+
+        // Should be on home page with no active conversation
+        const homeConvId = await chatPage.getConversationId();
+        expect(homeConvId).toBeNull();
+
+        // Wait for background task to potentially complete
+        await page.waitForTimeout(5000);
+
+        // Home page should remain clean (no messages from old task)
+        const messageCount = await chatPage.getMessageCount();
+        expect(messageCount.user).toBe(0);
+        expect(messageCount.assistant).toBe(0);
+
+        // Navigate back to verify original conversation has the response
+        await page.goto(`/?conversationId=${runningConvId}`);
+        await chatPage.waitForConnection();
+        await page.waitForTimeout(1000);
+
+        const originalCount = await chatPage.getMessageCount();
+        expect(originalCount.user).toBe(1);
+        expect(originalCount.assistant).toBe(1);
+    });
 });

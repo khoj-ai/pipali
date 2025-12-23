@@ -63,7 +63,7 @@ export const Selectors = {
     conversationItemWithActiveTask: '.conversation-item.has-active-task',
     conversationTitle: '.conversation-title',
     conversationSubtitle: '.conversation-subtitle',
-    newChatButton: '.new-chat-button',
+    newChatButton: '.new-chat-btn',
 
     // Header
     header: 'header',

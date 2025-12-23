@@ -183,4 +183,21 @@ export class AppPage {
         const params = await this.getUrlParams();
         return params.get('conversationId');
     }
+
+    /**
+     * Wait for conversation ID to appear in URL
+     * This happens when the server creates a new conversation and sends conversation_created
+     */
+    async waitForConversationId(timeout: number = 10000): Promise<string> {
+        await this.page.waitForFunction(
+            () => {
+                const params = new URLSearchParams(window.location.search);
+                return params.get('conversationId') !== null;
+            },
+            {},
+            { timeout }
+        );
+        const params = await this.getUrlParams();
+        return params.get('conversationId')!;
+    }
 }

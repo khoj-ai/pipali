@@ -484,6 +484,9 @@ const App = () => {
 
             // For background tasks, don't switch to the new conversation
             if (!isBackgroundTask) {
+                // Update ref immediately so subsequent WebSocket messages are processed correctly
+                // (avoids race condition where messages arrive before useEffect updates the ref)
+                conversationIdRef.current = newConvId;
                 setConversationId(newConvId);
             }
 
@@ -590,7 +593,12 @@ const App = () => {
             };
 
             const currentConvId = conversationIdRef.current;
-            const isCurrentConversation = !msgConversationId || msgConversationId === currentConvId || !currentConvId;
+            // Update the current view if:
+            // 1. Message conversation matches current conversation, OR
+            // 2. No message conversation ID and we have a current conversation (legacy)
+            const isCurrentConversation =
+                !msgConversationId || // Legacy case
+                msgConversationId === currentConvId; // Matches current
 
             if (isCurrentConversation) {
                 setMessages(prev => updateMessagesWithPendingThoughts(prev));
@@ -654,7 +662,12 @@ const App = () => {
             };
 
             const currentConvId = conversationIdRef.current;
-            const isCurrentConversation = !msgConversationId || msgConversationId === currentConvId || !currentConvId;
+            // Update the current view if:
+            // 1. Message conversation matches current conversation, OR
+            // 2. No message conversation ID and we have a current conversation (legacy)
+            const isCurrentConversation =
+                !msgConversationId || // Legacy case
+                msgConversationId === currentConvId; // Matches current
 
             if (isCurrentConversation) {
                 setMessages(prev => updateMessagesWithResults(prev));
@@ -700,7 +713,13 @@ const App = () => {
             };
 
             const currentConvId = conversationIdRef.current;
-            const isCurrentConversation = !completedConvId || completedConvId === currentConvId || !currentConvId;
+            // Update the current view if this message is for the current conversation.
+            // When user clicks "New Chat" or goes home, we set conversationIdRef.current to undefined.
+            // For normal new conversations, conversation_created updates the ref immediately,
+            // so by the time complete arrives, both IDs should match.
+            const isCurrentConversation =
+                (!completedConvId && !currentConvId) || // Both undefined (legacy - no conversation tracking)
+                completedConvId === currentConvId; // Matches current conversation
 
             if (isCurrentConversation) {
                 setConversationId(data.conversationId);
@@ -780,6 +799,10 @@ const App = () => {
                 });
             }
         }
+
+        // Update ref immediately to prevent WebSocket messages from old conversation
+        // being rendered in new chat (avoids race condition with useEffect)
+        conversationIdRef.current = undefined;
 
         setCurrentPage('home');
         setConversationId(undefined);
@@ -871,8 +894,13 @@ const App = () => {
     };
 
     const startNewConversation = () => {
+        // Update ref immediately to prevent WebSocket messages from old conversation
+        // being rendered in new chat (avoids race condition with useEffect)
+        conversationIdRef.current = undefined;
+
         setCurrentPage('chat');
         setConversationId(undefined);
+        setMessages([]); // Clear messages for fresh new chat
         setIsProcessing(false);
         setIsPaused(false);
     };
