@@ -227,9 +227,9 @@ export const Automation = pgTable('automation', {
     description: text('description'),
     prompt: text('prompt').notNull(),
 
-    // Trigger configuration
-    triggerType: TriggerTypeEnum('trigger_type').notNull(),
-    triggerConfig: jsonb('trigger_config').$type<TriggerConfig>().notNull(),
+    // Trigger configuration (optional)
+    triggerType: TriggerTypeEnum('trigger_type'),
+    triggerConfig: jsonb('trigger_config').$type<TriggerConfig>(),
 
     // Status
     status: AutomationStatusEnum('status').default('active').notNull(),

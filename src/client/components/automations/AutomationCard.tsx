@@ -12,6 +12,10 @@ interface AutomationCardProps {
 
 // Parse cron schedule to human-readable format
 function formatSchedule(automation: AutomationInfo): string {
+    if (!automation.triggerType || !automation.triggerConfig) {
+        return 'Manual only';
+    }
+
     if (automation.triggerType !== 'cron') {
         return 'File watch trigger';
     }
@@ -95,8 +99,9 @@ export function AutomationCard({ automation, pendingConfirmation, onClick }: Aut
     const isActive = automation.status === 'active';
     const isPaused = automation.status === 'paused';
     const hasConfirmation = !!pendingConfirmation;
+    const hasSchedule = automation.triggerType && automation.triggerConfig;
     const schedule = formatSchedule(automation);
-    const nextRun = formatNextRun(automation.nextScheduledAt);
+    const nextRun = hasSchedule ? formatNextRun(automation.nextScheduledAt) : null;
 
     // Determine card classes
     const cardClasses = [

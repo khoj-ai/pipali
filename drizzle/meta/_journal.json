@@ -36,6 +36,13 @@
       "when": 1766567675761,
       "tag": "0004_elite_bulldozer",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1766654075761,
+      "tag": "0005_nullable_trigger",
+      "breakpoints": true
     }
   ]
 }

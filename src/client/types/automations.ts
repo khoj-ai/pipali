@@ -27,8 +27,8 @@ export type AutomationInfo = {
     name: string;
     description?: string;
     prompt: string;
-    triggerType: TriggerType;
-    triggerConfig: TriggerConfig;
+    triggerType?: TriggerType;
+    triggerConfig?: TriggerConfig;
     status: AutomationStatus;
     conversationId?: string;
     maxIterations?: number;

@@ -58,15 +58,19 @@ export function stopAutomationSystem(): void {
 
 /**
  * Activate an automation (start its scheduler/watcher)
+ * Note: Automations without triggers (manual-only) are valid but won't start any scheduler
  */
 export async function activateAutomation(automation: {
     id: string;
-    triggerType: 'cron' | 'file_watch';
+    triggerType: 'cron' | 'file_watch' | null;
     triggerConfig: unknown;
     status: string;
     name: string;
 }): Promise<void> {
     if (automation.status !== 'active') return;
+
+    // Manual-only automations have no trigger to activate
+    if (!automation.triggerType || !automation.triggerConfig) return;
 
     if (automation.triggerType === 'cron') {
         const { scheduleCronJob } = await import('./scheduler/cron');

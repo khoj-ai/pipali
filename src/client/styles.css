@@ -3669,6 +3669,72 @@ body {
     border-color: #ea580c;
 }
 
+/* Schedule Section Toggle (Optional schedule) */
+.schedule-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0;
+    gap: 0;
+}
+
+.schedule-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    padding: 14px 16px;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+    text-align: left;
+}
+
+.schedule-toggle:hover {
+    background: var(--bg-secondary);
+}
+
+.schedule-toggle svg {
+    color: var(--text-tertiary);
+    flex-shrink: 0;
+}
+
+.schedule-toggle-hint {
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-tertiary);
+    margin-left: 4px;
+}
+
+.schedule-content {
+    padding: 0 16px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    border-top: 1px solid var(--border-color);
+    margin-top: 0;
+    padding-top: 16px;
+}
+
+/* Run Now button */
+.btn-run-now {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: white;
+}
+
+.btn-run-now:hover:not(:disabled) {
+    background: var(--accent-subtle);
+    border-color: var(--accent-subtle);
+}
+
+.btn-run-now:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 /* Automation Detail Modal */
 .automation-detail-modal {
     max-width: 560px;
@@ -3746,6 +3812,11 @@ body {
     gap: 8px;
     padding: 16px 24px;
     border-top: 1px solid var(--border-subtle);
+}
+
+/* Ensure consistent button heights in automation detail modal */
+.automation-detail-actions button {
+    min-height: 40px;
 }
 
 .action-spacer {

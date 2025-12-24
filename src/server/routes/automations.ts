@@ -49,8 +49,8 @@ const createAutomationSchema = z.object({
     name: z.string().min(1).max(100),
     description: z.string().optional(),
     prompt: z.string().min(1),
-    triggerType: z.enum(['cron', 'file_watch']),
-    triggerConfig: triggerConfigSchema,
+    triggerType: z.enum(['cron', 'file_watch']).optional(),
+    triggerConfig: triggerConfigSchema.optional(),
     maxIterations: z.number().min(1).max(50).optional(),
     maxExecutionsPerDay: z.number().min(1).optional(),
     maxExecutionsPerHour: z.number().min(1).optional(),
@@ -188,8 +188,8 @@ automations.post('/', zValidator('json', createAutomationSchema), async (c) => {
             name: data.name,
             description: data.description,
             prompt: data.prompt,
-            triggerType: data.triggerType,
-            triggerConfig: data.triggerConfig as TriggerConfig,
+            triggerType: data.triggerType || null,
+            triggerConfig: (data.triggerConfig as TriggerConfig) || null,
             maxIterations: data.maxIterations || 15,
             maxExecutionsPerDay: data.maxExecutionsPerDay,
             maxExecutionsPerHour: data.maxExecutionsPerHour,
@@ -202,8 +202,10 @@ automations.post('/', zValidator('json', createAutomationSchema), async (c) => {
         return c.json({ error: 'Failed to create automation' }, 500);
     }
 
-    // Start the scheduler/watcher for this automation
-    await activateAutomation(automation);
+    // Start the scheduler/watcher for this automation (only if it has a trigger)
+    if (automation.triggerType && automation.triggerConfig) {
+        await activateAutomation(automation);
+    }
 
     console.log(`[API] Created automation: ${automation.name} (${automation.id})`);
     return c.json({ automation }, 201);

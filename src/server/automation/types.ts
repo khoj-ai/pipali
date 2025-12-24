@@ -71,8 +71,8 @@ export interface AutomationDefinition {
     name: string;
     description?: string;
     prompt: string;
-    triggerType: 'cron' | 'file_watch';
-    triggerConfig: TriggerConfig;
+    triggerType?: 'cron' | 'file_watch';
+    triggerConfig?: TriggerConfig;
     status: 'active' | 'paused' | 'disabled';
     maxIterations: number;
     maxExecutionsPerDay?: number;
