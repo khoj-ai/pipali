@@ -428,12 +428,17 @@ async function executeTool(
                 return `Unknown tool: ${toolCall.function_name}`;
         }
     } catch (error) {
+        // Re-throw pause errors so the research loop can exit cleanly
+        if (error instanceof Error && error.message === 'Research paused') {
+            throw new ResearchPausedError();
+        }
         return `Error executing tool ${toolCall.function_name}: ${error instanceof Error ? error.message : String(error)}`;
     }
 }
 
 /**
- * Execute multiple tool calls in parallel and return their results
+ * Execute multiple tool calls in parallel and return their results.
+ * If any tool throws ResearchPausedError, it will propagate immediately.
  */
 async function executeToolsInParallel(
     toolCalls: ATIFToolCall[],
@@ -441,6 +446,7 @@ async function executeToolsInParallel(
 ): Promise<ATIFObservationResult[]> {
     const results: ATIFObservationResult[] = await Promise.all(
         toolCalls.map(async (toolCall) => {
+            // executeTool will throw ResearchPausedError if paused, which propagates through Promise.all
             const result = await executeTool(toolCall, context);
             return { source_call_id: toolCall.tool_call_id, content: result };
         })

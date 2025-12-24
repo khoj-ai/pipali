@@ -492,7 +492,7 @@ const App = () => {
                     }
                     next.set(msgConversationId, {
                         isProcessing: true,
-                        isPaused: existing?.isPaused ?? false, // Preserve paused state
+                        isPaused: false, // Research is active, clear paused state
                         latestReasoning: existing?.latestReasoning,
                         messages: msgs,
                     });
@@ -501,6 +501,7 @@ const App = () => {
             }
             if (!msgConversationId || msgConversationId === conversationIdRef.current) {
                 setIsProcessing(true);
+                setIsPaused(false); // Research is active, clear paused state
             }
             return;
         }

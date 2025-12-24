@@ -252,6 +252,11 @@ export const websocketHandler = {
                 console.log(`[WS] ⏸️ Pausing research (conv: ${data.conversationId})`);
                 session.isPaused = true;
                 session.abortController.abort();
+                // Reject any pending confirmation so the research loop can exit cleanly
+                if (session.pendingConfirmation) {
+                    session.pendingConfirmation.reject(new Error('Research paused'));
+                    session.pendingConfirmation = undefined;
+                }
                 sendToClient(ws, { type: 'pause' }, data.conversationId);
                 setSessionPaused(data.conversationId);
             }
