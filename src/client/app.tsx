@@ -63,13 +63,14 @@ const App = () => {
     const [exportingConversationId, setExportingConversationId] = useState<string | null>(null);
     // Current page state - determine from URL
     const [currentPage, setCurrentPage] = useState<PageType>(() => {
+        const params = new URLSearchParams(window.location.search);
+        // Show chat page if conversationId is present (takes priority over path)
+        if (params.get('conversationId') || params.get('q')) return 'chat';
         const path = window.location.pathname;
         if (path === '/skills') return 'skills';
         if (path === '/automations') return 'automations';
         if (path === '/tools') return 'mcp-tools';
-        const params = new URLSearchParams(window.location.search);
-        // Show chat page if conversationId or query param is present
-        return (params.get('conversationId') || params.get('q')) ? 'chat' : 'home';
+        return 'home';
     });
 
     // Multiple pending confirmations - one per conversation
@@ -139,9 +140,10 @@ const App = () => {
     useEffect(() => {
         const prevId = prevConversationIdRef.current;
 
-        // Update URL
+        // Update URL - when viewing a conversation, always use root path
         if (conversationId) {
             const url = new URL(window.location.href);
+            url.pathname = '/';
             url.searchParams.set('conversationId', conversationId);
             window.history.pushState({}, '', url);
         } else {
