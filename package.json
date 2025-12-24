@@ -54,6 +54,7 @@
     "xlsx": "^0.18.5",
     "zod": "^4.2.1",
     "croner": "^9.0.0",
-    "minimatch": "^10.0.0"
+    "minimatch": "^10.0.0",
+    "@modelcontextprotocol/sdk": "^1.12.0"
   }
 }

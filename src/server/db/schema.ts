@@ -285,3 +285,40 @@ export const PendingConfirmation = pgTable('pending_confirmation', {
 
     ...dbBaseModel,
 });
+
+// MCP Server Configuration Schema
+export const McpTransportTypeEnum = pgEnum('mcp_transport_type', ['stdio', 'sse']);
+
+export const McpServer = pgTable('mcp_server', {
+    id: serial('id').primaryKey(),
+
+    // Server identification
+    name: text('name').notNull().unique(),  // For namespacing tools: "github" -> "github/create_issue"
+    description: text('description'),
+
+    // Connection configuration
+    transportType: McpTransportTypeEnum('transport_type').notNull(),
+    // For stdio: path to script (.py/.js) or npm package name (@scope/package)
+    // For SSE: HTTP/HTTPS URL endpoint
+    path: text('path').notNull(),
+
+    // Optional API key for authenticated servers
+    apiKey: text('api_key'),
+
+    // Optional environment variables to pass to stdio servers (JSON object)
+    env: jsonb('env').$type<Record<string, string>>(),
+
+    // Whether tool calls from this server require user confirmation
+    requiresConfirmation: boolean('requires_confirmation').default(true).notNull(),
+
+    // Status tracking
+    enabled: boolean('enabled').default(true).notNull(),
+    lastConnectedAt: timestamp('last_connected_at'),
+    lastError: text('last_error'),
+
+    // Tool filtering: when null/empty, all tools are enabled
+    // When populated, only listed tools are available to the agent
+    enabledTools: jsonb('enabled_tools').$type<string[]>(),
+
+    ...dbBaseModel,
+});

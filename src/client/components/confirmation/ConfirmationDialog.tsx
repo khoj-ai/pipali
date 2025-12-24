@@ -12,6 +12,44 @@ interface ConfirmationDialogProps {
     onRespond: (optionId: string) => void;
 }
 
+/**
+ * Parse MCP tool name into server and tool parts
+ */
+function parseMcpToolName(toolName: string): { serverName: string; toolName: string } | null {
+    const separatorIndex = toolName.indexOf('__');
+    if (separatorIndex === -1) return null;
+    return {
+        serverName: toolName.slice(0, separatorIndex),
+        toolName: toolName.slice(separatorIndex + 2),
+    };
+}
+
+/**
+ * Format a tool argument value for display
+ */
+function formatArgValue(value: unknown): React.ReactNode {
+    if (value === null || value === undefined) {
+        return <span className="arg-value null">null</span>;
+    }
+    if (typeof value === 'boolean') {
+        return <span className={`arg-value boolean ${value ? 'true' : 'false'}`}>{String(value)}</span>;
+    }
+    if (typeof value === 'number') {
+        return <span className="arg-value number">{value}</span>;
+    }
+    if (typeof value === 'string') {
+        // Truncate long strings
+        const displayValue = value.length > 150 ? value.slice(0, 150) + '...' : value;
+        return <code className="arg-value string">{displayValue}</code>;
+    }
+    if (typeof value === 'object') {
+        const jsonStr = JSON.stringify(value, null, 2);
+        const displayValue = jsonStr.length > 200 ? jsonStr.slice(0, 200) + '...' : jsonStr;
+        return <pre className="arg-value object"><code>{displayValue}</code></pre>;
+    }
+    return <span className="arg-value">{String(value)}</span>;
+}
+
 export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogProps) {
     // Handle keyboard shortcuts
     useEffect(() => {
@@ -76,6 +114,13 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
 
     const commandInfo = request.message ? parseCommandMessage(request.message) : null;
 
+    // Check if this is an MCP tool call
+    const isMcpToolCall = request.operation === 'mcp_tool_call';
+    const mcpToolInfo = isMcpToolCall && request.context?.toolName
+        ? parseMcpToolName(request.context.toolName)
+        : null;
+    const mcpToolArgs = isMcpToolCall ? request.context?.toolArgs : null;
+
     return (
         <div className="confirmation-container">
             <div className="confirmation-dialog">
@@ -96,8 +141,42 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
                 </div>
 
                 <div className="confirmation-body">
-                    {/* Structured command execution view */}
-                    {commandInfo ? (
+                    {/* Structured MCP tool call view */}
+                    {isMcpToolCall && mcpToolInfo ? (
+                        <div className="mcp-tool-confirmation">
+                            <div className="mcp-tool-header">
+                                <div className="mcp-tool-info">
+                                    <span className="mcp-tool-label">Tool</span>
+                                    <code className="mcp-tool-name">{mcpToolInfo.toolName}</code>
+                                </div>
+                                <div className="mcp-server-info">
+                                    <span className="mcp-server-label">Server</span>
+                                    <code className="mcp-server-name">{mcpToolInfo.serverName}</code>
+                                </div>
+                            </div>
+                            {mcpToolArgs && Object.keys(mcpToolArgs).length > 0 && (
+                                <div className="mcp-tool-args">
+                                    <div className="mcp-args-label">Arguments</div>
+                                    <div className="mcp-args-list">
+                                        {Object.entries(mcpToolArgs).map(([key, value]) => (
+                                            <div key={key} className="mcp-arg-row">
+                                                <span className="mcp-arg-key">{key}</span>
+                                                <span className="mcp-arg-separator">:</span>
+                                                {formatArgValue(value)}
+                                            </div>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                            {mcpToolArgs && Object.keys(mcpToolArgs).length === 0 && (
+                                <div className="mcp-tool-args">
+                                    <div className="mcp-args-label">Arguments</div>
+                                    <div className="mcp-no-args">No arguments</div>
+                                </div>
+                            )}
+                        </div>
+                    ) : commandInfo ? (
+                        /* Structured command execution view */
                         <div className="command-confirmation">
                             {commandInfo.reason && (
                                 <div className="command-section">

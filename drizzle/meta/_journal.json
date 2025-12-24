@@ -29,6 +29,13 @@
       "when": 1766394000000,
       "tag": "0003_automation_conversation",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1766567675761,
+      "tag": "0004_elite_bulldozer",
+      "breakpoints": true
     }
   ]
 }

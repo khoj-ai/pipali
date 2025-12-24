@@ -40,7 +40,8 @@ export type ConfirmableOperation =
     | 'edit_file'
     | 'write_file'
     | 'delete_file'
-    | 'execute_command';
+    | 'execute_command'
+    | 'mcp_tool_call';
 
 /**
  * Get risk level based on operation and optional sub-type
@@ -68,6 +69,7 @@ function getRiskLevel(
         write_file: 'medium',
         delete_file: 'high',
         execute_command: 'high',
+        mcp_tool_call: 'medium',
     };
 
     return defaultRiskLevels[operation];
@@ -92,6 +94,7 @@ export function createFileOperationConfirmation(
         write_file: 'Confirm File Write',
         delete_file: 'Confirm File Deletion',
         execute_command: 'Confirm Command Execution',
+        mcp_tool_call: 'Confirm MCP Tool Call',
     };
 
     const messages: Record<ConfirmableOperation, string> = {
@@ -99,6 +102,7 @@ export function createFileOperationConfirmation(
         write_file: `The agent wants to create or overwrite the file:\n\n**${filePath}**`,
         delete_file: `The agent wants to delete the file:\n\n**${filePath}**`,
         execute_command: `The agent wants to execute a command`,
+        mcp_tool_call: `The agent wants to call an MCP tool:\n\n**${filePath}**`,
     };
 
     return {

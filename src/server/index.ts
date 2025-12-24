@@ -13,6 +13,7 @@ import {
     EMBEDDED_MIGRATIONS,
 } from "./embedded-assets";
 import { startAutomationSystem, stopAutomationSystem } from "./automation";
+import { loadEnabledMcpServers, closeMcpClients } from "./processor/mcp";
 
 // Parse CLI arguments
 function getServerConfig() {
@@ -140,6 +141,11 @@ async function main() {
     // Start automation system (cron scheduler, file watchers)
     await startAutomationSystem();
 
+    // Load enabled MCP servers asynchronously to not block server startup
+    loadEnabledMcpServers().catch(error => {
+        console.warn(`[MCP] ⚠️ Failed to load MCP servers:`, error);
+    });
+
     // Build frontend only in development mode (not when running as compiled binary)
     if (!IS_COMPILED_BINARY) {
         console.log("Building frontend...");
@@ -196,6 +202,7 @@ async function main() {
     console.log(`\n[Server] Received ${signal}, shutting down gracefully...`);
     server.stop();
     stopAutomationSystem();
+    await closeMcpClients();
     await closeDatabase();
     console.log('[Server] Shutdown complete.');
     process.exit(0);

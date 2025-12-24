@@ -1,7 +1,7 @@
 // Sidebar with conversation list
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Loader2, MessageSquare, AlertCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock } from 'lucide-react';
+import { Loader2, MessageSquare, AlertCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Wrench } from 'lucide-react';
 import type { ConversationSummary, ConversationState, ConfirmationRequest } from '../../types';
 
 const MAX_VISIBLE_CHATS = 5;
@@ -13,13 +13,14 @@ interface SidebarProps {
     pendingConfirmations: Map<string, ConfirmationRequest>;
     currentConversationId?: string;
     exportingConversationId: string | null;
-    currentPage?: 'home' | 'chat' | 'skills' | 'automations';
+    currentPage?: 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools';
     onNewChat: () => void;
     onSelectConversation: (id: string) => void;
     onDeleteConversation: (id: string, e: React.MouseEvent) => void;
     onExportConversation: (id: string) => void;
     onGoToSkills?: () => void;
     onGoToAutomations?: () => void;
+    onGoToMcpTools?: () => void;
     onClose?: () => void;
 }
 
@@ -37,6 +38,7 @@ export function Sidebar({
     onExportConversation,
     onGoToSkills,
     onGoToAutomations,
+    onGoToMcpTools,
     onClose,
 }: SidebarProps) {
     const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
@@ -310,6 +312,13 @@ export function Sidebar({
                     >
                         <Clock size={16} />
                         <span>Automations</span>
+                    </button>
+                    <button
+                        className={`sidebar-nav-btn ${currentPage === 'mcp-tools' ? 'active' : ''}`}
+                        onClick={onGoToMcpTools}
+                    >
+                        <Wrench size={16} />
+                        <span>Tools</span>
                     </button>
                 </div>
 

@@ -30,10 +30,11 @@ import { ToastContainer } from "./components/confirmation/ToastContainer";
 import { HomePage } from "./components/home";
 import { SkillsPage } from "./components/skills";
 import { AutomationsPage } from "./components/automations";
+import { McpToolsPage } from "./components/mcp-tools";
 import type { AutomationPendingConfirmation } from "./types/automations";
 
 // Page types
-type PageType = 'home' | 'chat' | 'skills' | 'automations';
+type PageType = 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools';
 
 // UUID generator that works in non-secure contexts (e.g., HTTP on non-localhost)
 function generateUUID(): string {
@@ -65,6 +66,7 @@ const App = () => {
         const path = window.location.pathname;
         if (path === '/skills') return 'skills';
         if (path === '/automations') return 'automations';
+        if (path === '/tools') return 'mcp-tools';
         const params = new URLSearchParams(window.location.search);
         // Show chat page if conversationId or query param is present
         return (params.get('conversationId') || params.get('q')) ? 'chat' : 'home';
@@ -916,6 +918,32 @@ const App = () => {
         window.history.pushState({}, '', '/automations');
     };
 
+    const goToMcpToolsPage = () => {
+        // Save current conversation state if needed
+        if (conversationId) {
+            const currentState = conversationStates.get(conversationId);
+            if (currentState?.isProcessing) {
+                setConversationStates(prev => {
+                    const next = new Map(prev);
+                    const existing = next.get(conversationId);
+                    if (existing) {
+                        next.set(conversationId, { ...existing, messages });
+                    }
+                    return next;
+                });
+            }
+        }
+
+        setCurrentPage('mcp-tools');
+        setConversationId(undefined);
+        setMessages([]);
+        setIsProcessing(false);
+        setIsPaused(false);
+
+        // Update URL to /tools
+        window.history.pushState({}, '', '/tools');
+    };
+
     const selectConversation = (id: string) => {
         // Save current conversation state if it's processing
         if (conversationId) {
@@ -1243,6 +1271,7 @@ const App = () => {
                 onExportConversation={exportConversationAsATIF}
                 onGoToSkills={goToSkillsPage}
                 onGoToAutomations={goToAutomationsPage}
+                onGoToMcpTools={goToMcpToolsPage}
                 onClose={() => setSidebarOpen(false)}
             />
 
@@ -1275,6 +1304,9 @@ const App = () => {
                         onConfirmationDismiss={dismissAutomationConfirmation}
                         onViewConversation={selectConversation}
                     />
+                )}
+                {currentPage === 'mcp-tools' && (
+                    <McpToolsPage />
                 )}
                 {currentPage === 'chat' && (
                     <MessageList messages={messages} />

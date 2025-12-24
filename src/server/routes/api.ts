@@ -7,6 +7,7 @@ import { eq, desc, isNull, and } from 'drizzle-orm';
 import { AiModelApi, ChatModel, User, UserChatModel } from '../db/schema';
 import openapi from './openapi';
 import automations from './automations';
+import mcp from './mcp';
 
 import { getDefaultUser } from '../utils';
 import { atifConversationService } from '../processor/conversation/atif/atif.service';
@@ -451,6 +452,9 @@ api.delete('/skills/:name', async (c) => {
 
 // Mount the automations router
 api.route('/automations', automations);
+
+// Mount the MCP router
+api.route('/mcp', mcp);
 
 // Mount the OpenAPI documentation
 api.route('/', openapi);

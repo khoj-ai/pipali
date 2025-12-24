@@ -15,6 +15,7 @@ import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import type { ATIFObservationResult, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
 import { addStepToTrajectory } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
+import { getMcpToolDefinitions, executeMcpTool, isMcpTool } from '../mcp';
 
 interface ResearchConfig {
     chatHistory: ATIFTrajectory;
@@ -31,8 +32,8 @@ interface ResearchConfig {
     confirmationContext?: ConfirmationContext;
 }
 
-// Tool definitions for the research agent
-const tools: ToolDefinition[] = [
+// Built-in tool definitions for the research agent
+const builtInTools: ToolDefinition[] = [
     {
         name: 'view_file',
         description: 'To view the contents of specific files including text, images, PDFs, and Office documents. For text files, use offset and limit to efficiently read large files. Supports images (jpg, jpeg, png, webp), PDFs, Word docs, Excel spreadsheets, and PowerPoint presentations.',
@@ -259,6 +260,19 @@ REQUIRED:
 ];
 
 /**
+ * Get all available tools including built-in tools and MCP tools
+ */
+async function getAllTools(): Promise<ToolDefinition[]> {
+    try {
+        const mcpTools = await getMcpToolDefinitions();
+        return [...builtInTools, ...mcpTools];
+    } catch (error) {
+        console.error('[Director] Failed to load MCP tools:', error);
+        return builtInTools;
+    }
+}
+
+/**
  * Pick the next tool to use based on the current query and previous iterations
  */
 async function pickNextTool(
@@ -269,6 +283,9 @@ async function pickNextTool(
     const isLast = config.chatHistory.steps.length - lastUserIndex == config.maxIterations - 1;
     const previousIterations = config.chatHistory.steps.slice(lastUserIndex + 1);
     const toolChoice = isLast ? 'none' : 'auto';
+
+    // Get all tools (built-in + MCP)
+    const tools = await getAllTools();
 
     // Build tool options string
     const toolOptionsStr = tools
@@ -378,6 +395,16 @@ async function executeTool(
     context?: ToolExecutionContext
 ): Promise<string | Array<{ type: string;[key: string]: any }>> {
     try {
+        // Check if this is an MCP tool (contains "__" in name, e.g., "github__create_issue")
+        if (isMcpTool(toolCall.function_name)) {
+            return await executeMcpTool(
+                toolCall.function_name,
+                toolCall.arguments as Record<string, unknown>,
+                context?.confirmation
+            );
+        }
+
+        // Built-in tools
         switch (toolCall.function_name) {
             case 'list_files': {
                 const result = await listFiles(toolCall.arguments as ListFilesArgs);
