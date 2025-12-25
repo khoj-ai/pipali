@@ -18,6 +18,17 @@ import { addStepToTrajectory } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, executeMcpTool, isMcpTool } from '../mcp';
 
+/** Returns a human-readable time of day based on the hour */
+function getTimeOfDay(date: Date): string {
+    const hour = date.getHours();
+    if (hour >= 5 && hour < 9) return 'early morning';
+    if (hour >= 9 && hour < 12) return 'morning';
+    if (hour >= 12 && hour < 17) return 'afternoon';
+    if (hour >= 17 && hour < 21) return 'evening';
+    if (hour >= 21 && hour < 24) return 'night';
+    return 'late night'; // 0-4
+}
+
 interface ResearchConfig {
     chatHistory: ATIFTrajectory;
     maxIterations: number;
@@ -354,7 +365,7 @@ async function pickNextTool(
         personality_context: await personalityContext,
         skills_context: skillsContext,
         current_date: currentDate ?? now.toLocaleDateString('en-CA'), // YYYY-MM-DD in local time
-        current_time: now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+        current_time: getTimeOfDay(now),
         day_of_week: dayOfWeek ?? now.toLocaleDateString('en-US', { weekday: 'long' }),
         location: location ?? 'Unknown',
         username: username ?? 'User',
