@@ -116,6 +116,7 @@ test.describe('Automations Page', () => {
             await automationsPage.goto();
 
             const automationCard = automationsPage.getAutomationCardByName('Schedule Display Test');
+            await expect(automationCard).toBeVisible();
             const scheduleEl = automationCard.locator(Selectors.automationSchedule);
             await expect(scheduleEl).toBeVisible();
 
@@ -337,6 +338,7 @@ test.describe('Automations Page', () => {
             // Reload and verify schedule changed
             await automationsPage.reloadAutomations();
             const updatedCard = automationsPage.getAutomationCardByPrompt('Test prompt for schedule update');
+            await expect(updatedCard).toBeVisible();
             const scheduleEl = updatedCard.locator(Selectors.automationSchedule);
             const scheduleText = await scheduleEl.textContent();
             expect(scheduleText?.toLowerCase()).toContain('friday');

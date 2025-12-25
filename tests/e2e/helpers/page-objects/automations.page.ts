@@ -168,6 +168,7 @@ export class AutomationsPage {
      */
     async openAutomationDetail(automationName: string): Promise<void> {
         const automationCard = this.getAutomationCardByName(automationName);
+        await automationCard.waitFor({ state: 'visible', timeout: 10000 });
         await automationCard.click();
         await this.detailModal.waitFor({ state: 'visible', timeout: 5000 });
     }
@@ -177,6 +178,7 @@ export class AutomationsPage {
      */
     async openAutomationDetailByPrompt(promptText: string): Promise<void> {
         const automationCard = this.getAutomationCardByPrompt(promptText);
+        await automationCard.waitFor({ state: 'visible', timeout: 10000 });
         await automationCard.click();
         await this.detailModal.waitFor({ state: 'visible', timeout: 5000 });
     }
