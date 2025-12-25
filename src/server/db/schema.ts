@@ -1,4 +1,4 @@
-import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb } from 'drizzle-orm/pg-core';
+import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb, real } from 'drizzle-orm/pg-core';
 import { type ATIFTrajectory } from '../processor/conversation/atif/atif.types';
 import { type TriggerConfig, type TriggerEventData } from '../automation/types';
 import { type ConfirmationRequest } from '../processor/confirmation/confirmation.types';
@@ -153,6 +153,11 @@ export const ChatModel = pgTable('chat_model', {
     modelType: ChatModelTypeEnum('model_type').default('google').notNull(),
     visionEnabled: boolean('vision_enabled').default(false).notNull(),
     aiModelApiId: integer('ai_model_api_id').references(() => AiModelApi.id, { onDelete: 'cascade' }),
+    // Token Cost (USD) for Usage Tracking
+    inputCostPerMillion: real('input_cost_per_million'),
+    outputCostPerMillion: real('output_cost_per_million'),
+    cacheReadCostPerMillion: real('cache_read_cost_per_million'),
+    cacheWriteCostPerMillion: real('cache_write_cost_per_million'),
     ...dbBaseModel,
 });
 

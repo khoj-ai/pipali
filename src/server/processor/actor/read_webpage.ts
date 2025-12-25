@@ -10,6 +10,7 @@ import { db } from '../../db';
 import { WebScraper } from '../../db/schema';
 import { desc, eq } from 'drizzle-orm';
 import { extractRelevantContent } from './webpage_extractor';
+import type { MetricsAccumulator } from '../director/types';
 
 // Timeout for webpage fetch requests (in milliseconds)
 const FETCH_REQUEST_TIMEOUT = 60000;
@@ -229,7 +230,10 @@ function isValidUrl(urlString: string): boolean {
 /**
  * Main read_webpage function
  */
-export async function readWebpage(args: ReadWebpageArgs): Promise<ReadWebpageResult> {
+export async function readWebpage(
+    args: ReadWebpageArgs,
+    metricsAccumulator?: MetricsAccumulator
+): Promise<ReadWebpageResult> {
     const { url, query } = args;
 
     if (!url || url.trim().length === 0) {
@@ -326,7 +330,7 @@ export async function readWebpage(args: ReadWebpageArgs): Promise<ReadWebpageRes
         if (query) {
             try {
                 console.log(`[ReadWebpage] Extracting relevant content for query: "${query}"`);
-                extractedContent = await extractRelevantContent(rawContent, query);
+                extractedContent = await extractRelevantContent(rawContent, query, metricsAccumulator);
                 console.log(`[ReadWebpage] Extracted ${extractedContent.length} chars of relevant content`);
             } catch (error) {
                 console.warn(`[ReadWebpage] Content extraction failed, using raw content: ${error}`);

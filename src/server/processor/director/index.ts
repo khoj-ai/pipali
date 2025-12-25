@@ -1,7 +1,7 @@
 import { type User } from '../../db/schema';
 import type { ToolDefinition } from '../conversation/conversation';
 import { sendMessageToModel } from '../conversation/index';
-import type { ResearchIteration, ToolCall, ToolResult, ToolExecutionContext } from './types';
+import type { ResearchIteration, ToolCall, ToolResult, ToolExecutionContext, MetricsAccumulator } from './types';
 import { listFiles, type ListFilesArgs } from '../actor/list_files';
 import { readFile, type ReadFileArgs } from '../actor/read_file';
 import { grepFiles, type GrepFilesArgs } from '../actor/grep_files';
@@ -13,8 +13,7 @@ import { readWebpage, type ReadWebpageArgs } from '../actor/read_webpage';
 import { askUser, type AskUserArgs } from '../actor/ask_user';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
-import type { ATIFObservationResult, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
-import { addStepToTrajectory } from '../conversation/atif/atif.utils';
+import type { ATIFMetrics, ATIFObservationResult, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, executeMcpTool, isMcpTool } from '../mcp';
 
@@ -373,7 +372,10 @@ async function pickNextTool(
         max_iterations: String(config.maxIterations)
     });
 
-    // Add initial query if this is the first iteration
+    // Check if this is the first agent iteration
+    const hasSystemStep = config.chatHistory.steps.some(s => s.source === 'system');
+    const isFirstIteration = !hasSystemStep;
+
     const messages: ATIFTrajectory = config.chatHistory;
     try {
         // Send message to model to pick next tool
@@ -394,6 +396,17 @@ async function pickNextTool(
         // Check if response is valid
         if (!response || (!response.message && !response.raw)) {
             throw new Error('No response from model');
+        }
+
+        // Extract usage metrics from response
+        let metrics: ATIFMetrics | undefined;
+        if (response.usage) {
+            metrics = {
+                prompt_tokens: response.usage.prompt_tokens,
+                completion_tokens: response.usage.completion_tokens,
+                cached_tokens: response.usage.cached_tokens,
+                cost_usd: response.usage.cost_usd,
+            };
         }
 
         // Parse tool calls from response
@@ -428,6 +441,8 @@ async function pickNextTool(
                 warning: `Repeated tool calls detected. You've already called these tools with the same arguments. Try something different.`,
                 thought: response.thought,
                 message: response.message,
+                metrics,
+                systemPrompt: isFirstIteration ? systemPrompt : undefined,
             };
         }
 
@@ -435,12 +450,15 @@ async function pickNextTool(
             toolCalls: newToolCalls,
             thought: response.thought,
             message: response.message,
+            metrics,
+            systemPrompt: isFirstIteration ? systemPrompt : undefined,
         };
     } catch (error) {
         console.error('Failed to pick next tool:', error);
         return {
             toolCalls: [],
             warning: `Failed to infer information sources to refer: ${error instanceof Error ? error.message : String(error)}`,
+            systemPrompt: isFirstIteration ? systemPrompt : undefined,
         };
     }
 }
@@ -502,7 +520,10 @@ async function executeTool(
                 return result.compiled;
             }
             case 'read_webpage': {
-                const result = await readWebpage(toolCall.arguments as ReadWebpageArgs);
+                const result = await readWebpage(
+                    toolCall.arguments as ReadWebpageArgs,
+                    context?.metricsAccumulator
+                );
                 return result.compiled;
             }
             case 'ask_user': {
@@ -576,7 +597,6 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         // Add warning to trajectory and skip tool execution
         if (iteration.warning) {
             const warningObservations: ATIFObservationResult[] = iteration.toolCalls.map(tc => ({ source_call_id: tc.tool_call_id, content: `Skipped due to warning: ${iteration.warning}` }));
-            addStepToTrajectory(config.chatHistory, 'agent', '', iteration.toolCalls, { results: warningObservations });
             iteration.toolResults = warningObservations;
             yield iteration;
             continue;
@@ -598,12 +618,38 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         // Yield tool calls before execution so UI can show current step
         yield { ...iteration, isToolCallStart: true };
 
-        // Execute all tools in parallel with confirmation context
+        // Create metrics accumulator to capture LLM usage from tool executions
+        const metricsAccumulator: MetricsAccumulator = {
+            prompt_tokens: 0,
+            completion_tokens: 0,
+            cached_tokens: 0,
+            cost_usd: 0,
+        };
+
+        // Execute all tools in parallel with confirmation context and metrics accumulator
         const executionContext: ToolExecutionContext = {
             confirmation: config.confirmationContext,
+            metricsAccumulator,
         };
         iteration.toolResults = await executeToolsInParallel(iteration.toolCalls, executionContext);
-        addStepToTrajectory(config.chatHistory, 'agent', '', iteration.toolCalls, { results: iteration.toolResults });
+
+        // Merge tool execution metrics with director's LLM metrics
+        if (metricsAccumulator.prompt_tokens > 0 || metricsAccumulator.completion_tokens > 0) {
+            if (iteration.metrics) {
+                iteration.metrics.prompt_tokens += metricsAccumulator.prompt_tokens;
+                iteration.metrics.completion_tokens += metricsAccumulator.completion_tokens;
+                iteration.metrics.cached_tokens = (iteration.metrics.cached_tokens || 0) + metricsAccumulator.cached_tokens;
+                iteration.metrics.cost_usd += metricsAccumulator.cost_usd;
+            } else {
+                iteration.metrics = {
+                    prompt_tokens: metricsAccumulator.prompt_tokens,
+                    completion_tokens: metricsAccumulator.completion_tokens,
+                    cached_tokens: metricsAccumulator.cached_tokens || undefined,
+                    cost_usd: metricsAccumulator.cost_usd,
+                };
+            }
+        }
+
         yield iteration;
     }
 }

@@ -14,11 +14,10 @@
  * 4. Handling the final response
  */
 
-import { db } from '../db';
-import { Conversation, User } from '../db/schema';
-import { eq } from 'drizzle-orm';
+import { User } from '../db/schema';
 import { research, ResearchPausedError } from './director';
 import { atifConversationService } from './conversation/atif/atif.service';
+import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import type { ResearchIteration } from './director/types';
 import type { ConfirmationContext } from './confirmation';
@@ -30,6 +29,8 @@ export interface ResearchRunnerOptions {
     conversationId: string;
     /** The user running the research */
     user: typeof User.$inferSelect;
+    /** User message to add before running research */
+    userMessage?: string;
     /** Maximum number of iterations (default: from utils) */
     maxIterations?: number;
     /** Abort signal for pause support */
@@ -86,6 +87,7 @@ export async function* runResearchWithConversation(
     const {
         conversationId,
         user,
+        userMessage,
         maxIterations = defaultMaxIterations,
         abortSignal,
         confirmationContext,
@@ -95,8 +97,7 @@ export async function* runResearchWithConversation(
     } = options;
 
     // Load conversation from DB
-    const results = await db.select().from(Conversation).where(eq(Conversation.id, conversationId));
-    const conversation = results[0];
+    const conversation = await atifConversationService.getConversation(conversationId);
 
     if (!conversation) {
         throw new Error('Conversation not found');
@@ -104,9 +105,31 @@ export async function* runResearchWithConversation(
 
     const trajectory = conversation.trajectory;
 
+    // Check if this is a new conversation (no system prompt yet) or existing
+    const isNewConversation = !trajectory.steps.some(s => s.source === 'system');
+
+    // For existing conversations, persist user message immediately.
+    // For new conversations, we add to in-memory first, then persist after system prompt.
+    if (userMessage) {
+        if (isNewConversation) {
+            // Add to in-memory only - will persist after system prompt for correct ordering
+            addStepToTrajectory(trajectory, 'user', userMessage);
+        } else {
+            // Existing conversation - persist immediately
+            const userStep = await atifConversationService.addStep(
+                conversationId,
+                'user',
+                userMessage,
+            );
+            trajectory.steps.push(userStep);
+        }
+    }
+
     let finalResponse = '';
     let finalThought: string | undefined;
+    let finalMetrics: ResearchIteration['metrics'];
     let iterationCount = 0;
+    let systemPromptPersisted = false;
 
     // Run research loop
     for await (const iteration of research({
@@ -119,6 +142,33 @@ export async function* runResearchWithConversation(
         confirmationContext,
     })) {
         iterationCount++;
+
+        // On first iteration (new conversation), persist system prompt and user message to DB
+        // System prompt is persisted first to maintain correct ordering: system → user → agent
+        if (iteration.systemPrompt && !systemPromptPersisted) {
+            const systemStep = await atifConversationService.addStep(
+                conversationId,
+                'system',
+                iteration.systemPrompt,
+            );
+            // Insert system prompt at start of in-memory trajectory
+            trajectory.steps.unshift(systemStep);
+
+            // Now persist the user message (which was added to in-memory earlier)
+            if (userMessage) {
+                const userStep = await atifConversationService.addStep(
+                    conversationId,
+                    'user',
+                    userMessage,
+                );
+                // Replace the temporary in-memory user step with the DB version
+                const userStepIndex = trajectory.steps.findLastIndex(s => s.source === 'user');
+                if (userStepIndex >= 0) {
+                    trajectory.steps[userStepIndex] = userStep;
+                }
+            }
+            systemPromptPersisted = true;
+        }
 
         // Update reasoning if callback provided
         if (iteration.thought && onReasoning) {
@@ -139,6 +189,7 @@ export async function* runResearchWithConversation(
         if (textTool) {
             finalResponse = textTool.arguments.response || '';
             finalThought = iteration.thought;
+            finalMetrics = iteration.metrics;
 
             // If there's a thought with the final response, yield it for display
             if (iteration.thought || iteration.message) {
@@ -155,23 +206,21 @@ export async function* runResearchWithConversation(
             }
             // Don't add the text tool as a step, we'll add it as the final response
         } else if (iteration.toolCalls.length > 0 && iteration.toolResults) {
-            // Add step to conversation
-            await atifConversationService.addStep(
+            // Persist to DB and update in-memory trajectory so the director sees it in the next iteration
+            const agentStep = await atifConversationService.addStep(
                 conversationId,
                 'agent',
                 iteration.message ?? '',
-                undefined,
+                iteration.metrics,
                 iteration.toolCalls,
                 { results: iteration.toolResults },
                 iteration.thought,
             );
+            trajectory.steps.push(agentStep);
 
             if (onIteration) {
                 onIteration(iteration);
             }
-            yield iteration;
-        } else if (iteration.warning) {
-            // Yield warnings without persisting
             yield iteration;
         }
     }
@@ -181,15 +230,15 @@ export async function* runResearchWithConversation(
         finalResponse = 'Failed to generate response.';
     }
 
-    // Add final response as the last agent step (with reasoning if present)
+    // Add final response as the last agent step
     await atifConversationService.addStep(
         conversationId,
         'agent',
         finalResponse,
+        finalMetrics,
         undefined,
         undefined,
-        undefined,
-        finalThought
+        finalThought,
     );
 
     return {

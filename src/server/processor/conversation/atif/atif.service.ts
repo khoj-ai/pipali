@@ -8,20 +8,19 @@ import { v4 as uuidv4 } from 'uuid';
 import { db } from '../../../db';
 import { Conversation, User } from '../../../db/schema';
 import { createEmptyATIFTrajectory } from './atif.types';
-import type {
-  ATIFTrajectory,
-  ATIFStep,
-  ATIFToolCall,
-  ATIFObservation,
-  ATIFMetrics,
-  ATIFStepSource,
+import {
+  type ATIFTrajectory,
+  type ATIFStep,
+  type ATIFToolCall,
+  type ATIFObservation,
+  type ATIFMetrics,
+  type ATIFStepSource,
 } from './atif.types';
 import {
   addStepToTrajectory,
   validateATIFTrajectory,
   exportATIFTrajectory,
   importATIFTrajectory,
-  calculateFinalMetrics,
 } from './atif.utils';
 
 export interface ConversationWithTrajectory {
@@ -122,7 +121,7 @@ export class ATIFConversationService {
     metrics?: ATIFMetrics,
     toolCalls?: ATIFToolCall[],
     observation?: ATIFObservation,
-    reasoningContent?: string
+    reasoningContent?: string,
   ): Promise<ATIFStep> {
     const conversation = await this.getConversation(conversationId);
 
@@ -132,23 +131,20 @@ export class ATIFConversationService {
 
     const trajectory = conversation.trajectory;
 
-    // Add new step to trajectory
+    // Add step to trajectory
     const step = addStepToTrajectory(
       trajectory,
       source,
       message,
       toolCalls,
       observation,
-      metrics
+      metrics,
     );
 
     // Add reasoning content if provided
     if (reasoningContent) {
       step.reasoning_content = reasoningContent;
     }
-
-    // Recalculate final metrics
-    trajectory.final_metrics = calculateFinalMetrics(trajectory.steps);
 
     // Update database
     await db

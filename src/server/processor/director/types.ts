@@ -1,6 +1,6 @@
 // Minimal types for research director
 
-import type { ATIFObservationResult, ATIFToolCall } from "../conversation/atif/atif.types";
+import type { ATIFMetrics, ATIFObservationResult, ATIFToolCall } from "../conversation/atif/atif.types";
 import type { ConfirmationContext } from "../confirmation";
 
 export interface ToolCall {
@@ -20,6 +20,8 @@ export interface ResearchIteration {
     warning?: string;
     thought?: string;
     message?: string;
+    /** Token usage metrics from the LLM API call for this iteration */
+    metrics?: ATIFMetrics;
     /** Pending confirmation request that needs user response */
     pendingConfirmation?: {
         requestId: string;
@@ -27,6 +29,18 @@ export interface ResearchIteration {
     };
     /** True when yielding tool calls before execution (no results yet) */
     isToolCallStart?: boolean;
+    /** System prompt used for this research session (only set on first iteration) */
+    systemPrompt?: string;
+}
+
+/**
+ * Accumulator for aggregating LLM usage metrics from tool executions
+ */
+export interface MetricsAccumulator {
+    prompt_tokens: number;
+    completion_tokens: number;
+    cached_tokens: number;
+    cost_usd: number;
 }
 
 /**
@@ -35,4 +49,6 @@ export interface ResearchIteration {
 export interface ToolExecutionContext {
     /** Confirmation context for requesting user approval */
     confirmation?: ConfirmationContext;
+    /** Accumulator for LLM usage metrics from tool executions */
+    metricsAccumulator?: MetricsAccumulator;
 }

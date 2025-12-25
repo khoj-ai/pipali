@@ -69,19 +69,13 @@ api.post('/chat', zValidator('json', schema), async (c) => {
         return c.json({ error: 'Failed to create or find conversation' }, 500);
     }
 
-    // Add user message to conversation immediately
-    await atifConversationService.addStep(
-        conversation.id,
-        'user',
-        message
-    );
-
     // Run research using shared runner
     console.log(`[API] 🔬 Starting research...`);
 
     const result = await runResearchToCompletion({
         conversationId: conversation.id,
         user,
+        userMessage: message,
     });
 
     console.log(`[API] ✅ Research complete`);

@@ -6,6 +6,7 @@
  */
 
 import { sendMessageToModel } from '../conversation/index';
+import type { MetricsAccumulator } from '../director/types';
 
 // System prompt for content extraction
 const EXTRACTION_SYSTEM_PROMPT = `As a professional analyst, your job is to extract all pertinent information from a webpage to help answer a user's query.
@@ -48,11 +49,13 @@ Extract all relevant information from the webpage content to answer the target q
  *
  * @param webpageContent - The raw text content of the webpage
  * @param query - The query/question to extract relevant information for
+ * @param metricsAccumulator - Optional accumulator to track LLM usage metrics
  * @returns Extracted relevant content
  */
 export async function extractRelevantContent(
     webpageContent: string,
-    query: string
+    query: string,
+    metricsAccumulator?: MetricsAccumulator
 ): Promise<string> {
     if (!webpageContent || webpageContent.trim().length === 0) {
         return 'No content to extract from.';
@@ -92,6 +95,15 @@ export async function extractRelevantContent(
         if (!response || !response.message) {
             console.warn('[WebpageExtractor] No response from model');
             return webpageContent.slice(0, 5000) + (webpageContent.length > 5000 ? '\n\n[Content truncated...]' : '');
+        }
+
+        // Accumulate usage metrics if accumulator provided
+        if (metricsAccumulator && response.usage) {
+            metricsAccumulator.prompt_tokens += response.usage.prompt_tokens;
+            metricsAccumulator.completion_tokens += response.usage.completion_tokens;
+            metricsAccumulator.cached_tokens += response.usage.cached_tokens || 0;
+            metricsAccumulator.cost_usd += response.usage.cost_usd;
+            console.log(`[WebpageExtractor] Added usage: ${response.usage.prompt_tokens} prompt, ${response.usage.completion_tokens} completion, $${response.usage.cost_usd.toFixed(6)}`);
         }
 
         return response.message.trim();

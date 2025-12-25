@@ -63,7 +63,7 @@ describe('ATIF Type Definitions', () => {
 });
 
 describe('ATIF Trajectory Management', () => {
-  test('should add step to trajectory', () => {
+  test('should add steps with correct order and IDs: system -> user -> agent', () => {
     const trajectory = createEmptyATIFTrajectory(
       'session-123',
       'test-agent',
@@ -71,49 +71,108 @@ describe('ATIF Trajectory Management', () => {
       'gpt-4'
     );
 
-    const step = addStepToTrajectory(
-      trajectory,
-      'user',
-      'Test message'
-    );
+    const systemStep = addStepToTrajectory(trajectory, 'system', 'You are helpful.');
+    const userStep = addStepToTrajectory(trajectory, 'user', 'Hello');
+    const agentStep = addStepToTrajectory(trajectory, 'agent', 'Hi there!');
 
-    expect(trajectory.steps).toHaveLength(1);
-    expect(step.step_id).toBe(1);
-    expect(step.source).toBe('user');
-    expect(step.message).toBe('Test message');
-    expect(step.timestamp).toBeDefined();
+    expect(trajectory.steps).toHaveLength(3);
+
+    // Verify step IDs are sequential
+    expect(systemStep.step_id).toBe(1);
+    expect(userStep.step_id).toBe(2);
+    expect(agentStep.step_id).toBe(3);
+
+    // Verify sources
+    expect(trajectory.steps[0]?.source).toBe('system');
+    expect(trajectory.steps[1]?.source).toBe('user');
+    expect(trajectory.steps[2]?.source).toBe('agent');
+
+    // Verify timestamps exist
+    expect(systemStep.timestamp).toBeDefined();
+    expect(userStep.timestamp).toBeDefined();
+    expect(agentStep.timestamp).toBeDefined();
   });
 
-  test('should calculate final metrics', () => {
+  test('should add step with metrics and accumulate in final_metrics', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    // Steps without metrics
+    addStepToTrajectory(trajectory, 'system', 'System prompt');
+    addStepToTrajectory(trajectory, 'user', 'Hello');
+
+    // First agent response with metrics
+    const step1 = addStepToTrajectory(
+      trajectory,
+      'agent',
+      'First response',
+      undefined,
+      undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cost_usd: 0.01 }
+    );
+
+    // Second agent response with metrics
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Second response',
+      undefined,
+      undefined,
+      { prompt_tokens: 150, completion_tokens: 75, cached_tokens: 20, cost_usd: 0.015 }
+    );
+
+    // Verify step metrics
+    expect(step1.metrics?.prompt_tokens).toBe(100);
+    expect(step1.metrics?.completion_tokens).toBe(50);
+    expect(step1.metrics?.cached_tokens).toBe(10);
+    expect(step1.metrics?.cost_usd).toBe(0.01);
+
+    // Verify accumulated final_metrics
+    expect(trajectory.final_metrics?.total_prompt_tokens).toBe(250);
+    expect(trajectory.final_metrics?.total_completion_tokens).toBe(125);
+    expect(trajectory.final_metrics?.total_cached_tokens).toBe(30);
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0.025);
+    expect(trajectory.final_metrics?.total_steps).toBe(4);
+  });
+
+  test('should handle steps without metrics gracefully', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'system', 'System prompt');
+    addStepToTrajectory(trajectory, 'user', 'Hello');
+    addStepToTrajectory(trajectory, 'agent', 'Response without metrics');
+
+    expect(trajectory.final_metrics?.total_prompt_tokens).toBe(0);
+    expect(trajectory.final_metrics?.total_completion_tokens).toBe(0);
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0);
+    expect(trajectory.final_metrics?.total_steps).toBe(3);
+  });
+
+  test('should calculate final metrics from step array', () => {
     const steps: ATIFStep[] = [
-      {
-        step_id: 1,
-        timestamp: '2024-01-01T10:00:00Z',
-        source: 'user',
-        message: 'Hello',
-      },
+      { step_id: 1, timestamp: '2024-01-01T10:00:00Z', source: 'user', message: 'Hello' },
       {
         step_id: 2,
         timestamp: '2024-01-01T10:00:30Z',
         source: 'agent',
         message: 'Response',
-        metrics: {
-          prompt_tokens: 100,
-          completion_tokens: 50,
-          cached_tokens: 10,
-          cost_usd: 0.01,
-        },
+        metrics: { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cost_usd: 0.01 },
       },
       {
         step_id: 3,
         timestamp: '2024-01-01T10:01:00Z',
         source: 'agent',
         message: 'Another response',
-        metrics: {
-          prompt_tokens: 150,
-          completion_tokens: 75,
-          cost_usd: 0.015,
-        },
+        metrics: { prompt_tokens: 150, completion_tokens: 75, cost_usd: 0.015 },
       },
     ];
 
@@ -128,22 +187,15 @@ describe('ATIF Trajectory Management', () => {
 });
 
 describe('ATIF Validation', () => {
-  test('should validate valid trajectory', () => {
+  test('should validate trajectory with all step sources (system, user, agent)', () => {
     const trajectory: ATIFTrajectory = {
       schema_version: 'ATIF-v1.4',
       session_id: 'session-123',
-      agent: {
-        name: 'test-agent',
-        version: '1.0.0',
-        model_name: 'gpt-4',
-      },
+      agent: { name: 'test-agent', version: '1.0.0', model_name: 'gpt-4' },
       steps: [
-        {
-          step_id: 1,
-          timestamp: '2024-01-01T10:00:00Z',
-          source: 'user',
-          message: 'Test',
-        },
+        { step_id: 1, timestamp: '2024-01-01T10:00:00Z', source: 'system', message: 'System prompt' },
+        { step_id: 2, timestamp: '2024-01-01T10:00:01Z', source: 'user', message: 'Hello' },
+        { step_id: 3, timestamp: '2024-01-01T10:00:02Z', source: 'agent', message: 'Hi there!' },
       ],
     };
 
@@ -152,14 +204,10 @@ describe('ATIF Validation', () => {
     expect(validation.errors).toEqual([]);
   });
 
-  test('should detect invalid trajectory', () => {
+  test('should detect missing required fields', () => {
     const invalidTrajectory: any = {
       session_id: 'test',
-      steps: [
-        {
-          message: 'Test',
-        },
-      ],
+      steps: [{ message: 'Test' }],
     };
 
     const validation = validateATIFTrajectory(invalidTrajectory);
@@ -169,22 +217,13 @@ describe('ATIF Validation', () => {
     expect(validation.errors.some(e => e.includes('Missing step_id'))).toBe(true);
   });
 
-  test('should validate step sources', () => {
+  test('should reject invalid step source', () => {
     const trajectory: ATIFTrajectory = {
       schema_version: 'ATIF-v1.4',
       session_id: 'session-123',
-      agent: {
-        name: 'test-agent',
-        version: '1.0.0',
-        model_name: 'gpt-4',
-      },
+      agent: { name: 'test-agent', version: '1.0.0', model_name: 'gpt-4' },
       steps: [
-        {
-          step_id: 1,
-          timestamp: '2024-01-01T10:00:00Z',
-          source: 'invalid' as any,
-          message: 'Test',
-        },
+        { step_id: 1, timestamp: '2024-01-01T10:00:00Z', source: 'invalid' as any, message: 'Test' },
       ],
     };
 
@@ -195,7 +234,81 @@ describe('ATIF Validation', () => {
 });
 
 describe('ATIF Import/Export', () => {
-  test('should export trajectory as JSON', () => {
+  test('should roundtrip complete conversation with all features', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'panini-agent',
+      '1.0.0',
+      'gpt-4o'
+    );
+
+    // 1. System prompt
+    addStepToTrajectory(trajectory, 'system', 'You are a helpful assistant.');
+
+    // 2. User message
+    addStepToTrajectory(trajectory, 'user', 'List files in my home directory');
+
+    // 3. Agent tool call with metrics
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      '',
+      [{ function_name: 'list_files', arguments: { path: '~' }, tool_call_id: 'call-1' }],
+      { results: [{ source_call_id: 'call-1', content: 'file1.txt\nfile2.txt\nfolder1/' }] },
+      { prompt_tokens: 200, completion_tokens: 30, cached_tokens: 50, cost_usd: 0.002 }
+    );
+
+    // 4. Final agent response with metrics
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Here are the files:\n- file1.txt\n- file2.txt\n- folder1/',
+      undefined,
+      undefined,
+      { prompt_tokens: 250, completion_tokens: 40, cached_tokens: 100, cost_usd: 0.003 }
+    );
+
+    // Export and import
+    const json = exportATIFTrajectory(trajectory);
+    const imported = importATIFTrajectory(json);
+
+    // Verify agent metadata
+    expect(imported.schema_version).toBe(ATIF_SCHEMA_VERSION);
+    expect(imported.session_id).toBe('session-123');
+    expect(imported.agent.name).toBe('panini-agent');
+    expect(imported.agent.model_name).toBe('gpt-4o');
+
+    // Verify step count and sources
+    expect(imported.steps).toHaveLength(4);
+    expect(imported.steps[0]?.source).toBe('system');
+    expect(imported.steps[0]?.message).toBe('You are a helpful assistant.');
+    expect(imported.steps[1]?.source).toBe('user');
+    expect(imported.steps[1]?.message).toBe('List files in my home directory');
+    expect(imported.steps[2]?.source).toBe('agent');
+    expect(imported.steps[3]?.source).toBe('agent');
+
+    // Verify tool calls and observations preserved
+    expect(imported.steps[2]?.tool_calls).toHaveLength(1);
+    expect(imported.steps[2]?.tool_calls?.[0]?.function_name).toBe('list_files');
+    expect(imported.steps[2]?.tool_calls?.[0]?.arguments).toEqual({ path: '~' });
+    expect(imported.steps[2]?.observation?.results).toHaveLength(1);
+    expect(imported.steps[2]?.observation?.results?.[0]?.content).toBe('file1.txt\nfile2.txt\nfolder1/');
+
+    // Verify step metrics preserved
+    expect(imported.steps[2]?.metrics?.prompt_tokens).toBe(200);
+    expect(imported.steps[2]?.metrics?.cached_tokens).toBe(50);
+    expect(imported.steps[3]?.metrics?.prompt_tokens).toBe(250);
+    expect(imported.steps[3]?.metrics?.cost_usd).toBe(0.003);
+
+    // Verify final_metrics preserved
+    expect(imported.final_metrics?.total_prompt_tokens).toBe(450);
+    expect(imported.final_metrics?.total_completion_tokens).toBe(70);
+    expect(imported.final_metrics?.total_cached_tokens).toBe(150);
+    expect(imported.final_metrics?.total_cost_usd).toBe(0.005);
+    expect(imported.final_metrics?.total_steps).toBe(4);
+  });
+
+  test('should export trajectory as valid JSON', () => {
     const trajectory = createEmptyATIFTrajectory('session', 'agent', '1.0', 'model');
     addStepToTrajectory(trajectory, 'user', 'Test message');
 
@@ -207,22 +320,8 @@ describe('ATIF Import/Export', () => {
     expect(parsed.steps).toHaveLength(1);
   });
 
-  test('should import valid trajectory from JSON', () => {
-    const original = createEmptyATIFTrajectory('session', 'agent', '1.0', 'model');
-    addStepToTrajectory(original, 'user', 'Test message');
-
-    const json = exportATIFTrajectory(original);
-    const imported = importATIFTrajectory(json);
-
-    expect(imported.schema_version).toBe(original.schema_version);
-    expect(imported.session_id).toBe(original.session_id);
-    expect(imported.steps).toHaveLength(1);
-    expect(imported.steps[0]?.message).toBe('Test message');
-  });
-
   test('should throw error on invalid JSON import', () => {
     const invalidJson = '{"invalid": "data"}';
-
     expect(() => importATIFTrajectory(invalidJson)).toThrow('Invalid ATIF trajectory');
   });
 });

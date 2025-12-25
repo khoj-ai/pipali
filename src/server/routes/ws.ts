@@ -33,6 +33,8 @@ type ResearchSession = {
     abortController: AbortController;
     conversationId: string;
     user: typeof User.$inferSelect;
+    // User message for initial research
+    userMessage?: string;
     // Confirmation support
     confirmationPreferences: ConfirmationPreferences;
     pendingConfirmation?: {
@@ -127,7 +129,7 @@ async function runResearch(
     ws: ServerWebSocket<WebSocketData>,
     session: ResearchSession
 ): Promise<void> {
-    const { user, conversationId } = session;
+    const { user, conversationId, userMessage } = session;
 
     // Mark session as active in shared store
     setSessionActive(conversationId);
@@ -145,6 +147,7 @@ async function runResearch(
         const runner = runResearchWithConversation({
             conversationId,
             user,
+            userMessage,
             abortSignal: session.abortController.signal,
             confirmationContext,
             onToolCallStart: (iteration) => {
@@ -366,19 +369,13 @@ export const websocketHandler = {
             sendToClient(ws, { type: 'conversation_created' }, conversation.id);
         }
 
-        // Add user message to conversation immediately
-        await atifConversationService.addStep(
-            conversation.id,
-            'user',
-            userQuery
-        );
-
         // Create session for this research
         const session: ResearchSession = {
             isPaused: false,
             abortController: new AbortController(),
             conversationId: conversation.id,
             user,
+            userMessage: userQuery,
             confirmationPreferences: createEmptyPreferences(),
         };
         sessions.set(conversation.id, session);

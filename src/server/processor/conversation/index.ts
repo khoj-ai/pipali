@@ -11,6 +11,12 @@ declare global {
         message?: string;
         raw: Array<{ name: string; args: Record<string, unknown>; id: string }>;
         thought?: string;
+        usage?: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            cached_tokens?: number;
+            cost_usd: number;
+        };
     }) | undefined;
 }
 
@@ -32,19 +38,21 @@ export async function sendMessageToModel(
     // Check for test mock (E2E tests inject this via preload)
     if (globalThis.__paniniMockLLM) {
         const actualQuery = query || history?.steps?.findLast(s => s.source === 'user')?.message || '';
-        console.log(`[Model] 🧪 Using mock for: "${actualQuery.substring(0, 50)}..."`);
+        console.log(`[LLM] 🧪 Using mock for: "${actualQuery.substring(0, 50)}..."`);
         return globalThis.__paniniMockLLM(actualQuery);
     }
 
     const chatModelWithApi: ChatModelWithApi | undefined = await getDefaultChatModel(user);
 
     if (!chatModelWithApi) {
-        console.error(`[Model] ❌ No chat model configured`);
+        console.error(`[LLM] ❌ No chat model configured`);
         throw new Error('No chat model configured.');
     }
 
-    console.log(`[Model] 🤖 Using: ${chatModelWithApi.chatModel.name} (${chatModelWithApi.chatModel.modelType})`);
-    console.log(`[Model] Provider: ${chatModelWithApi.aiModelApi?.name || 'Unknown'}`);
+    const modelName = chatModelWithApi.chatModel.friendlyName || chatModelWithApi.chatModel.name;
+    const aiModelApiName = chatModelWithApi.aiModelApi?.name || 'Device';
+    const aiModelType = chatModelWithApi.chatModel.modelType;
+    console.log(`[LLM] 🤖 Using ${modelName} via ${aiModelApiName} API`);
 
     const messages: ChatMessage[] = generateChatmlMessagesWithContext(
         query,
@@ -58,10 +66,18 @@ export async function sendMessageToModel(
         fastMode,
     );
 
-    console.log(`[Model] Messages: ${messages.length}, Tools: ${tools?.length || 0}`);
+    console.log(`[LLM] Messages: ${messages.length}, Tools: ${tools?.length || 0}`);
+
+    // Extract pricing from chat model for cost calculation
+    const pricing = {
+        inputCostPerMillion: chatModelWithApi.chatModel.inputCostPerMillion,
+        outputCostPerMillion: chatModelWithApi.chatModel.outputCostPerMillion,
+        cacheReadCostPerMillion: chatModelWithApi.chatModel.cacheReadCostPerMillion,
+        cacheWriteCostPerMillion: chatModelWithApi.chatModel.cacheWriteCostPerMillion,
+    };
 
     // Depending on the model type, you would call the appropriate function
-    if (chatModelWithApi?.chatModel.modelType === 'openai') {
+    if (aiModelType === 'openai') {
         const startTime = Date.now();
         const response = await sendMessageToGpt(
             messages,
@@ -70,10 +86,11 @@ export async function sendMessageToModel(
             chatModelWithApi.aiModelApi?.apiBaseUrl,
             tools,
             toolChoice,
+            pricing,
         );
-        console.log(`[Model] ⏱️ Response received in ${(Date.now() - startTime) / 1000.0}ms`);
+        console.log(`[LLM] ⏱️ Response received in ${(Date.now() - startTime) / 1000.0}ms`);
         return response;
     }
 
-    console.warn(`[Model] ⚠️ Unsupported model type: ${chatModelWithApi.chatModel.modelType}`);
+    console.warn(`[LLM] ⚠️ Unsupported model type: ${aiModelType}`);
 }

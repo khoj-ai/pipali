@@ -122,6 +122,12 @@ declare global {
         message?: string;
         raw: Array<{ name: string; args: Record<string, unknown>; id: string }>;
         thought?: string;
+        usage?: {
+            prompt_tokens: number;
+            completion_tokens: number;
+            cached_tokens?: number;
+            cost_usd: number;
+        };
     }) | undefined;
     var __paniniMockReset: typeof resetMockState | undefined;
 }

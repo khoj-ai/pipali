@@ -262,7 +262,7 @@ export function createEmptyATIFTrajectory(
   sessionId: string,
   agentName: string,
   agentVersion: string,
-  modelName: string
+  modelName: string,
 ): ATIFTrajectory {
   return {
     schema_version: ATIF_SCHEMA_VERSION,
