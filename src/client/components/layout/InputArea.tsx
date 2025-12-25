@@ -17,7 +17,7 @@ interface InputAreaProps {
     onPause: () => void;
     onResume: () => void;
     pendingConfirmation?: ConfirmationRequest;
-    onConfirmationRespond: (optionId: string) => void;
+    onConfirmationRespond: (optionId: string, guidance?: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
     onBackgroundSend?: () => void;
 }

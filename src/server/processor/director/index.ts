@@ -10,6 +10,7 @@ import { writeFile, type WriteFileArgs } from '../actor/write_file';
 import { bashCommand, type BashCommandArgs } from '../actor/bash_command';
 import { webSearch, type WebSearchArgs } from '../actor/search_web';
 import { readWebpage, type ReadWebpageArgs } from '../actor/read_webpage';
+import { askUser, type AskUserArgs } from '../actor/ask_user';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import type { ATIFObservationResult, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
@@ -244,6 +245,52 @@ REQUIRED:
         },
     },
     {
+        name: 'ask_user',
+        description: `Ask the user a question or send them a notification. This tool displays a structured prompt that the user can see and respond to even when not actively viewing the chat - making it ideal for background tasks and automations.
+
+Use this tool to:
+- Gather user preferences or requirements before proceeding
+- Clarify ambiguous instructions when multiple interpretations are possible
+- Get decisions on implementation choices (e.g., which approach to take, which files to modify)
+- Offer choices to the user about what direction to take
+- Send important status updates or notifications that require acknowledgment
+
+Benefits over plain text responses:
+- Notifications are visible even when user is not in the chat (appears as a toast)
+- Structured options make it easy for users to respond with a single click
+- Users can always provide a custom text response if none of the options fit
+
+Tips:
+- If you recommend a specific option, list it first and add "(Recommended)" to the label
+- Keep options concise (1-5 words) with clear, distinct choices
+- Use 2-4 options for best user experience
+- Omit options entirely to send a notification that requires acknowledgment`,
+        schema: {
+            type: 'object',
+            properties: {
+                title: {
+                    type: 'string',
+                    description: 'Short heading for the question or notification. Should be clear and specific.',
+                },
+                description: {
+                    type: 'string',
+                    description: 'Longer explanation providing context, trade-offs, or implications of each choice.',
+                },
+                options: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Multiple choice option labels (2-4 recommended). If empty, functions as a notification requiring acknowledgment. Users can always type a custom response instead of selecting an option.',
+                },
+                input_type: {
+                    type: 'string',
+                    enum: ['choice', 'text_input'],
+                    description: "Type of input: 'choice' for multiple choice options (default), 'text_input' for free-form text response.",
+                },
+            },
+            required: ['title'],
+        },
+    },
+    {
         name: 'text',
         description: 'Use this when you have gathered enough information and are ready to respond to the user.',
         schema: {
@@ -445,6 +492,13 @@ async function executeTool(
             }
             case 'read_webpage': {
                 const result = await readWebpage(toolCall.arguments as ReadWebpageArgs);
+                return result.compiled;
+            }
+            case 'ask_user': {
+                const result = await askUser(
+                    toolCall.arguments as AskUserArgs,
+                    context?.confirmation
+                );
                 return result.compiled;
             }
             case 'text': {

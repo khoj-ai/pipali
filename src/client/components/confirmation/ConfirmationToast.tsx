@@ -1,7 +1,7 @@
 // Toast notification for confirmation requests from background tasks
 
 import React, { useState } from 'react';
-import { ChevronDown, ChevronUp, X, Bot, Clock, Send } from 'lucide-react';
+import { ChevronDown, ChevronUp, X, Bot, Clock, Send, MessageCircleQuestion } from 'lucide-react';
 import type { PendingConfirmation } from '../../types/confirmation';
 import { DiffView } from '../tool-views/DiffView';
 import { parseCommandMessage, shortenHomePath } from '../../utils/parseCommand';
@@ -23,6 +23,7 @@ export function ConfirmationToast({
 
     const { request, source, expiresAt, key } = confirmation;
     const isAutomation = source.type === 'automation';
+    const isAgentQuestion = request.operation === 'ask_user';
 
     const commandInfo = request.message ? parseCommandMessage(request.message) : null;
     const expandable = hasExpandableContent(request);
@@ -38,7 +39,7 @@ export function ConfirmationToast({
     };
 
     return (
-        <div className={`confirmation-toast ${isAutomation ? 'confirmation-toast--automation' : ''}`}>
+        <div className={`confirmation-toast ${isAutomation ? 'confirmation-toast--automation' : ''} ${isAgentQuestion ? 'confirmation-toast--question' : ''}`}>
             <div className="toast-header">
                 <div className="toast-info">
                     {/* Source indicator */}
@@ -51,7 +52,11 @@ export function ConfirmationToast({
                         <span className="toast-conversation">{source.conversationTitle}</span>
                     )}
 
-                    <span className="toast-title">{request.title}</span>
+                    <span className={`toast-title ${isAgentQuestion ? 'agent-question-title' : ''}`}>
+                        {isAgentQuestion && <MessageCircleQuestion size={12} className="question-icon" />}
+                        {request.title}
+                    </span>
+                    {isAgentQuestion && <span className="question-badge">Question</span>}
 
                     {/* Command reason or message preview */}
                     {commandInfo?.reason && (
@@ -144,7 +149,7 @@ export function ConfirmationToast({
                     <input
                         type="text"
                         className="toast-guidance-input"
-                        placeholder="Or provide alternative instructions..."
+                        placeholder={isAgentQuestion ? "Or type a custom response..." : "Or provide alternative instructions..."}
                         value={guidanceText}
                         onChange={(e) => setGuidanceText(e.target.value)}
                         onKeyDown={(e) => {

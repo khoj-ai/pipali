@@ -1825,6 +1825,49 @@ body {
     color: #991b1b;
 }
 
+/* Question badge for agent questions */
+.question-badge {
+    font-size: 11px;
+    font-weight: 500;
+    padding: 4px 8px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    background: #dbeafe;
+    color: #1e40af;
+}
+
+/* Agent question title styling */
+.agent-question-title {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #1e40af;
+}
+
+.agent-question-title .question-icon {
+    flex-shrink: 0;
+}
+
+/* Agent question dialog styling */
+.confirmation-dialog.agent-question {
+    border-color: #93c5fd;
+}
+
+.confirmation-dialog.agent-question .confirmation-header {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border-bottom-color: #bfdbfe;
+}
+
+/* Toast agent question styling */
+.confirmation-toast--question {
+    border-color: #93c5fd;
+}
+
+.confirmation-toast--question .toast-header {
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+}
+
 /* Badges container for operation type and risk level */
 .confirmation-badges {
     display: flex;
@@ -2224,6 +2267,52 @@ body {
 
 .confirmation-btn.danger .btn-shortcut {
     background: rgba(153, 27, 27, 0.15);
+}
+
+/* Confirmation dialog guidance section */
+.confirmation-guidance-section {
+    padding: 12px 20px 16px;
+    border-top: 1px solid var(--border-light);
+}
+
+.confirmation-guidance-input-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.confirmation-guidance-input {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 13px;
+    font-family: inherit;
+}
+
+.confirmation-guidance-input:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.confirmation-guidance-input::placeholder {
+    color: var(--text-muted);
+}
+
+.confirmation-guidance-send {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px 12px !important;
+    min-width: 36px;
+    flex: 0;
+}
+
+.confirmation-guidance-send:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
 }
 
 /* Diff display styles */

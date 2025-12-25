@@ -2,14 +2,15 @@
 // Displays a modal dialog for user confirmation of dangerous operations
 // Positioned above the chat input with keyboard shortcuts (1, 2, 3)
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { MessageCircleQuestion, Send } from 'lucide-react';
 import type { ConfirmationRequest, ConfirmationOption } from '../../types';
 import { DiffView } from '../tool-views/DiffView';
 import { parseCommandMessage, shortenHomePath } from '../../utils/parseCommand';
 
 interface ConfirmationDialogProps {
     request: ConfirmationRequest;
-    onRespond: (optionId: string) => void;
+    onRespond: (optionId: string, guidance?: string) => void;
 }
 
 /**
@@ -51,9 +52,18 @@ function formatArgValue(value: unknown): React.ReactNode {
 }
 
 export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogProps) {
+    const [guidanceText, setGuidanceText] = useState('');
+
+    // Check if this is an agent question
+    const isAgentQuestion = request.operation === 'ask_user';
+
     // Handle keyboard shortcuts
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
+            // Don't capture keyboard if typing in guidance input
+            if (document.activeElement?.tagName === 'INPUT') {
+                return;
+            }
             // Number keys 1, 2, 3 for quick selection
             const keyNum = parseInt(e.key);
             if (keyNum >= 1 && keyNum <= request.options.length) {
@@ -68,6 +78,12 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [request.options, onRespond]);
+
+    const handleSendGuidance = () => {
+        if (guidanceText.trim()) {
+            onRespond('guidance', guidanceText.trim());
+        }
+    };
 
     // Get button style class based on option style
     const getButtonClass = (option: ConfirmationOption): string => {
@@ -123,16 +139,22 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
 
     return (
         <div className="confirmation-container">
-            <div className="confirmation-dialog">
+            <div className={`confirmation-dialog ${isAgentQuestion ? 'agent-question' : ''}`}>
                 <div className="confirmation-header">
-                    <h3 className="confirmation-title">{request.title}</h3>
+                    <h3 className={`confirmation-title ${isAgentQuestion ? 'agent-question-title' : ''}`}>
+                        {isAgentQuestion && <MessageCircleQuestion size={16} className="question-icon" />}
+                        {request.title}
+                    </h3>
                     <div className="confirmation-badges">
-                        {request.context?.operationType && (
+                        {isAgentQuestion && (
+                            <span className="question-badge">Question</span>
+                        )}
+                        {request.context?.operationType && !isAgentQuestion && (
                             <span className={getOperationTypePillClass(request.context.operationType)}>
                                 {request.context.operationType}
                             </span>
                         )}
-                        {request.context?.riskLevel && (
+                        {request.context?.riskLevel && !isAgentQuestion && (
                             <span className={getRiskBadgeClass(request.context.riskLevel)}>
                                 {request.context.riskLevel} risk
                             </span>
@@ -239,6 +261,33 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
                             {option.label}
                         </button>
                     ))}
+                </div>
+
+                {/* Free-form input for custom response */}
+                <div className="confirmation-guidance-section">
+                    <div className="confirmation-guidance-input-row">
+                        <input
+                            type="text"
+                            className="confirmation-guidance-input"
+                            placeholder={isAgentQuestion ? "Or type a custom response..." : "Or provide alternative instructions..."}
+                            value={guidanceText}
+                            onChange={(e) => setGuidanceText(e.target.value)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' && guidanceText.trim()) {
+                                    e.preventDefault();
+                                    handleSendGuidance();
+                                }
+                            }}
+                        />
+                        <button
+                            className="confirmation-btn confirmation-guidance-send"
+                            onClick={handleSendGuidance}
+                            disabled={!guidanceText.trim()}
+                            title="Send custom response"
+                        >
+                            <Send size={14} />
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
