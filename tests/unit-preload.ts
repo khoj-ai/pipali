@@ -30,6 +30,15 @@ const dbSchemaModule = import.meta.resolve('../src/server/db/schema');
 mock.module(dbSchemaModule, () => {
     return {
         User: { $inferSelect: {} },
+        WebSearchProvider: {
+            enabled: 'enabled',
+            priority: 'priority',
+            type: 'type',
+            apiKey: 'apiKey',
+            apiBaseUrl: 'apiBaseUrl',
+            name: 'name',
+            $inferSelect: {},
+        },
         WebScraper: {
             enabled: 'enabled',
             priority: 'priority',

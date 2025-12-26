@@ -50,6 +50,13 @@
       "when": 1766732665973,
       "tag": "0006_burly_living_mummy",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1766788416725,
+      "tag": "0007_wooden_major_mapleleaf",
+      "breakpoints": true
     }
   ]
 }

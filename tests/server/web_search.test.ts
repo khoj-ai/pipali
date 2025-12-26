@@ -8,6 +8,9 @@ describe('webSearch', () => {
     beforeEach(() => {
         // Reset environment
         process.env = { ...originalEnv };
+        // Clear all search provider API keys to start fresh
+        delete process.env.SERPER_DEV_API_KEY;
+        delete process.env.EXA_API_KEY;
     });
 
     afterEach(() => {
@@ -67,13 +70,11 @@ describe('webSearch', () => {
         const result = await webSearch({ query: 'test query' });
 
         expect(result.query).toContain('test query');
-        expect(result.compiled).toContain('Found 2 results');
+        expect(result.compiled).toContain('2 found');
         expect(result.compiled).toContain('Test Result 1');
         expect(result.compiled).toContain('https://example.com/1');
         expect(result.compiled).toContain('This is a test snippet');
         expect(result.compiled).toContain('Test Result 2');
-        expect(result.results).toBeDefined();
-        expect(result.results?.length).toBe(2);
     });
 
     test('should respect max_results parameter', async () => {
@@ -207,13 +208,9 @@ describe('webSearch', () => {
 
         const result = await webSearch({ query: 'test' });
 
-        expect(result.results).toBeDefined();
-        const results = result.results ?? [];
-        expect(results.length).toBe(1);
-        const first = results[0]!;
-        expect(first.title).toBe('Result Title');
-        expect(first.link).toBe('https://example.com');
-        expect(first.snippet).toBe('Snippet text');
+        expect(result.compiled).toContain('Result Title');
+        expect(result.compiled).toContain('https://example.com');
+        expect(result.compiled).toContain('Snippet text');
     });
 
     test('should use correct Exa API endpoint', async () => {
@@ -263,5 +260,175 @@ describe('webSearch', () => {
         await webSearch({ query: 'test' });
 
         expect(capturedUrl.toString()).toContain('custom-exa.example.com/search');
+    });
+
+    // Serper-specific tests
+    test('should format Serper search results correctly', async () => {
+        process.env.SERPER_DEV_API_KEY = 'test-serper-key';
+
+        fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({
+                organic: [
+                    {
+                        title: 'Serper Result 1',
+                        link: 'https://example.com/serper/1',
+                        snippet: 'This is a Serper snippet',
+                    },
+                    {
+                        title: 'Serper Result 2',
+                        link: 'https://example.com/serper/2',
+                        snippet: 'Another Serper snippet',
+                    },
+                ],
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            })
+        );
+
+        const result = await webSearch({ query: 'test serper' });
+
+        expect(result.query).toContain('test serper');
+        expect(result.compiled).toContain('2 found');
+        expect(result.compiled).toContain('Serper Result 1');
+        expect(result.compiled).toContain('https://example.com/serper/1');
+    });
+
+    test('should include Serper answerBox in results', async () => {
+        process.env.SERPER_DEV_API_KEY = 'test-serper-key';
+
+        fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({
+                organic: [
+                    {
+                        title: 'Organic Result',
+                        link: 'https://example.com/organic',
+                        snippet: 'Organic snippet',
+                    },
+                ],
+                answerBox: {
+                    title: 'Featured Answer Title',
+                    snippet: 'This is the featured answer',
+                    link: 'https://example.com/answer',
+                },
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            })
+        );
+
+        const result = await webSearch({ query: 'what is something' });
+
+        expect(result.compiled).toContain('Featured Answer');
+        expect(result.compiled).toContain('Featured Answer Title');
+        expect(result.compiled).toContain('This is the featured answer');
+    });
+
+    test('should include Serper knowledgeGraph in results', async () => {
+        process.env.SERPER_DEV_API_KEY = 'test-serper-key';
+
+        fetchSpy = spyOn(globalThis, 'fetch').mockResolvedValue(
+            new Response(JSON.stringify({
+                organic: [
+                    {
+                        title: 'Organic Result',
+                        link: 'https://example.com/organic',
+                        snippet: 'Organic snippet',
+                    },
+                ],
+                knowledgeGraph: {
+                    title: 'Albert Einstein',
+                    type: 'Physicist',
+                    description: 'German-born theoretical physicist',
+                },
+            }), {
+                status: 200,
+                headers: { 'Content-Type': 'application/json' },
+            })
+        );
+
+        const result = await webSearch({ query: 'Albert Einstein' });
+
+        expect(result.compiled).toContain('Albert Einstein');
+        expect(result.compiled).toContain('Physicist');
+    });
+
+    test('should use correct Serper API endpoint', async () => {
+        process.env.SERPER_DEV_API_KEY = 'test-serper-key';
+
+        let capturedUrl: string | URL | Request = '';
+        const preconnect = (globalThis.fetch as typeof fetch).preconnect;
+        const fetchImpl = Object.assign(
+            async (...args: Parameters<typeof fetch>) => {
+                const [url] = args;
+                capturedUrl = url;
+                return new Response(JSON.stringify({ organic: [] }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            },
+            { preconnect }
+        ) satisfies typeof fetch;
+
+        fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchImpl);
+
+        await webSearch({ query: 'test' });
+
+        expect(capturedUrl.toString()).toContain('google.serper.dev/search');
+    });
+
+    test('should prefer Serper over Exa when both are configured', async () => {
+        process.env.SERPER_DEV_API_KEY = 'test-serper-key';
+        process.env.EXA_API_KEY = 'test-exa-key';
+
+        let capturedUrl: string | URL | Request = '';
+        const preconnect = (globalThis.fetch as typeof fetch).preconnect;
+        const fetchImpl = Object.assign(
+            async (...args: Parameters<typeof fetch>) => {
+                const [url] = args;
+                capturedUrl = url;
+                return new Response(JSON.stringify({
+                    organic: [{ title: 'Result', link: 'https://example.com', snippet: 'Test' }],
+                }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            },
+            { preconnect }
+        ) satisfies typeof fetch;
+
+        fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchImpl);
+
+        await webSearch({ query: 'test' });
+
+        // Serper should be tried first
+        expect(capturedUrl.toString()).toContain('serper.dev');
+    });
+
+    test('should truncate long queries for Serper', async () => {
+        process.env.SERPER_DEV_API_KEY = 'test-serper-key';
+
+        let capturedPayload: any;
+        const preconnect = (globalThis.fetch as typeof fetch).preconnect;
+        const fetchImpl = Object.assign(
+            async (...args: Parameters<typeof fetch>) => {
+                const [_url, options] = args;
+                capturedPayload = JSON.parse(options?.body as string);
+                return new Response(JSON.stringify({ organic: [] }), {
+                    status: 200,
+                    headers: { 'Content-Type': 'application/json' },
+                });
+            },
+            { preconnect }
+        ) satisfies typeof fetch;
+
+        fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchImpl);
+
+        // Create a query longer than 2048 characters
+        const longQuery = 'a'.repeat(3000);
+        await webSearch({ query: longQuery });
+
+        // Should be truncated to 2048 characters
+        expect(capturedPayload.q.length).toBe(2048);
     });
 });
