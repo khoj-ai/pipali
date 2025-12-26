@@ -80,9 +80,6 @@ export async function extractRelevantContent(
         // This handles model selection and API routing automatically
         const response = await sendMessageToModel(
             extractionPrompt,      // query
-            undefined,             // queryFiles
-            undefined,             // queryImages
-            undefined,             // context
             undefined,             // history
             EXTRACTION_SYSTEM_PROMPT, // systemMessage
             undefined,             // tools (none needed for extraction)

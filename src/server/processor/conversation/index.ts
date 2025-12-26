@@ -23,9 +23,6 @@ declare global {
 export async function sendMessageToModel(
     // Context
     query: string,
-    queryFiles?: string[],
-    queryImages?: string[],
-    context?: string,
     history?: ATIFTrajectory,
     systemMessage?: string,
     // Model Config
@@ -56,9 +53,6 @@ export async function sendMessageToModel(
 
     const messages: ChatMessage[] = generateChatmlMessagesWithContext(
         query,
-        queryFiles,
-        queryImages,
-        context,
         history?.steps,
         systemMessage,
         chatModelWithApi.chatModel,

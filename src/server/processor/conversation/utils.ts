@@ -5,9 +5,6 @@ import type { ATIFStep, ATIFToolCall } from './atif/atif.types';
 
 export function generateChatmlMessagesWithContext(
     query: string,
-    queryFiles?: string[],
-    queryImages?: string[],
-    context?: string,
     history?: ATIFStep[],
     systemMessage?: string,
     chatModel?: { name: string; visionEnabled: boolean },

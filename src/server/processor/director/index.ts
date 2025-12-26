@@ -381,9 +381,6 @@ async function pickNextTool(
         // Send message to model to pick next tool
         const response = await sendMessageToModel(
             "",
-            undefined,
-            undefined,
-            undefined,
             messages,
             systemPrompt,
             tools,
