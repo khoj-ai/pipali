@@ -38,6 +38,12 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Finder (MacOS) folder config
 .DS_Store
 
+# tauri
+src-tauri/target
+src-tauri/gen
+src-tauri/binaries
+src-tauri-frontend/dist
+
 # AI assistants
 AGENTS.md
 CLAUDE.md

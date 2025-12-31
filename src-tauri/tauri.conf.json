@@ -1,0 +1,56 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Panini",
+  "version": "0.1.0",
+  "identifier": "dev.khoj.panini",
+  "build": {
+    "beforeDevCommand": "cd src-tauri-frontend && bun run dev",
+    "devUrl": "http://localhost:5173",
+    "beforeBuildCommand": "cd src-tauri-frontend && bun run build",
+    "frontendDist": "../src-tauri-frontend/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Panini",
+        "width": 1200,
+        "height": 800,
+        "minWidth": 800,
+        "minHeight": 600,
+        "resizable": true,
+        "fullscreen": false,
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self' tauri: asset:; connect-src 'self' http://127.0.0.1:* ws://localhost/ws/chat ws://127.0.0.1:* tauri: asset:; style-src 'self' 'unsafe-inline' tauri: asset:; script-src 'self' 'unsafe-inline' tauri: asset:; img-src 'self' data: blob: tauri: asset:; font-src 'self' data: tauri: asset:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/panini-server"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "10.15"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    }
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}

@@ -12,6 +12,13 @@
     "build:linux-x64": "bun run scripts/build.ts --target=bun-linux-x64",
     "build:linux-arm64": "bun run scripts/build.ts --target=bun-linux-arm64",
     "build:windows-x64": "bun run scripts/build.ts --target=bun-windows-x64",
+    "tauri:dev": "bunx tauri dev",
+    "tauri:build": "bun run scripts/build-tauri.ts",
+    "tauri:build:debug": "bun run scripts/build-tauri.ts --debug",
+    "tauri:build:darwin-arm64": "bun run scripts/build-tauri.ts --platform=darwin-arm64",
+    "tauri:build:darwin-x64": "bun run scripts/build-tauri.ts --platform=darwin-x64",
+    "tauri:build:linux-x64": "bun run scripts/build-tauri.ts --platform=linux-x64",
+    "tauri:build:windows-x64": "bun run scripts/build-tauri.ts --platform=windows-x64",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:headed": "playwright test --headed",
@@ -19,14 +26,19 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.48.0",
+    "@tauri-apps/cli": "^2",
     "@types/bun": "latest",
     "@types/react": "^19.2.7",
-    "@types/react-dom": "^19.2.3"
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^4.4.1",
+    "vite": "^6.3.5"
   },
   "peerDependencies": {
     "typescript": "^5.8.3"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-shell": "^2",
     "@electric-sql/pglite": "^0.3.14",
     "@hono/swagger-ui": "^0.5.2",
     "@hono/zod-openapi": "^1.1.5",

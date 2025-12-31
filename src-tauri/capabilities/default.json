@@ -1,0 +1,22 @@
+{
+  "$schema": "https://schemas.tauri.app/config/capability",
+  "identifier": "default",
+  "description": "Default capability set for Panini",
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:webview:default",
+    {
+      "identifier": "shell:allow-spawn",
+      "allow": [
+        {
+          "name": "binaries/panini-server",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    },
+    "shell:allow-kill",
+    "shell:allow-stdin-write"
+  ]
+}

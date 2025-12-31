@@ -1,0 +1,27 @@
+[package]
+name = "panini"
+version = "0.1.0"
+description = "Panini - Personal AI Assistant"
+authors = ["Khoj Team"]
+edition = "2021"
+
+# Note: crate-type not specified - defaults to rlib, which is what we need
+# for linking with main.rs binary
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+log = "0.4"
+env_logger = "0.11"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

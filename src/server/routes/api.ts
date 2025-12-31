@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { cors } from 'hono/cors';
 import { z } from 'zod';
 import { zValidator } from '@hono/zod-validator';
 import { db, getDefaultChatModel } from '../db';
@@ -17,6 +18,21 @@ import { getActiveStatus } from '../sessions';
 import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill } from '../skills';
 
 const api = new Hono().basePath('/api');
+
+// Enable CORS for Tauri desktop app (tauri://localhost origin) and local development
+api.use('*', cors({
+    origin: (origin) => {
+        // Allow Tauri app, localhost dev servers, and same-origin requests
+        if (!origin) return '*'; // Same-origin or non-browser requests
+        if (origin.startsWith('tauri://')) return origin;
+        if (origin.startsWith('http://localhost:')) return origin;
+        if (origin.startsWith('http://127.0.0.1:')) return origin;
+        return null; // Reject other origins
+    },
+    allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowHeaders: ['Content-Type', 'Authorization'],
+    credentials: true,
+}));
 
 // Health check endpoint for Tauri sidecar readiness detection
 api.get('/health', (c) => c.json({ status: 'ok' }));
