@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Terminal, Globe, Plus, Trash2 } from 'lucide-react';
 import type { McpTransportType, CreateMcpServerInput } from '../../types/mcp';
+import { apiFetch } from '../../utils/api';
 
 interface CreateMcpServerModalProps {
     onClose: () => void;
@@ -77,7 +78,7 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
         };
 
         try {
-            const res = await fetch('/api/mcp/servers', {
+            const res = await apiFetch('/api/mcp/servers', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(input),

@@ -5,6 +5,7 @@ import { McpServerCard } from './McpServerCard';
 import { CreateMcpServerModal } from './CreateMcpServerModal';
 import { McpServerDetailModal } from './McpServerDetailModal';
 import { McpToolsEmpty } from './McpToolsEmpty';
+import { apiFetch } from '../../utils/api';
 
 export function McpToolsPage() {
     const [servers, setServers] = useState<McpServerInfo[]>([]);
@@ -19,7 +20,7 @@ export function McpToolsPage() {
 
     const fetchServers = async () => {
         try {
-            const res = await fetch('/api/mcp/servers');
+            const res = await apiFetch('/api/mcp/servers');
             if (res.ok) {
                 const data = await res.json();
                 setServers(data.servers || []);
@@ -35,7 +36,7 @@ export function McpToolsPage() {
         setIsReloading(true);
         try {
             // First reload servers on the backend
-            await fetch('/api/mcp/reload', { method: 'POST' });
+            await apiFetch('/api/mcp/reload', { method: 'POST' });
             // Then fetch updated list
             await fetchServers();
         } catch (e) {

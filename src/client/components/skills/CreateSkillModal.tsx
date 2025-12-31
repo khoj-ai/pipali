@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { X, Loader2, Globe, FolderOpen } from 'lucide-react';
+import { apiFetch } from '../../utils/api';
 
 interface CreateSkillModalProps {
     onClose: () => void;
@@ -27,7 +28,7 @@ export function CreateSkillModal({ onClose, onCreated }: CreateSkillModalProps) 
         setError(null);
 
         try {
-            const res = await fetch('/api/skills', {
+            const res = await apiFetch('/api/skills', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ name, description, instructions, source }),

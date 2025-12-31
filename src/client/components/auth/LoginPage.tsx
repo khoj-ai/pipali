@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Loader2 } from 'lucide-react';
+import { apiFetch, getApiBaseUrl } from '../../utils/api';
 
 interface LoginPageProps {
     onLoginSuccess: () => void;
@@ -15,7 +16,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
         try {
             // Get the OAuth URL from the server
-            const res = await fetch('/api/auth/oauth/google/url');
+            const res = await apiFetch('/api/auth/oauth/google/url');
             if (!res.ok) {
                 throw new Error('Failed to get OAuth URL');
             }
@@ -36,14 +37,15 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
         try {
             // Get the platform URL and redirect to platform login
-            const res = await fetch('/api/auth/platform-url');
+            const res = await apiFetch('/api/auth/platform-url');
             if (!res.ok) {
                 throw new Error('Failed to get platform URL');
             }
             const { url } = await res.json();
 
-            // Get callback URL for this app
-            const callbackUrl = `${window.location.origin}/api/auth/callback`;
+            // Get callback URL for this app (use sidecar URL if configured)
+            const baseUrl = getApiBaseUrl() || window.location.origin;
+            const callbackUrl = `${baseUrl}/api/auth/callback`;
 
             // Redirect to platform login with callback
             window.location.href = `${url}/login?redirect_uri=${encodeURIComponent(callbackUrl)}`;

@@ -7,6 +7,7 @@ import { SkillCard } from './SkillCard';
 import { SkillsEmpty } from './SkillsEmpty';
 import { CreateSkillModal } from './CreateSkillModal';
 import { SkillDetailModal } from './SkillDetailModal';
+import { apiFetch } from '../../utils/api';
 
 export function SkillsPage() {
     const [skills, setSkills] = useState<SkillInfo[]>([]);
@@ -22,7 +23,7 @@ export function SkillsPage() {
 
     const fetchSkills = async () => {
         try {
-            const res = await fetch('/api/skills');
+            const res = await apiFetch('/api/skills');
             if (res.ok) {
                 const data = await res.json();
                 setSkills(data.skills || []);
@@ -38,7 +39,7 @@ export function SkillsPage() {
         setIsReloading(true);
         setErrors([]);
         try {
-            const res = await fetch('/api/skills/reload', { method: 'POST' });
+            const res = await apiFetch('/api/skills/reload', { method: 'POST' });
             if (res.ok) {
                 const data = await res.json();
                 setSkills(data.skills || []);

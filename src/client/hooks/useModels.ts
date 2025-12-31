@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import type { ChatModelInfo } from '../types';
+import { apiFetch } from '../utils/api';
 
 export function useModels() {
     const [models, setModels] = useState<ChatModelInfo[]>([]);
@@ -10,7 +11,7 @@ export function useModels() {
 
     const fetchModels = useCallback(async () => {
         try {
-            const res = await fetch('/api/models');
+            const res = await apiFetch('/api/models');
             if (res.ok) {
                 const data = await res.json();
                 setModels(data.models);
@@ -22,7 +23,7 @@ export function useModels() {
 
     const fetchUserModel = useCallback(async () => {
         try {
-            const res = await fetch('/api/user/model');
+            const res = await apiFetch('/api/user/model');
             if (res.ok) {
                 const data = await res.json();
                 if (data.model) {
@@ -36,7 +37,7 @@ export function useModels() {
 
     const selectModel = useCallback(async (model: ChatModelInfo) => {
         try {
-            const res = await fetch('/api/user/model', {
+            const res = await apiFetch('/api/user/model', {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ modelId: model.id }),

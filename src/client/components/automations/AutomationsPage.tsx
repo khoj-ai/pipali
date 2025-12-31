@@ -7,6 +7,7 @@ import { AutomationCard } from './AutomationCard';
 import { AutomationsEmpty } from './AutomationsEmpty';
 import { CreateAutomationModal } from './CreateAutomationModal';
 import { AutomationDetailModal } from './AutomationDetailModal';
+import { apiFetch } from '../../utils/api';
 
 interface AutomationsPageProps {
     pendingConfirmations: AutomationPendingConfirmation[];
@@ -33,7 +34,7 @@ export function AutomationsPage({
 
     const fetchAutomations = async () => {
         try {
-            const res = await fetch('/api/automations');
+            const res = await apiFetch('/api/automations');
             if (res.ok) {
                 const data = await res.json();
                 setAutomations(data.automations || []);

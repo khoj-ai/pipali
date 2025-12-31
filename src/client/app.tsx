@@ -19,10 +19,11 @@ import type {
 import type { PendingConfirmation } from "./types/confirmation";
 
 // Hooks
-import { useFocusManagement, useModels } from "./hooks";
+import { useFocusManagement, useModels, useSidecar } from "./hooks";
 
 // Utils
 import { formatToolCallsForSidebar } from "./utils/formatting";
+import { setApiBaseUrl, apiFetch } from "./utils/api";
 
 // Components
 import { Header, Sidebar, InputArea } from "./components/layout";
@@ -53,6 +54,14 @@ function generateUUID(): string {
 }
 
 const App = () => {
+    // Sidecar configuration (for Tauri desktop app)
+    const { baseUrl, wsBaseUrl } = useSidecar();
+
+    // Initialize API base URL on mount
+    useEffect(() => {
+        setApiBaseUrl(baseUrl);
+    }, [baseUrl]);
+
     // Core state
     const [messages, setMessages] = useState<Message[]>([]);
     const [input, setInput] = useState("");
@@ -206,7 +215,7 @@ const App = () => {
 
     const fetchConversations = async () => {
         try {
-            const res = await fetch('/api/conversations');
+            const res = await apiFetch('/api/conversations');
             if (res.ok) {
                 const data = await res.json();
                 setConversations(data.conversations);
@@ -218,7 +227,7 @@ const App = () => {
 
     const fetchAutomationConfirmations = async () => {
         try {
-            const res = await fetch('/api/automations/confirmations/pending');
+            const res = await apiFetch('/api/automations/confirmations/pending');
             if (res.ok) {
                 const data = await res.json();
                 setAutomationConfirmations(data.confirmations || []);
@@ -230,7 +239,7 @@ const App = () => {
 
     const fetchAuthStatus = async () => {
         try {
-            const res = await fetch('/api/auth/status');
+            const res = await apiFetch('/api/auth/status');
             if (res.ok) {
                 const data = await res.json();
                 setAuthStatus(data);
@@ -242,7 +251,7 @@ const App = () => {
 
     const handleLogout = async () => {
         try {
-            const res = await fetch('/api/auth/logout', { method: 'POST' });
+            const res = await apiFetch('/api/auth/logout', { method: 'POST' });
             if (res.ok) {
                 // Fetch auth status again - this will return authenticated: false
                 // which will trigger the login page to show
@@ -259,7 +268,7 @@ const App = () => {
             if (guidance) {
                 body.guidance = guidance;
             }
-            const res = await fetch(`/api/automations/confirmations/${confirmationId}/respond`, {
+            const res = await apiFetch(`/api/automations/confirmations/${confirmationId}/respond`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
@@ -284,7 +293,7 @@ const App = () => {
 
     const fetchHistory = async (id: string) => {
         try {
-            const res = await fetch(`/api/chat/${id}/history`);
+            const res = await apiFetch(`/api/chat/${id}/history`);
             if (!res.ok) return;
             const data = await res.json();
             const historyMessages: Message[] = [];
@@ -400,7 +409,7 @@ const App = () => {
         if (!id || exportingConversationId) return;
         setExportingConversationId(id);
         try {
-            const res = await fetch(`/api/conversations/${id}/export/atif`);
+            const res = await apiFetch(`/api/conversations/${id}/export/atif`);
             if (!res.ok) {
                 const text = await res.text().catch(() => '');
                 throw new Error(text || `Export failed (${res.status})`);
@@ -427,8 +436,7 @@ const App = () => {
     // ===== WebSocket =====
 
     const connectWebSocket = () => {
-        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const wsUrl = `${protocol}//${window.location.host}/ws/chat`;
+        const wsUrl = `${wsBaseUrl}/ws/chat`;
         const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
@@ -1017,7 +1025,7 @@ const App = () => {
     const deleteConversation = async (id: string, e: React.MouseEvent) => {
         e.stopPropagation();
         try {
-            const res = await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+            const res = await apiFetch(`/api/conversations/${id}`, { method: 'DELETE' });
             if (res.ok) {
                 setConversations(prev => prev.filter(c => c.id !== id));
                 if (conversationId === id) {
@@ -1379,5 +1387,11 @@ const App = () => {
     );
 };
 
-const root = createRoot(document.getElementById("root")!);
-root.render(<App />);
+// Export for use in Tauri wrapper
+export default App;
+
+// Direct render for web mode (when not imported as a module)
+if (typeof window !== 'undefined' && document.getElementById("root")) {
+    const root = createRoot(document.getElementById("root")!);
+    root.render(<App />);
+}

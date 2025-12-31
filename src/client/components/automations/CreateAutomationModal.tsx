@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { X, Loader2, Calendar, Clock, ChevronDown, ChevronRight } from 'lucide-react';
 import type { FrequencyType, DayOfWeek } from '../../types/automations';
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
+import { apiFetch } from '../../utils/api';
 
 interface CreateAutomationModalProps {
     onClose: () => void;
@@ -98,7 +99,7 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
                 };
             }
 
-            const res = await fetch('/api/automations', {
+            const res = await apiFetch('/api/automations', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),

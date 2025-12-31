@@ -2,3 +2,4 @@
 
 export * from './useFocusManagement';
 export * from './useModels';
+export * from './useSidecar';
