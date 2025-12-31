@@ -14,6 +14,8 @@ import {
 } from '../src/server/processor/conversation/atif/atif.types';
 import {
   addStepToTrajectory,
+  removeStepFromTrajectory,
+  removeAgentMessageFromTrajectory,
   calculateFinalMetrics,
   validateATIFTrajectory,
   exportATIFTrajectory,
@@ -323,5 +325,234 @@ describe('ATIF Import/Export', () => {
   test('should throw error on invalid JSON import', () => {
     const invalidJson = '{"invalid": "data"}';
     expect(() => importATIFTrajectory(invalidJson)).toThrow('Invalid ATIF trajectory');
+  });
+});
+
+describe('ATIF Step Removal', () => {
+  test('should remove step by step_id and recalculate metrics', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    // Add some steps with metrics
+    addStepToTrajectory(trajectory, 'user', 'First message');
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'First response',
+      undefined,
+      undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cost_usd: 0.01 }
+    );
+    addStepToTrajectory(trajectory, 'user', 'Second message');
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Second response',
+      undefined,
+      undefined,
+      { prompt_tokens: 150, completion_tokens: 75, cost_usd: 0.015 }
+    );
+
+    expect(trajectory.steps).toHaveLength(4);
+    expect(trajectory.final_metrics?.total_prompt_tokens).toBe(250);
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0.025);
+
+    // Remove the first agent step (step_id: 2)
+    const removed = removeStepFromTrajectory(trajectory, 2);
+
+    expect(removed).toBe(true);
+    expect(trajectory.steps).toHaveLength(3);
+
+    // Verify remaining step IDs
+    expect(trajectory.steps[0]?.step_id).toBe(1);
+    expect(trajectory.steps[1]?.step_id).toBe(3);
+    expect(trajectory.steps[2]?.step_id).toBe(4);
+
+    // Verify metrics recalculated (only second agent step's metrics remain)
+    expect(trajectory.final_metrics?.total_prompt_tokens).toBe(150);
+    expect(trajectory.final_metrics?.total_completion_tokens).toBe(75);
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0.015);
+    expect(trajectory.final_metrics?.total_steps).toBe(3);
+  });
+
+  test('should return false when step_id does not exist', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'Test message');
+
+    const removed = removeStepFromTrajectory(trajectory, 999);
+
+    expect(removed).toBe(false);
+    expect(trajectory.steps).toHaveLength(1);
+  });
+
+  test('should handle removing all steps', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'Only message');
+
+    const removed = removeStepFromTrajectory(trajectory, 1);
+
+    expect(removed).toBe(true);
+    expect(trajectory.steps).toHaveLength(0);
+    expect(trajectory.final_metrics?.total_steps).toBe(0);
+    expect(trajectory.final_metrics?.total_prompt_tokens).toBe(0);
+  });
+});
+
+describe('ATIF Agent Message Removal', () => {
+  test('should remove all agent steps between user messages', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    // User message 1
+    addStepToTrajectory(trajectory, 'user', 'First question');
+    // Agent tool call step
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      '',
+      [{ function_name: 'search', arguments: { query: 'test' }, tool_call_id: 'call-1' }],
+      { results: [{ source_call_id: 'call-1', content: 'result' }] },
+      { prompt_tokens: 50, completion_tokens: 20, cost_usd: 0.005 }
+    );
+    // Agent final response
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Here is the answer',
+      undefined,
+      undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cost_usd: 0.01 }
+    );
+    // User message 2
+    addStepToTrajectory(trajectory, 'user', 'Second question');
+    // Agent response 2
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Second answer',
+      undefined,
+      undefined,
+      { prompt_tokens: 80, completion_tokens: 40, cost_usd: 0.008 }
+    );
+
+    expect(trajectory.steps).toHaveLength(5);
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0.023);
+
+    // Remove the first agent message (using step_id 3, the final response)
+    const removedCount = removeAgentMessageFromTrajectory(trajectory, 3);
+
+    expect(removedCount).toBe(2); // Both agent steps removed
+    expect(trajectory.steps).toHaveLength(3);
+
+    // Verify remaining steps
+    expect(trajectory.steps[0]?.source).toBe('user');
+    expect(trajectory.steps[0]?.message).toBe('First question');
+    expect(trajectory.steps[1]?.source).toBe('user');
+    expect(trajectory.steps[1]?.message).toBe('Second question');
+    expect(trajectory.steps[2]?.source).toBe('agent');
+    expect(trajectory.steps[2]?.message).toBe('Second answer');
+
+    // Verify metrics recalculated
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0.008);
+    expect(trajectory.final_metrics?.total_steps).toBe(3);
+  });
+
+  test('should remove agent steps at end of conversation', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'Question');
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Tool call step',
+      undefined,
+      undefined,
+      { prompt_tokens: 50, completion_tokens: 25, cost_usd: 0.005 }
+    );
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Final answer',
+      undefined,
+      undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cost_usd: 0.01 }
+    );
+
+    expect(trajectory.steps).toHaveLength(3);
+
+    // Remove agent message using any of the agent step IDs
+    const removedCount = removeAgentMessageFromTrajectory(trajectory, 2);
+
+    expect(removedCount).toBe(2);
+    expect(trajectory.steps).toHaveLength(1);
+    expect(trajectory.steps[0]?.source).toBe('user');
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0);
+  });
+
+  test('should return 0 when step_id not found', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'Question');
+    addStepToTrajectory(trajectory, 'agent', 'Answer');
+
+    const removedCount = removeAgentMessageFromTrajectory(trajectory, 999);
+
+    expect(removedCount).toBe(0);
+    expect(trajectory.steps).toHaveLength(2);
+  });
+
+  test('should handle single agent step removal', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'Question');
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Single answer',
+      undefined,
+      undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cost_usd: 0.01 }
+    );
+
+    const removedCount = removeAgentMessageFromTrajectory(trajectory, 2);
+
+    expect(removedCount).toBe(1);
+    expect(trajectory.steps).toHaveLength(1);
+    expect(trajectory.steps[0]?.source).toBe('user');
   });
 });

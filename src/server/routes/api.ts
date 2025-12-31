@@ -206,6 +206,49 @@ api.delete('/conversations/:conversationId', async (c) => {
     return c.json({ success: true });
 });
 
+// Delete a message from a conversation
+// For user messages: deletes just that step
+// For assistant messages: deletes all associated agent steps (reasoning, tool calls, etc.)
+api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
+    const conversationId = c.req.param('conversationId');
+    const stepIdParam = c.req.param('stepId');
+    const role = c.req.query('role'); // 'user' or 'assistant'
+
+    // Validate conversation ID
+    try {
+        z.uuid().parse(conversationId);
+    } catch (e) {
+        return c.json({ error: 'Invalid conversation ID' }, 400);
+    }
+
+    // Validate step ID is a number
+    const stepId = parseInt(stepIdParam, 10);
+    if (isNaN(stepId) || stepId < 1) {
+        return c.json({ error: 'Invalid step ID' }, 400);
+    }
+
+    try {
+        if (role === 'assistant') {
+            // Delete all agent steps associated with this assistant message
+            const deletedCount = await atifConversationService.deleteAgentMessage(conversationId, stepId);
+            if (deletedCount === 0) {
+                return c.json({ error: 'Message not found' }, 404);
+            }
+            return c.json({ success: true, deletedCount });
+        } else {
+            // Delete just the single step (user message or legacy behavior)
+            const deleted = await atifConversationService.deleteStep(conversationId, stepId);
+            if (!deleted) {
+                return c.json({ error: 'Message not found' }, 404);
+            }
+            return c.json({ success: true, deletedCount: 1 });
+        }
+    } catch (error) {
+        console.error('[API] Error deleting message:', error);
+        return c.json({ error: error instanceof Error ? error.message : 'Failed to delete message' }, 500);
+    }
+});
+
 // Get all available chat models
 api.get('/models', async (c) => {
     const models = await db.select({

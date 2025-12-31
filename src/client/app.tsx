@@ -1037,6 +1037,37 @@ const App = () => {
         }
     };
 
+    const deleteMessage = async (messageId: string, role: 'user' | 'assistant') => {
+        if (!conversationId) return;
+
+        try {
+            const res = await apiFetch(`/api/conversations/${conversationId}/messages/${messageId}?role=${role}`, {
+                method: 'DELETE'
+            });
+            if (res.ok) {
+                // Remove the message from local state
+                setMessages(prev => prev.filter(m => m.id !== messageId));
+                // Also update conversation states if needed
+                setConversationStates(prev => {
+                    const next = new Map(prev);
+                    const existing = next.get(conversationId);
+                    if (existing) {
+                        next.set(conversationId, {
+                            ...existing,
+                            messages: existing.messages.filter(m => m.id !== messageId),
+                        });
+                    }
+                    return next;
+                });
+            } else {
+                const data = await res.json();
+                console.error("Failed to delete message:", data.error);
+            }
+        } catch (e) {
+            console.error("Failed to delete message", e);
+        }
+    };
+
     // ===== Message Sending =====
 
     const pauseResearch = () => {
@@ -1356,7 +1387,7 @@ const App = () => {
                     <McpToolsPage />
                 )}
                 {currentPage === 'chat' && (
-                    <MessageList messages={messages} />
+                    <MessageList messages={messages} onDeleteMessage={deleteMessage} />
                 )}
 
                 <InputArea

@@ -18,6 +18,8 @@ import {
 } from './atif.types';
 import {
   addStepToTrajectory,
+  removeStepFromTrajectory,
+  removeAgentMessageFromTrajectory,
   validateATIFTrajectory,
   exportATIFTrajectory,
   importATIFTrajectory,
@@ -158,6 +160,68 @@ export class ATIFConversationService {
     return step;
   }
 
+
+  /**
+   * Deletes a step from a conversation by step_id
+   * Returns true if the step was found and deleted, false otherwise
+   */
+  async deleteStep(conversationId: string, stepId: number): Promise<boolean> {
+    const conversation = await this.getConversation(conversationId);
+
+    if (!conversation) {
+      throw new Error(`Conversation ${conversationId} not found`);
+    }
+
+    const trajectory = conversation.trajectory;
+    const removed = removeStepFromTrajectory(trajectory, stepId);
+
+    if (!removed) {
+      return false;
+    }
+
+    // Update database
+    await db
+      .update(Conversation)
+      .set({
+        trajectory,
+        updatedAt: new Date(),
+      })
+      .where(eq(Conversation.id, conversationId));
+
+    return true;
+  }
+
+  /**
+   * Deletes an agent message and all associated steps (reasoning, tool calls, etc.)
+   * from a conversation. Removes all consecutive agent steps from the given step_id
+   * until the next user message or end of conversation.
+   * Returns the number of steps deleted.
+   */
+  async deleteAgentMessage(conversationId: string, stepId: number): Promise<number> {
+    const conversation = await this.getConversation(conversationId);
+
+    if (!conversation) {
+      throw new Error(`Conversation ${conversationId} not found`);
+    }
+
+    const trajectory = conversation.trajectory;
+    const removedCount = removeAgentMessageFromTrajectory(trajectory, stepId);
+
+    if (removedCount === 0) {
+      return 0;
+    }
+
+    // Update database
+    await db
+      .update(Conversation)
+      .set({
+        trajectory,
+        updatedAt: new Date(),
+      })
+      .where(eq(Conversation.id, conversationId));
+
+    return removedCount;
+  }
 
   /**
    * Exports a conversation in ATIF format

@@ -7,9 +7,10 @@ import { MessageItem } from './MessageItem';
 
 interface MessageListProps {
     messages: Message[];
+    onDeleteMessage?: (messageId: string, role: 'user' | 'assistant') => void;
 }
 
-export function MessageList({ messages }: MessageListProps) {
+export function MessageList({ messages, onDeleteMessage }: MessageListProps) {
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
     // Auto-scroll to bottom when messages change
@@ -29,7 +30,7 @@ export function MessageList({ messages }: MessageListProps) {
                 ) : (
                     <div className="messages">
                         {messages.map((msg) => (
-                            <MessageItem key={msg.id} message={msg} />
+                            <MessageItem key={msg.id} message={msg} onDelete={onDeleteMessage} />
                         ))}
                         <div ref={messagesEndRef} />
                     </div>

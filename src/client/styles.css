@@ -1047,6 +1047,13 @@ body {
     gap: 8px;
 }
 
+.message-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
 .message-label {
     font-size: 13px;
     font-weight: 500;
@@ -1056,6 +1063,32 @@ body {
 
 .user-message .message-label {
     color: var(--text-tertiary);
+}
+
+.message-delete-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    opacity: 0.6;
+}
+
+.message-delete-btn:hover {
+    background: var(--bg-hover);
+    color: var(--text-secondary);
+    opacity: 1;
+}
+
+.message-delete-btn:active {
+    background: var(--bg-active);
 }
 
 .message-content {

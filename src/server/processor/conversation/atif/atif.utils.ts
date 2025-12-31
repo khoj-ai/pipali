@@ -145,4 +145,77 @@ export function importATIFTrajectory(jsonString: string): ATIFTrajectory {
   return parsed as ATIFTrajectory;
 }
 
+/**
+ * Removes a step from an ATIF trajectory by step_id
+ * Returns true if the step was found and removed, false otherwise
+ */
+export function removeStepFromTrajectory(
+  trajectory: ATIFTrajectory,
+  stepId: number
+): boolean {
+  const stepIndex = trajectory.steps.findIndex(s => s.step_id === stepId);
+
+  if (stepIndex === -1) {
+    return false;
+  }
+
+  // Remove the step
+  trajectory.steps.splice(stepIndex, 1);
+
+  // Recalculate final metrics
+  trajectory.final_metrics = calculateFinalMetrics(trajectory.steps);
+
+  return true;
+}
+
+/**
+ * Removes an agent message and all associated steps (reasoning, tool calls, tool results)
+ * from the trajectory. Deletes all consecutive 'agent' steps starting from the step
+ * that contains the given step_id, going backwards to find the first agent step after
+ * the previous user message, and forwards until the next user message.
+ * Returns the number of steps removed.
+ */
+export function removeAgentMessageFromTrajectory(
+  trajectory: ATIFTrajectory,
+  stepId: number
+): number {
+  const startIndex = trajectory.steps.findIndex(s => s.step_id === stepId);
+
+  if (startIndex === -1) {
+    return 0;
+  }
+
+  // Find the range of agent steps to delete
+  // Go backwards to find where agent steps start (after last user message)
+  let firstAgentIndex = startIndex;
+  for (let i = startIndex - 1; i >= 0; i--) {
+    if (trajectory.steps[i].source === 'user') {
+      break; // Stop at user message
+    }
+    if (trajectory.steps[i].source === 'agent') {
+      firstAgentIndex = i;
+    }
+  }
+
+  // Now find the end - all agent steps until next user message or end
+  let lastAgentIndex = startIndex;
+  for (let i = startIndex + 1; i < trajectory.steps.length; i++) {
+    if (trajectory.steps[i].source === 'user') {
+      break; // Stop at next user message
+    }
+    if (trajectory.steps[i].source === 'agent') {
+      lastAgentIndex = i;
+    }
+  }
+
+  // Remove all steps from firstAgentIndex to lastAgentIndex (inclusive)
+  const removeCount = lastAgentIndex - firstAgentIndex + 1;
+  trajectory.steps.splice(firstAgentIndex, removeCount);
+
+  // Recalculate final metrics
+  trajectory.final_metrics = calculateFinalMetrics(trajectory.steps);
+
+  return removeCount;
+}
+
 
