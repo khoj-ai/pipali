@@ -235,7 +235,7 @@ async function main() {
   const shutdown = async (signal: string) => {
     console.log(`\n[Server] Received ${signal}, shutting down gracefully...`);
     server.stop();
-    stopAutomationSystem();
+    await stopAutomationSystem();
     await closeMcpClients();
     await closeDatabase();
     console.log('[Server] Shutdown complete.');

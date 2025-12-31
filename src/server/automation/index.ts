@@ -50,9 +50,9 @@ export async function startAutomationSystem(): Promise<void> {
 /**
  * Stop the automation system
  */
-export function stopAutomationSystem(): void {
-    const { stopSchedulers } = require('./scheduler');
-    stopSchedulers();
+export async function stopAutomationSystem(): Promise<void> {
+    const { stopSchedulers } = await import('./scheduler');
+    await stopSchedulers();
     console.log('[Automation] System stopped');
 }
 
@@ -84,10 +84,10 @@ export async function activateAutomation(automation: {
 /**
  * Deactivate an automation (stop its scheduler/watcher and cancel any running execution)
  */
-export function deactivateAutomation(automationId: string): void {
-    const { stopCronJob } = require('./scheduler/cron');
-    const { stopFileWatcher } = require('./scheduler/file-watcher');
-    const { cancelExecution } = require('./executor');
+export async function deactivateAutomation(automationId: string): Promise<void> {
+    const { stopCronJob } = await import('./scheduler/cron');
+    const { stopFileWatcher } = await import('./scheduler/file-watcher');
+    const { cancelExecution } = await import('./executor');
 
     stopCronJob(automationId);
     stopFileWatcher(automationId);

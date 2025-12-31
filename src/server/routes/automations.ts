@@ -246,7 +246,7 @@ automations.delete('/:id', async (c) => {
     }
 
     // Stop any running schedulers/watchers
-    deactivateAutomation(id);
+    await deactivateAutomation(id);
 
     await db.delete(Automation).where(eq(Automation.id, id));
 
@@ -269,7 +269,7 @@ automations.post('/:id/pause', async (c) => {
         .set({ status: 'paused', updatedAt: new Date() })
         .where(eq(Automation.id, id));
 
-    deactivateAutomation(id);
+    await deactivateAutomation(id);
 
     console.log(`[API] Paused automation: ${id}`);
     return c.json({ success: true });

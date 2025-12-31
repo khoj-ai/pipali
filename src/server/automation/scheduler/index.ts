@@ -41,9 +41,9 @@ export async function startSchedulers(): Promise<void> {
 /**
  * Stop all schedulers
  */
-export function stopSchedulers(): void {
-    const { stopAllCronJobs } = require('./cron');
-    const { stopAllFileWatchers } = require('./file-watcher');
+export async function stopSchedulers(): Promise<void> {
+    const { stopAllCronJobs } = await import('./cron');
+    const { stopAllFileWatchers } = await import('./file-watcher');
 
     stopAllCronJobs();
     stopAllFileWatchers();

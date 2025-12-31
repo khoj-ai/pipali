@@ -18,6 +18,9 @@ import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, update
 
 const api = new Hono().basePath('/api');
 
+// Health check endpoint for Tauri sidecar readiness detection
+api.get('/health', (c) => c.json({ status: 'ok' }));
+
 const schema = z.object({
     message: z.string(),
     conversationId: z.uuid().optional(),
