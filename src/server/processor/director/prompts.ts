@@ -32,7 +32,7 @@ Assuming you can search through files.
   2. Use the view file tool to examine specific configuration files if needed.
 
 # Background Context
-- Current Date, Time: {day_of_week}, {current_date} {current_time}
+- Current Date, Time (in User Local Timezone): {day_of_week}, {current_date} {current_time}
 - User Location: {location}
 - User Name: {username}
 - Operating System: {os_info}
