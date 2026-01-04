@@ -1,4 +1,5 @@
 import { ChatOpenAI } from '@langchain/openai';
+import { AIMessageChunk } from '@langchain/core/messages';
 import type { ChatMessage, ResponseWithThought, ToolDefinition, UsageMetrics } from '../conversation';
 import { toOpenaiTools, formatMessagesForOpenAI } from './utils';
 import { calculateCost, type PricingConfig } from '../costs';
@@ -23,13 +24,24 @@ export async function sendMessageToGpt(
         configuration: {
             baseURL: apiBaseUrl,
         },
-        __includeRawResponse: true
+        __includeRawResponse: true,
+        streamUsage: true,
     }).withConfig({
         tools: lcTools,
         tool_choice: lcTools ? toolChoice : undefined,
     });
 
-    const response = await chat.invoke(formattedMessages);
+    // Use streaming to avoid timeout issues - accumulate chunks into final response
+    const stream = await chat.stream(formattedMessages);
+    let response: AIMessageChunk | undefined;
+    for await (const chunk of stream) {
+        response = response ? response.concat(chunk) : chunk;
+    }
+
+    if (!response) {
+        throw new Error('No response received from model');
+    }
+
     const reasoning: any = response.additional_kwargs?.reasoning;
     const summary = typeof reasoning?.summary === "string"
         ? reasoning.summary
