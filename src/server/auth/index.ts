@@ -366,7 +366,14 @@ export async function syncPlatformModels(): Promise<void> {
         }
 
         const data = await response.json();
-        const platformModels = data.data as Array<{ id: string; owned_by: string; name?: string | null; use_responses_api?: boolean }>;
+        const platformModels = data.data as Array<{
+            id: string;
+            owned_by: string;
+            name?: string | null;
+            model_type?: 'openai' | 'anthropic' | 'google';
+            vision_enabled?: boolean;
+            use_responses_api?: boolean;
+        }>;
 
         if (!platformModels || platformModels.length === 0) {
             console.log('[Auth] No models available from platform');
@@ -411,29 +418,49 @@ export async function syncPlatformModels(): Promise<void> {
         const existingModelNames = new Set(existingModels.map(m => m.name));
         const platformModelNames = new Set(platformModels.map(m => m.id));
 
-        // Add new models and update existing ones with useResponsesApi
+        // Add new models and update existing ones
         let addedCount = 0;
         let updatedCount = 0;
         for (const model of platformModels) {
+            // Use model_type from platform, fallback to detection if not provided
+            const modelType = model.model_type || detectModelType(model.id, model.owned_by);
+            const visionEnabled = model.vision_enabled ?? false;
+            const useResponsesApi = model.use_responses_api ?? false;
+            const friendlyName = model.name || model.id;
+
             if (!existingModelNames.has(model.id)) {
-                const modelType = detectModelType(model.id, model.owned_by);
                 await db.insert(ChatModel).values({
                     name: model.id,
-                    friendlyName: model.name || model.id,
-                    modelType: modelType,
-                    visionEnabled: true, // Assume vision support
-                    useResponsesApi: model.use_responses_api || false,
+                    friendlyName,
+                    modelType,
+                    visionEnabled,
+                    useResponsesApi,
                     aiModelApiId: providerId,
                 });
                 addedCount++;
             } else {
-                // Update useResponsesApi for existing models
+                // Update existing model with latest platform values
                 const existingModel = existingModels.find(m => m.name === model.id);
-                if (existingModel && existingModel.useResponsesApi !== (model.use_responses_api || false)) {
-                    await db.update(ChatModel)
-                        .set({ useResponsesApi: model.use_responses_api || false, updatedAt: new Date() })
-                        .where(eq(ChatModel.id, existingModel.id));
-                    updatedCount++;
+                if (existingModel) {
+                    // Check if any values have changed
+                    const hasChanges =
+                        existingModel.friendlyName !== friendlyName ||
+                        existingModel.modelType !== modelType ||
+                        existingModel.visionEnabled !== visionEnabled ||
+                        existingModel.useResponsesApi !== useResponsesApi;
+
+                    if (hasChanges) {
+                        await db.update(ChatModel)
+                            .set({
+                                friendlyName,
+                                modelType,
+                                visionEnabled,
+                                useResponsesApi,
+                                updatedAt: new Date()
+                            })
+                            .where(eq(ChatModel.id, existingModel.id));
+                        updatedCount++;
+                    }
                 }
             }
         }
