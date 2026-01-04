@@ -189,10 +189,10 @@ export function removeAgentMessageFromTrajectory(
   // Go backwards to find where agent steps start (after last user message)
   let firstAgentIndex = startIndex;
   for (let i = startIndex - 1; i >= 0; i--) {
-    if (trajectory.steps[i].source === 'user') {
+    if (trajectory.steps[i]?.source === 'user') {
       break; // Stop at user message
     }
-    if (trajectory.steps[i].source === 'agent') {
+    if (trajectory.steps[i]?.source === 'agent') {
       firstAgentIndex = i;
     }
   }
@@ -200,10 +200,10 @@ export function removeAgentMessageFromTrajectory(
   // Now find the end - all agent steps until next user message or end
   let lastAgentIndex = startIndex;
   for (let i = startIndex + 1; i < trajectory.steps.length; i++) {
-    if (trajectory.steps[i].source === 'user') {
+    if (trajectory.steps[i]?.source === 'user') {
       break; // Stop at next user message
     }
-    if (trajectory.steps[i].source === 'agent') {
+    if (trajectory.steps[i]?.source === 'agent') {
       lastAgentIndex = i;
     }
   }
