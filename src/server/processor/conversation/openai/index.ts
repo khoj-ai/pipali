@@ -23,6 +23,7 @@ export async function sendMessageToGpt(
         configuration: {
             baseURL: apiBaseUrl,
         },
+        __includeRawResponse: true
     }).withConfig({
         tools: lcTools,
         tool_choice: lcTools ? toolChoice : undefined,
@@ -45,7 +46,13 @@ export async function sendMessageToGpt(
         const promptDetails = usageData.input_token_details;
         const cachedReadTokens = promptDetails?.cache_read || 0;
         const cacheWriteTokens = promptDetails?.cache_creation || 0;
-        const costUsd = calculateCost(model, promptTokens, completionTokens, cachedReadTokens, cacheWriteTokens, 0, pricing);
+
+        // Use cost from platform if available, else fallback to estimate it locally
+        const metadata: Record<string, any> = (response.additional_kwargs?.__raw_response as any)?.metadata;
+        const rawCostUsd = metadata?.cost_usd ?? metadata?.["cost_usd"];
+        const platformCostUsd = typeof rawCostUsd === 'number' ? rawCostUsd : (rawCostUsd ? parseFloat(rawCostUsd) : undefined);
+        const costUsd = platformCostUsd || calculateCost(model, promptTokens, completionTokens, cachedReadTokens, cacheWriteTokens, 0, pricing);
+
         usage = {
             prompt_tokens: promptTokens,
             completion_tokens: completionTokens,
