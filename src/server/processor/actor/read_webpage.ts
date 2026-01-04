@@ -346,13 +346,13 @@ export async function readWebpage(
                 // 'direct' type scrapers are handled in the final fallback
 
                 if (rawContent) {
-                    usedProvider = scraper.name;
-                    console.log(`[ReadWebpage] Successfully read with ${scraper.name}`);
+                    usedProvider = scraper.type;
+                    console.log(`[ReadWebpage] Successfully read with ${scraper.type}`);
                     break;
                 }
             } catch (error) {
                 lastError = error instanceof Error ? error : new Error(String(error));
-                console.warn(`[ReadWebpage] Failed with ${scraper.name}: ${lastError.message}`);
+                console.warn(`[ReadWebpage] Failed with ${scraper.type}: ${lastError.message}`);
             }
         }
 
@@ -399,9 +399,9 @@ export async function readWebpage(
 
         console.log(`[ReadWebpage] Got ${rawContent.length} chars of raw content from ${usedProvider}`);
 
-        // Extract relevant content using LLM if query is provided
+        // Extract relevant content using LLM if query is provided and not platform scraper
         let extractedContent: string;
-        if (query) {
+        if (query && usedProvider !== 'platform') {
             try {
                 console.log(`[ReadWebpage] Extracting relevant content for query: "${query}"`);
                 extractedContent = await extractRelevantContent(rawContent, query, metricsAccumulator);
