@@ -76,17 +76,11 @@ export async function extractRelevantContent(
 
         console.log(`[WebpageExtractor] Extracting content for query: "${query.slice(0, 50)}..."`);
 
-        // Use sendMessageToModel abstraction layer
-        // This handles model selection and API routing automatically
+        // Use sendMessageToModel abstraction layer. Handles model selection automatically
         const response = await sendMessageToModel(
             extractionPrompt,      // query
             undefined,             // history
             EXTRACTION_SYSTEM_PROMPT, // systemMessage
-            undefined,             // tools (none needed for extraction)
-            'auto',                // toolChoice
-            false,                 // deepThought
-            true,                  // fastMode - use fast model for extraction
-            undefined,             // user
         );
 
         if (!response || !response.message) {
