@@ -12,15 +12,15 @@ export async function sendMessageToGpt(
     tools?: ToolDefinition[],
     toolChoice: string = 'auto',
     pricing?: PricingConfig,
-    useResponsesApi: boolean = false,
 ): Promise<ResponseWithThought> {
     const formattedMessages = formatMessagesForOpenAI(messages);
     const lcTools = toOpenaiTools(tools);
 
+    // Use Responses API
     const chat = new ChatOpenAI({
         apiKey: apiKey,
         model: model,
-        useResponsesApi: useResponsesApi,
+        useResponsesApi: true,
         configuration: {
             baseURL: apiBaseUrl,
         },
