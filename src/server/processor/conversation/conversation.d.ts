@@ -1,5 +1,5 @@
 import { AIMessage, HumanMessage, SystemMessage, ToolMessage } from '@langchain/core/messages';
-import type { ToolCall } from '@langchain/core/messages/tool';
+import type { Responses } from 'openai/resources/responses/responses';
 
 export type ChatMessage = HumanMessage | AIMessage | ToolMessage | SystemMessage;
 
@@ -22,7 +22,8 @@ export interface UsageMetrics {
 export interface ResponseWithThought {
     message?: string;
     thought?: string;
-    raw?: ToolCall[];
+    /** Raw LLM response. Store in trajectory for multi-turn passthrough */
+    raw?: Responses.ResponseOutputItem[];
     /** Token usage metrics from the API call */
     usage?: UsageMetrics;
 };

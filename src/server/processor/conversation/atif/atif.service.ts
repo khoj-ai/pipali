@@ -124,6 +124,7 @@ export class ATIFConversationService {
     toolCalls?: ATIFToolCall[],
     observation?: ATIFObservation,
     reasoningContent?: string,
+    rawOutput?: unknown[],
   ): Promise<ATIFStep> {
     const conversation = await this.getConversation(conversationId);
 
@@ -146,6 +147,11 @@ export class ATIFConversationService {
     // Add reasoning content if provided
     if (reasoningContent) {
       step.reasoning_content = reasoningContent;
+    }
+
+    // Store raw LLM response for multi-turn passthrough
+    if (rawOutput && rawOutput.length > 0) {
+      step.extra = { ...step.extra, raw_output: rawOutput };
     }
 
     // Update database

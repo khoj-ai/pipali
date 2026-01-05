@@ -1,7 +1,8 @@
 import { ChatOpenAI } from '@langchain/openai';
 import { AIMessageChunk } from '@langchain/core/messages';
+import type { Responses } from 'openai/resources/responses/responses';
 import type { ChatMessage, ResponseWithThought, ToolDefinition, UsageMetrics } from '../conversation';
-import { toOpenaiTools, formatMessagesForOpenAI } from './utils';
+import { toOpenaiTools, formatMessagesForOpenAI, getReasoningText } from './utils';
 import { calculateCost, type PricingConfig } from '../costs';
 
 export async function sendMessageToGpt(
@@ -42,12 +43,9 @@ export async function sendMessageToGpt(
         throw new Error('No response received from model');
     }
 
-    const reasoning: any = response.additional_kwargs?.reasoning;
-    const summary = typeof reasoning?.summary === "string"
-        ? reasoning.summary
-        : Array.isArray(reasoning?.summary)
-            ? reasoning.summary.map((s: any) => s.text ?? "").join("")
-            : undefined;
+    // Extract reasoning, raw response from LangChain response
+    const thought = getReasoningText(response.additional_kwargs?.reasoning as unknown as Responses.ResponseReasoningItem);
+    const rawOutput = response.response_metadata?.output as unknown as Responses.ResponseOutputItem[] | undefined;
 
     // Extract usage metrics from response metadata
     let usage: UsageMetrics | undefined;
@@ -75,5 +73,5 @@ export async function sendMessageToGpt(
         console.log(`[LLM] Usage: ${promptTokens} prompt, ${completionTokens} completion, ${cachedReadTokens} cache read, ${cacheWriteTokens} cache write, $${costUsd.toFixed(6)}`);
     }
 
-    return { thought: summary, message: response.text, raw: response.tool_calls, usage };
+    return { thought, message: response.text, raw: rawOutput, usage };
 }

@@ -1,5 +1,6 @@
 // Minimal types for research director
 
+import type { Responses } from 'openai/resources/responses/responses';
 import type { ATIFMetrics, ATIFObservationResult, ATIFToolCall } from "../conversation/atif/atif.types";
 import type { ConfirmationContext } from "../confirmation";
 
@@ -22,6 +23,8 @@ export interface ResearchIteration {
     message?: string;
     /** Token usage metrics from the LLM API call for this iteration */
     metrics?: ATIFMetrics;
+    /** Raw LLM response. Store in trajectory for multi-turn passthrough */
+    raw?: Responses.ResponseOutputItem[];
     /** Pending confirmation request that needs user response */
     pendingConfirmation?: {
         requestId: string;

@@ -13,7 +13,7 @@ import { readWebpage, type ReadWebpageArgs } from '../actor/read_webpage';
 import { askUser, type AskUserArgs } from '../actor/ask_user';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
-import type { ATIFMetrics, ATIFObservationResult, ATIFToolCall, ATIFTrajectory } from '../conversation/atif/atif.types';
+import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, executeMcpTool, isMcpTool } from '../mcp';
 
@@ -406,13 +406,15 @@ async function pickNextTool(
             };
         }
 
-        // Parse tool calls from response
+        // Parse tool calls from raw output items (Responses API format)
+        // Raw output contains items like: { type: 'reasoning', ... }, { type: 'message', ... }, { type: 'function_call', ... }
         let toolCalls: ATIFToolCall[];
-        if (response.raw && Array.isArray(response.raw) && response.raw.length > 0) {
-            toolCalls = response.raw.map(tc => ({
-                function_name: tc.name,
-                arguments: tc.args,
-                tool_call_id: tc.id,
+        const functionCalls = response.raw?.filter((item: any) => item.type === 'function_call') ?? [];
+        if (functionCalls.length > 0) {
+            toolCalls = functionCalls.map((fc: any) => ({
+                function_name: fc.name,
+                arguments: typeof fc.arguments === 'string' ? JSON.parse(fc.arguments) : fc.arguments,
+                tool_call_id: fc.call_id,
             })) as ATIFToolCall[];
         } else {
             // No tool calls - model wants to respond directly
@@ -439,6 +441,7 @@ async function pickNextTool(
                 thought: response.thought,
                 message: response.message,
                 metrics,
+                raw: response.raw,
                 systemPrompt: isFirstIteration ? systemPrompt : undefined,
             };
         }
@@ -448,6 +451,7 @@ async function pickNextTool(
             thought: response.thought,
             message: response.message,
             metrics,
+            raw: response.raw,
             systemPrompt: isFirstIteration ? systemPrompt : undefined,
         };
     } catch (error) {

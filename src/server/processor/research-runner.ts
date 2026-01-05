@@ -126,8 +126,9 @@ export async function* runResearchWithConversation(
     }
 
     let finalResponse = '';
-    let finalThought: string | undefined;
+    let finalThought: ResearchIteration['thought'];
     let finalMetrics: ResearchIteration['metrics'];
+    let finalRaw: ResearchIteration['raw'];
     let iterationCount = 0;
     let systemPromptPersisted = false;
 
@@ -190,6 +191,7 @@ export async function* runResearchWithConversation(
             finalResponse = textTool.arguments.response || '';
             finalThought = iteration.thought;
             finalMetrics = iteration.metrics;
+            finalRaw = iteration.raw;
 
             // If there's a thought with the final response, yield it for display
             if (iteration.thought || iteration.message) {
@@ -215,6 +217,7 @@ export async function* runResearchWithConversation(
                 iteration.toolCalls,
                 { results: iteration.toolResults },
                 iteration.thought,
+                iteration.raw,
             );
             trajectory.steps.push(agentStep);
 
@@ -239,6 +242,7 @@ export async function* runResearchWithConversation(
         undefined,
         undefined,
         finalThought,
+        finalRaw,
     );
 
     return {

@@ -1,6 +1,6 @@
 import { getDefaultChatModel } from '../../db';
 import { User, type ChatModelWithApi } from '../../db/schema';
-import { type ToolDefinition, type ChatMessage } from './conversation';
+import { type ToolDefinition, type ChatMessage, type ResponseWithThought } from './conversation';
 import { generateChatmlMessagesWithContext } from './utils';
 import { sendMessageToGpt } from './openai';
 import type { ATIFTrajectory } from './atif/atif.types';
@@ -8,17 +8,7 @@ import { getValidAccessToken } from '../../auth';
 
 // Test mock interface - set by E2E test preload scripts via globalThis
 declare global {
-    var __paniniMockLLM: ((query: string) => {
-        message?: string;
-        raw: Array<{ name: string; args: Record<string, unknown>; id: string }>;
-        thought?: string;
-        usage?: {
-            prompt_tokens: number;
-            completion_tokens: number;
-            cached_tokens?: number;
-            cost_usd: number;
-        };
-    }) | undefined;
+    var __paniniMockLLM: ((query: string) => ResponseWithThought) | undefined;
 }
 
 export async function sendMessageToModel(

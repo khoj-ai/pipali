@@ -1,6 +1,7 @@
 import type { ToolDefinition, ChatMessage } from "../conversation";
 import type { ToolDefinition as LcToolDefinition } from '@langchain/core/language_models/base';
 import { HumanMessage, ToolMessage } from '@langchain/core/messages';
+import type { Responses } from 'openai/resources/responses/responses';
 
 export function toOpenaiTools(tools?: ToolDefinition[]): LcToolDefinition[] | undefined {
     if (!tools) return undefined;
@@ -96,4 +97,15 @@ export function formatMessagesForOpenAI(messages: ChatMessage[]): ChatMessage[] 
     }
 
     return formatted;
+}
+
+/**
+ * Get the reasoning content as a string from a ATIF reasoning object.
+ * Returns undefined if no reasoning is present.
+ */
+export function getReasoningText(reasoning: Responses.ResponseReasoningItem | undefined): string | undefined {
+  if (!reasoning?.summary || reasoning.summary.length === 0) {
+    return undefined;
+  }
+  return reasoning.summary.map(s => s.text).join('\n\n');
 }
