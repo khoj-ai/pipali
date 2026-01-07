@@ -176,8 +176,9 @@ api.get('/conversations', async (c) => {
                 .reverse()
                 .find(s => s.source === 'agent' && s.reasoning_content);
             latestReasoning = latestAgentWithReasoning?.reasoning_content
-                ?.split('\n')[0]  // First line only
-                ?.slice(0, 80);   // Truncate
+                ?.split('\n')[0]              // First line only
+                ?.replace(/^\*\*|\*\*$/g, '') // Strip leading, ending **
+                ?.slice(0, 80);               // Truncate
         }
 
         return {
