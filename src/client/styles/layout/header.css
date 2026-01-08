@@ -43,11 +43,25 @@
 }
 
 .logo {
-    font-size: 18px;
-    font-weight: 600;
-    letter-spacing: -0.02em;
-    color: var(--color-text);
+    display: flex;
+    align-items: flex-end;
+    gap: var(--space-2);
     margin: 0;
+}
+
+.logo-icon {
+    width: var(--text-lg);
+    height: var(--text-lg);
+    object-fit: contain;
+    flex-shrink: 0;
+}
+
+.logo-text {
+    font-size: var(--text-lg);
+    font-weight: var(--font-semibold);
+    letter-spacing: var(--tracking-tight);
+    color: var(--color-text);
+    line-height: var(--leading-none);
 }
 
 .logo.clickable {

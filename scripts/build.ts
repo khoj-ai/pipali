@@ -133,6 +133,25 @@ async function readMigrations(): Promise<{ migrations: { sql: string; tag: strin
     return { migrations };
 }
 
+async function readIcons(): Promise<{ [key: string]: string }> {
+    console.log("🎨 Reading icon assets...");
+
+    const iconsDir = path.join(ROOT_DIR, "src/client/public", "icons");
+    const icons: { [key: string]: string } = {};
+
+    const files = await fs.readdir(iconsDir);
+    for (const file of files) {
+        if (file.endsWith('.png')) {
+            const filePath = path.join(iconsDir, file);
+            const buffer = await fs.readFile(filePath);
+            icons[file] = buffer.toString('base64');
+        }
+    }
+
+    console.log(`✅ Read ${Object.keys(icons).length} icon(s)`);
+    return icons;
+}
+
 function escapeForTemplate(str: string): string {
     // Escape backticks and ${} for template literals
     return str
@@ -145,7 +164,8 @@ async function generateEmbeddedAssets(
     migrations: { sql: string; tag: string }[],
     indexHtml: string,
     stylesCss: string,
-    appJs: string
+    appJs: string,
+    icons: { [key: string]: string }
 ) {
     console.log("📝 Generating embedded assets module...");
 
@@ -155,6 +175,10 @@ async function generateEmbeddedAssets(
 
     const migrationsArray = migrations.map(m =>
         `  { sql: \`${escapeForTemplate(m.sql)}\`, tag: "${m.tag}" }`
+    ).join(",\n");
+
+    const iconsObject = Object.entries(icons).map(([name, data]) =>
+        `  "${name}": "${data}"`
     ).join(",\n");
 
     const content = `/**
@@ -172,6 +196,10 @@ export const EMBEDDED_INDEX_HTML = \`${escapeForTemplate(indexHtml)}\`;
 export const EMBEDDED_STYLES_CSS = \`${escapeForTemplate(stylesCss)}\`;
 
 export const EMBEDDED_APP_JS = \`${escapeForTemplate(appJs)}\`;
+
+export const EMBEDDED_ICONS: { [key: string]: string } = {
+${iconsObject}
+};
 
 export const IS_COMPILED_BINARY = true;
 `;
@@ -198,6 +226,9 @@ export const EMBEDDED_MIGRATIONS: { sql: string; tag: string }[] = [];
 export const EMBEDDED_INDEX_HTML = "";
 export const EMBEDDED_STYLES_CSS = "";
 export const EMBEDDED_APP_JS = "";
+
+// Icon assets (base64 encoded)
+export const EMBEDDED_ICONS: { [key: string]: string } = {};
 
 export const IS_COMPILED_BINARY = false;
 `;
@@ -263,10 +294,11 @@ async function main() {
         const { appJs } = await buildFrontend();
         const stylesCss = await bundleCss();
         const { migrations } = await readMigrations();
+        const icons = await readIcons();
         const indexHtml = await fs.readFile(path.join(CLIENT_SRC, "index.html"), "utf-8");
 
         // Generate embedded assets module
-        await generateEmbeddedAssets(migrations, indexHtml, stylesCss, appJs);
+        await generateEmbeddedAssets(migrations, indexHtml, stylesCss, appJs, icons);
 
         // Compile
         await compile(target);

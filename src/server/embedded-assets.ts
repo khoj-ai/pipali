@@ -13,5 +13,8 @@ export const EMBEDDED_INDEX_HTML = "";
 export const EMBEDDED_STYLES_CSS = "";
 export const EMBEDDED_APP_JS = "";
 
+// Icon assets (base64 encoded)
+export const EMBEDDED_ICONS: { [key: string]: string } = {};
+
 // Flag to check if assets are embedded (set to true during build)
 export const IS_COMPILED_BINARY = false;

@@ -50,7 +50,7 @@ export function Header({
                     >
                         {sidebarOpen ? <PanelLeftClose size={20} /> : <PanelLeft size={20} />}
                     </button>
-                    <h1
+                    <div
                         className="logo clickable"
                         onClick={onGoHome}
                         role="button"
@@ -62,8 +62,9 @@ export function Header({
                             }
                         }}
                     >
-                        Pipali
-                    </h1>
+                        <img src="/icons/pipali_64.png" alt="Pipali" className="logo-icon" />
+                        <span className="logo-text">Pipali</span>
+                    </div>
                 </div>
 
                 <div className="header-right">

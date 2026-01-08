@@ -61,11 +61,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
             <div className="login-card">
                 <div className="login-header">
                     <div className="login-logo">
-                        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                            <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                            <path d="M2 17l10 5 10-5" />
-                            <path d="M2 12l10 5 10-5" />
-                        </svg>
+                        <img src="/icons/pipali_128.png" alt="Pipali" width="64" height="64" />
                     </div>
                     <h1>Welcome to Pipali</h1>
                     <p>Sign in to continue to your personal AI assistant</p>
