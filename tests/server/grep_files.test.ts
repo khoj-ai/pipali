@@ -329,4 +329,84 @@ describe('grepFiles', () => {
         expect(result.compiled).toContain('It contains test data');
         expect(result.compiled).toContain('And some more lines');
     });
+
+    describe('ReDoS protection', () => {
+        test('should reject nested quantifiers pattern (a+)+', async () => {
+            const result = await grepFiles({
+                pattern: '(a+)+',
+                path: testDir,
+            });
+
+            expect(result.compiled).toContain('Regex pattern is too complex');
+            expect(result.compiled).toContain('nested quantifiers');
+        });
+
+        test('should reject nested quantifiers pattern (a*)+', async () => {
+            const result = await grepFiles({
+                pattern: '(a*)+',
+                path: testDir,
+            });
+
+            expect(result.compiled).toContain('Regex pattern is too complex');
+        });
+
+        test('should reject nested quantifiers pattern (a+)*', async () => {
+            const result = await grepFiles({
+                pattern: '(a+)*',
+                path: testDir,
+            });
+
+            expect(result.compiled).toContain('Regex pattern is too complex');
+        });
+
+        test('should reject complex nested patterns like (.*a+)+', async () => {
+            const result = await grepFiles({
+                pattern: '(.*a+)+',
+                path: testDir,
+            });
+
+            expect(result.compiled).toContain('Regex pattern is too complex');
+        });
+
+        test('should allow safe patterns with single quantifiers', async () => {
+            const result = await grepFiles({
+                pattern: 'test+',
+                path: testDir,
+            });
+
+            // Should work normally, not be rejected
+            expect(result.compiled).not.toContain('Regex pattern is too complex');
+        });
+
+        test('should allow normal patterns with alternations', async () => {
+            const result = await grepFiles({
+                pattern: '(test|data)',
+                path: testDir,
+            });
+
+            // Should work normally
+            expect(result.compiled).not.toContain('Regex pattern is too complex');
+            expect(result.compiled).toContain('test');
+        });
+
+        test('should allow patterns with character classes and quantifiers', async () => {
+            const result = await grepFiles({
+                pattern: '[a-z]+',
+                path: testDir,
+            });
+
+            // Character classes with quantifiers are safe
+            expect(result.compiled).not.toContain('Regex pattern is too complex');
+        });
+
+        test('should allow normal email-like patterns', async () => {
+            const result = await grepFiles({
+                pattern: '[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+',
+                path: testDir,
+            });
+
+            // Standard email regex is safe
+            expect(result.compiled).not.toContain('Regex pattern is too complex');
+        });
+    });
 });

@@ -3,6 +3,11 @@ import { homedir } from 'os';
 import fs from 'fs/promises';
 import { minimatch } from 'minimatch';
 import { clampInt, getExcludedDirNamesForRootDir, resolveCaseInsensitivePath, resolvePath, walkFilePaths } from './actor.utils';
+import { isSensitivePath, getSensitivePathReason } from '../../security';
+import {
+    type ConfirmationContext,
+    requestOperationConfirmation,
+} from '../confirmation';
 
 /**
  * Arguments for the grep_files tool.
@@ -41,6 +46,42 @@ export interface GrepResult {
 }
 
 /**
+ * Options for grep operations
+ */
+export interface GrepFilesOptions {
+    /** Confirmation context for requesting user approval on sensitive paths */
+    confirmationContext?: ConfirmationContext;
+}
+
+/**
+ * Check if a regex pattern is potentially dangerous (ReDoS).
+ * Uses simple heuristics to detect nested quantifiers and other patterns
+ * that can cause catastrophic backtracking.
+ */
+function isUnsafeRegex(pattern: string): boolean {
+    // Detect nested quantifiers like (a+)+, (a*)+, (a+)*, etc.
+    // These can cause exponential backtracking
+    const nestedQuantifiers = /(\([^)]*[+*][^)]*\))[+*]|\([^)]*([+*])[^)]*\)\2/;
+    if (nestedQuantifiers.test(pattern)) {
+        return true;
+    }
+
+    // Detect overlapping alternations with quantifiers like (a|a)+
+    const overlappingAlternation = /\(([^|)]+)\|(\1[^)]*|\1)\)[+*]/;
+    if (overlappingAlternation.test(pattern)) {
+        return true;
+    }
+
+    // Very long patterns with many quantifiers
+    const quantifierCount = (pattern.match(/[+*?]|\{\d+,?\d*\}/g) || []).length;
+    if (quantifierCount > 10 && pattern.length > 100) {
+        return true;
+    }
+
+    return false;
+}
+
+/**
  * Search for a regex pattern in files.
  *
  * Features:
@@ -49,8 +90,15 @@ export interface GrepResult {
  * - Glob-based file type filtering via `include` parameter
  * - Context lines (before/after matches)
  * - Uses ripgrep when available for speed
+ *
+ * Security:
+ * - Sensitive paths require user confirmation
+ * - Dangerous regex patterns (ReDoS) are rejected
  */
-export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
+export async function grepFiles(
+    args: GrepFilesArgs,
+    options?: GrepFilesOptions
+): Promise<GrepResult> {
     const {
         pattern,
         path: searchPathArg = homedir(),
@@ -72,6 +120,16 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
     };
 
     try {
+        // Check for potentially dangerous regex patterns (ReDoS prevention)
+        if (isUnsafeRegex(pattern)) {
+            return {
+                query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                file: searchPathArg,
+                uri: searchPathArg,
+                compiled: 'Error: Regex pattern is too complex and may cause performance issues. Patterns with nested quantifiers like (a+)+ or (a|b)* can cause exponential backtracking. Please simplify the pattern.',
+            };
+        }
+
         // Compile the regex pattern
         let regex: RegExp;
         try {
@@ -87,6 +145,30 @@ export async function grepFiles(args: GrepFilesArgs): Promise<GrepResult> {
 
         // Determine search path.
         let searchPath = resolvePath(searchPathArg);
+
+        // Check if path is sensitive and request confirmation if needed
+        if (isSensitivePath(searchPath) && options?.confirmationContext) {
+            const reason = getSensitivePathReason(searchPath) || 'sensitive location';
+            const confirmResult = await requestOperationConfirmation(
+                'grep_sensitive_path',
+                searchPath,
+                options.confirmationContext,
+                {
+                    toolName: 'grep_files',
+                    toolArgs: { pattern, path: searchPathArg, include, lines_before, lines_after, max_results },
+                    additionalMessage: `This path contains ${reason}.\n\nAre you sure you want to search in this location?`,
+                }
+            );
+
+            if (!confirmResult.approved) {
+                return {
+                    query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                    file: searchPathArg,
+                    uri: searchPathArg,
+                    compiled: `Search cancelled: ${confirmResult.denialReason || 'User denied access to sensitive path'}`,
+                };
+            }
+        }
 
         // Normalize to on-disk casing when input casing differs (common on macOS).
         const caseResolvedSearchPath = await resolveCaseInsensitivePath(path.resolve(searchPath));

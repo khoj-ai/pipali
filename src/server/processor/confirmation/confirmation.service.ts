@@ -41,7 +41,10 @@ export type ConfirmableOperation =
     | 'write_file'
     | 'delete_file'
     | 'execute_command'
-    | 'mcp_tool_call';
+    | 'mcp_tool_call'
+    | 'read_sensitive_file'
+    | 'grep_sensitive_path'
+    | 'fetch_internal_url';
 
 /**
  * Get risk level based on operation and optional sub-type
@@ -70,6 +73,9 @@ function getRiskLevel(
         delete_file: 'high',
         execute_command: 'high',
         mcp_tool_call: 'medium',
+        read_sensitive_file: 'medium',
+        grep_sensitive_path: 'medium',
+        fetch_internal_url: 'medium',
     };
 
     return defaultRiskLevels[operation];
@@ -95,6 +101,9 @@ export function createFileOperationConfirmation(
         delete_file: 'Confirm File Deletion',
         execute_command: 'Confirm Command Execution',
         mcp_tool_call: 'Confirm MCP Tool Call',
+        read_sensitive_file: 'Confirm Sensitive File Access',
+        grep_sensitive_path: 'Confirm Sensitive Path Search',
+        fetch_internal_url: 'Confirm Internal Network Access',
     };
 
     const messages: Record<ConfirmableOperation, string> = {
@@ -103,6 +112,9 @@ export function createFileOperationConfirmation(
         delete_file: `The agent wants to delete the file:\n\n**${filePath}**`,
         execute_command: `The agent wants to execute a command`,
         mcp_tool_call: `The agent wants to call an MCP tool:\n\n**${filePath}**`,
+        read_sensitive_file: `The agent wants to read a sensitive file:\n\n**${filePath}**`,
+        grep_sensitive_path: `The agent wants to search in a sensitive path:\n\n**${filePath}**`,
+        fetch_internal_url: `The agent wants to access an internal network URL:\n\n**${filePath}**`,
     };
 
     return {

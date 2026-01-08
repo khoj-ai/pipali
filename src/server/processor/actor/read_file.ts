@@ -5,6 +5,11 @@ import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { DocxLoader } from '@langchain/community/document_loaders/fs/docx';
 import { PPTXLoader } from '@langchain/community/document_loaders/fs/pptx';
 import * as XLSX from 'xlsx';
+import { isSensitivePath, getSensitivePathReason } from '../../security';
+import {
+    type ConfirmationContext,
+    requestOperationConfirmation,
+} from '../confirmation';
 
 /**
  * Arguments for the read_file tool.
@@ -24,6 +29,14 @@ export interface FileContentResult {
     uri: string;
     compiled: string | Array<{ type: string; [key: string]: any }>;
     isImage?: boolean;
+}
+
+/**
+ * Options for file reading operations
+ */
+export interface ReadFileOptions {
+    /** Confirmation context for requesting user approval on sensitive paths */
+    confirmationContext?: ConfirmationContext;
 }
 
 /** Default maximum lines to read when no limit is specified */
@@ -152,8 +165,14 @@ function formatTruncationMessage(result: LineFilterResult, fileType: string = 'F
  * - Word documents (.docx, .doc)
  * - Excel spreadsheets (.xlsx, .xls)
  * - PowerPoint presentations (.pptx, .ppt)
+ *
+ * Security:
+ * - Sensitive paths (SSH keys, credentials, etc.) require user confirmation
  */
-export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
+export async function readFile(
+    args: ReadFileArgs,
+    options?: ReadFileOptions
+): Promise<FileContentResult> {
     const { path: filePath, offset = 0, limit } = args;
 
     let query = `View file: ${filePath}`;
@@ -176,6 +195,30 @@ export async function readFile(args: ReadFileArgs): Promise<FileContentResult> {
         const absolutePath = path.isAbsolute(expandedPath)
             ? expandedPath
             : path.resolve(os.homedir(), expandedPath);
+
+        // Check if path is sensitive and request confirmation if needed
+        if (isSensitivePath(absolutePath) && options?.confirmationContext) {
+            const reason = getSensitivePathReason(absolutePath) || 'sensitive file';
+            const confirmResult = await requestOperationConfirmation(
+                'read_sensitive_file',
+                absolutePath,
+                options.confirmationContext,
+                {
+                    toolName: 'view_file',
+                    toolArgs: { path: filePath, offset, limit },
+                    additionalMessage: `This path contains ${reason}.\n\nAre you sure you want to read this file?`,
+                }
+            );
+
+            if (!confirmResult.approved) {
+                return {
+                    query,
+                    file: filePath,
+                    uri: filePath,
+                    compiled: `File read cancelled: ${confirmResult.denialReason || 'User denied access to sensitive file'}`,
+                };
+            }
+        }
 
         // Read the file using Bun.file
         let resolvedPath = absolutePath;

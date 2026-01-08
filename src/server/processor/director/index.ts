@@ -482,11 +482,17 @@ async function executeTool(
                 return result.compiled;
             }
             case 'view_file': {
-                const result = await readFile(toolCall.arguments as ReadFileArgs);
+                const result = await readFile(
+                    toolCall.arguments as ReadFileArgs,
+                    { confirmationContext: context?.confirmation }
+                );
                 return result.compiled;
             }
             case 'grep_files': {
-                const result = await grepFiles(toolCall.arguments as GrepFilesArgs);
+                const result = await grepFiles(
+                    toolCall.arguments as GrepFilesArgs,
+                    { confirmationContext: context?.confirmation }
+                );
                 return result.compiled;
             }
             case 'edit_file': {
@@ -517,7 +523,10 @@ async function executeTool(
             case 'read_webpage': {
                 const result = await readWebpage(
                     toolCall.arguments as ReadWebpageArgs,
-                    context?.metricsAccumulator
+                    {
+                        confirmationContext: context?.confirmation,
+                        metricsAccumulator: context?.metricsAccumulator,
+                    }
                 );
                 return result.compiled;
             }

@@ -12,6 +12,11 @@ import { desc, eq } from 'drizzle-orm';
 import { getValidAccessToken } from '../../auth';
 import { extractRelevantContent } from './webpage_extractor';
 import type { MetricsAccumulator } from '../director/types';
+import { isInternalUrl, getInternalUrlReason } from '../../security';
+import {
+    type ConfirmationContext,
+    requestOperationConfirmation,
+} from '../confirmation';
 
 // Timeout for webpage fetch requests (in milliseconds)
 const FETCH_REQUEST_TIMEOUT = 60000;
@@ -46,6 +51,16 @@ export interface ReadWebpageResult {
     file: string;
     uri: string;
     compiled: string;
+}
+
+/**
+ * Options for webpage reading operations
+ */
+export interface ReadWebpageOptions {
+    /** Confirmation context for requesting user approval on internal URLs */
+    confirmationContext?: ConfirmationContext;
+    /** Metrics accumulator for tracking LLM usage */
+    metricsAccumulator?: MetricsAccumulator;
 }
 
 /**
@@ -287,12 +302,20 @@ function isValidUrl(urlString: string): boolean {
 
 /**
  * Main read_webpage function
+ *
+ * Security:
+ * - Internal/private network URLs require user confirmation
  */
 export async function readWebpage(
     args: ReadWebpageArgs,
-    metricsAccumulator?: MetricsAccumulator
+    options?: ReadWebpageOptions | MetricsAccumulator
 ): Promise<ReadWebpageResult> {
     const { url, query } = args;
+
+    // Handle both old signature (metricsAccumulator) and new signature (options object)
+    const opts: ReadWebpageOptions = options && 'confirmationContext' in options
+        ? options
+        : { metricsAccumulator: options as MetricsAccumulator | undefined };
 
     if (!url || url.trim().length === 0) {
         return {
@@ -310,6 +333,30 @@ export async function readWebpage(
             uri: url,
             compiled: 'Error: Invalid URL format. URL must start with http:// or https://',
         };
+    }
+
+    // Check if URL points to internal/private network and request confirmation
+    if (isInternalUrl(url) && opts.confirmationContext) {
+        const reason = getInternalUrlReason(url) || 'internal network resource';
+        const confirmResult = await requestOperationConfirmation(
+            'fetch_internal_url',
+            url,
+            opts.confirmationContext,
+            {
+                toolName: 'read_webpage',
+                toolArgs: { url, query },
+                additionalMessage: `This URL points to a ${reason}.\n\nInternal network resources may expose sensitive information. Are you sure you want to access this URL?`,
+            }
+        );
+
+        if (!confirmResult.approved) {
+            return {
+                query: `**Reading webpage**: ${url}`,
+                file: url,
+                uri: url,
+                compiled: `Webpage fetch cancelled: ${confirmResult.denialReason || 'User denied access to internal network URL'}`,
+            };
+        }
     }
 
     try {
@@ -404,7 +451,7 @@ export async function readWebpage(
         if (query && usedProvider !== 'platform') {
             try {
                 console.log(`[ReadWebpage] Extracting relevant content for query: "${query}"`);
-                extractedContent = await extractRelevantContent(rawContent, query, metricsAccumulator);
+                extractedContent = await extractRelevantContent(rawContent, query, opts.metricsAccumulator);
                 console.log(`[ReadWebpage] Extracted ${extractedContent.length} chars of relevant content`);
             } catch (error) {
                 console.warn(`[ReadWebpage] Content extraction failed, using raw content: ${error}`);
