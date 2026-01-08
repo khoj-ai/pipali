@@ -33,12 +33,9 @@ export function DiffView({ diff }: DiffViewProps) {
         );
     }
 
-    // For write operations, show the content (truncated if too long)
+    // For write operations, show the full content with scrolling
     if (diff.newText !== undefined) {
         const lines = diff.newText.split('\n');
-        const maxLines = 20;
-        const truncated = lines.length > maxLines;
-        const displayLines = truncated ? lines.slice(0, maxLines) : lines;
 
         return (
             <div className="diff-container">
@@ -49,18 +46,13 @@ export function DiffView({ diff }: DiffViewProps) {
                     </span>
                 </div>
                 <div className="diff-inline">
-                    {displayLines.map((line, idx) => (
+                    {lines.map((line, idx) => (
                         <div key={idx} className="diff-line added">
                             <span className="diff-line-indicator">+</span>
                             <span className="diff-line-content">{line || ' '}</span>
                         </div>
                     ))}
                 </div>
-                {truncated && (
-                    <div className="diff-meta">
-                        ... {lines.length - maxLines} more lines
-                    </div>
-                )}
             </div>
         );
     }

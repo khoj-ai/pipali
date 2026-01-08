@@ -5,7 +5,7 @@ import { X, Loader2, Trash2, Play, Pause, Calendar, Clock, Pencil, Save, AlertCi
 import type { AutomationInfo, FrequencyType, DayOfWeek, AutomationPendingConfirmation } from '../../types/automations';
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
 import { DiffView } from '../tool-views/DiffView';
-import { parseCommandMessage, shortenHomePath } from '../../utils/parseCommand';
+import { shortenHomePath } from '../../utils/parseCommand';
 
 interface AutomationDetailModalProps {
     automation: AutomationInfo;
@@ -365,9 +365,7 @@ export function AutomationDetailModal({
                             <div className="confirmation-content">
                                 <p className="confirmation-title">{pendingConfirmation.request.title}</p>
                                 {(() => {
-                                    const commandInfo = pendingConfirmation.request.message
-                                        ? parseCommandMessage(pendingConfirmation.request.message)
-                                        : null;
+                                    const commandInfo = pendingConfirmation.request.context?.commandInfo;
                                     return (
                                         <>
                                             {commandInfo?.reason && (

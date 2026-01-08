@@ -2158,6 +2158,8 @@ body {
 
 /* Operation type pill styles */
 .operation-type-pill {
+    display: inline-block;
+    width: fit-content;
     font-size: 11px;
     font-weight: 500;
     padding: 4px 8px;
@@ -2276,6 +2278,8 @@ body {
     background: var(--bg-secondary);
     border-radius: 8px;
     border: 1px solid var(--border-light);
+    max-height: 200px;
+    overflow-y: auto;
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-word;
@@ -2743,6 +2747,18 @@ body {
     gap: 2px;
 }
 
+.toast-info-clickable {
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    padding: 4px;
+    margin: -4px;
+    transition: background var(--transition);
+}
+
+.toast-info-clickable:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+}
+
 .toast-conversation {
     font-size: 12px;
     font-weight: 600;
@@ -2750,6 +2766,25 @@ body {
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+.toast-conversation-clickable {
+    cursor: pointer;
+    border-radius: var(--radius-sm);
+    padding: 2px 4px;
+    margin: -2px -4px;
+    transition: background var(--transition);
+}
+
+.toast-conversation-clickable:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.05));
+}
+
+.toast-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
 }
 
 .toast-title {
@@ -2855,6 +2890,8 @@ body {
     font-size: 11px;
     line-height: 1.4;
     color: var(--text-primary);
+    max-height: 150px;
+    overflow-y: auto;
     overflow-x: auto;
     white-space: pre-wrap;
     word-break: break-all;
@@ -2862,6 +2899,28 @@ body {
 
 .toast-command-code code {
     font-family: inherit;
+}
+
+/* Toast reason section (for bash command confirmations) */
+.toast-reason-section {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 12px;
+}
+
+.toast-reason-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.toast-reason-content {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.4;
 }
 
 .toast-actions {

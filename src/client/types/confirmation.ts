@@ -15,11 +15,17 @@ export type DiffInfo = {
     isNewFile?: boolean;
 };
 
+export type CommandExecutionInfo = {
+    command: string;
+    reason: string;
+    workdir: string;
+};
+
 export type ConfirmationRequest = {
     requestId: string;
     inputType: 'choice' | 'multi_select' | 'number_range' | 'text_input';
     title: string;
-    message: string;
+    message?: string;
     operation: string;
     context?: {
         toolName: string;
@@ -28,6 +34,8 @@ export type ConfirmationRequest = {
         riskLevel?: 'low' | 'medium' | 'high';
         /** Operation sub-type for display (e.g., 'read-only', 'write-only', 'read-write' for bash commands) */
         operationType?: string;
+        /** Structured command execution info (for bash_command operations) */
+        commandInfo?: CommandExecutionInfo;
     };
     diff?: DiffInfo;
     options: ConfirmationOption[];
@@ -38,7 +46,7 @@ export type ConfirmationRequest = {
 // Source of the confirmation - determines visual treatment and response channel
 export type ConfirmationSource =
     | { type: 'chat'; conversationId: string; conversationTitle: string }
-    | { type: 'automation'; confirmationId: string; automationId: string; automationName: string; executionId: string };
+    | { type: 'automation'; confirmationId: string; automationId: string; automationName: string; executionId: string; conversationId: string | null };
 
 // Pending confirmation type for both chat and automation confirmations
 export type PendingConfirmation = {

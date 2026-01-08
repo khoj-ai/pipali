@@ -6,7 +6,8 @@ import React, { useEffect, useState } from 'react';
 import { MessageCircleQuestion, Send } from 'lucide-react';
 import type { ConfirmationRequest, ConfirmationOption } from '../../types';
 import { DiffView } from '../tool-views/DiffView';
-import { parseCommandMessage, shortenHomePath } from '../../utils/parseCommand';
+import { shortenHomePath } from '../../utils/parseCommand';
+import { getOperationTypePillClass } from './utils';
 
 interface ConfirmationDialogProps {
     request: ConfirmationRequest;
@@ -114,21 +115,8 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
         }
     };
 
-    // Get operation type pill class
-    const getOperationTypePillClass = (opType?: string): string => {
-        switch (opType) {
-            case 'read-only':
-                return 'operation-type-pill read-only';
-            case 'write-only':
-                return 'operation-type-pill write-only';
-            case 'read-write':
-                return 'operation-type-pill read-write';
-            default:
-                return 'operation-type-pill';
-        }
-    };
-
-    const commandInfo = request.message ? parseCommandMessage(request.message) : null;
+    // Get structured command info from context (for bash_command operations)
+    const commandInfo = request.context?.commandInfo;
 
     // Check if this is an MCP tool call
     const isMcpToolCall = request.operation === 'mcp_tool_call';
@@ -198,7 +186,6 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
                             )}
                         </div>
                     ) : commandInfo ? (
-                        /* Structured command execution view */
                         <div className="command-confirmation">
                             {commandInfo.reason && (
                                 <div className="command-section">
@@ -236,8 +223,8 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
                     {/* Diff view for showing changes */}
                     {request.diff && <DiffView diff={request.diff} />}
 
-                    {/* File path if no diff and no message */}
-                    {!request.diff && !request.message && request.context?.affectedFiles && request.context.affectedFiles.length > 0 && (
+                    {/* File path if no diff, no message, and no command info */}
+                    {!request.diff && !request.message && !commandInfo && request.context?.affectedFiles && request.context.affectedFiles.length > 0 && (
                         <div className="confirmation-files">
                             <span className="files-label">Affected files:</span>
                             <ul className="files-list">

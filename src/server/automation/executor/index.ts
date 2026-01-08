@@ -533,6 +533,7 @@ export async function getPendingConfirmations(userId: number): Promise<Array<{
     executionId: string;
     automationId: string;
     automationName: string;
+    conversationId: string | null;
     request: ConfirmationRequest;
     expiresAt: Date;
 }>> {
@@ -543,6 +544,7 @@ export async function getPendingConfirmations(userId: number): Promise<Array<{
         expiresAt: PendingConfirmation.expiresAt,
         automationId: Automation.id,
         automationName: Automation.name,
+        conversationId: Automation.conversationId,
     })
         .from(PendingConfirmation)
         .innerJoin(AutomationExecution, eq(PendingConfirmation.executionId, AutomationExecution.id))
@@ -557,6 +559,7 @@ export async function getPendingConfirmations(userId: number): Promise<Array<{
         executionId: r.executionId,
         automationId: r.automationId,
         automationName: r.automationName,
+        conversationId: r.conversationId,
         request: r.request as ConfirmationRequest,
         expiresAt: r.expiresAt,
     }));

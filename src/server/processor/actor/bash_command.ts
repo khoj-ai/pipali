@@ -141,8 +141,12 @@ export async function bashCommand(
                     timeout: effectiveTimeout,
                     operation_type: args.operation_type,
                 },
-                additionalMessage: `**Why:** ${justification}\n\n**Command:**\n\`\`\`bash\n${command}\n\`\`\`\n\n**Working directory:** ${workingDir}`,
                 operationSubType: args.operation_type,
+                commandInfo: {
+                    command,
+                    reason: justification,
+                    workdir: workingDir,
+                },
             }
         );
 

@@ -11,6 +11,7 @@ import {
     type ConfirmationResult,
     type ConfirmationPreferences,
     type DiffInfo,
+    type CommandExecutionInfo,
     CONFIRMATION_OPTIONS,
     createStandardConfirmationOptions,
 } from './confirmation.types';
@@ -93,6 +94,8 @@ export function createFileOperationConfirmation(
         additionalMessage?: string;
         diff?: DiffInfo;
         operationSubType?: string;
+        /** Structured command execution info (for bash_command operations) */
+        commandInfo?: CommandExecutionInfo;
     }
 ): ConfirmationRequest {
     const titles: Record<ConfirmableOperation, string> = {
@@ -106,24 +109,11 @@ export function createFileOperationConfirmation(
         fetch_internal_url: 'Confirm Internal Network Access',
     };
 
-    const messages: Record<ConfirmableOperation, string> = {
-        edit_file: `The agent wants to modify the file:\n\n**${filePath}**`,
-        write_file: `The agent wants to create or overwrite the file:\n\n**${filePath}**`,
-        delete_file: `The agent wants to delete the file:\n\n**${filePath}**`,
-        execute_command: `The agent wants to execute a command`,
-        mcp_tool_call: `The agent wants to call an MCP tool:\n\n**${filePath}**`,
-        read_sensitive_file: `The agent wants to read a sensitive file:\n\n**${filePath}**`,
-        grep_sensitive_path: `The agent wants to search in a sensitive path:\n\n**${filePath}**`,
-        fetch_internal_url: `The agent wants to access an internal network URL:\n\n**${filePath}**`,
-    };
-
     return {
         requestId: crypto.randomUUID(),
         inputType: 'choice',
         title: titles[operation],
-        message: details.additionalMessage
-            ? `${messages[operation]}\n\n${details.additionalMessage}`
-            : messages[operation],
+        message: details.additionalMessage,
         operation,
         context: {
             toolName: details.toolName,
@@ -131,6 +121,7 @@ export function createFileOperationConfirmation(
             affectedFiles: [filePath],
             riskLevel: getRiskLevel(operation, details.operationSubType),
             operationType: details.operationSubType,
+            commandInfo: details.commandInfo,
         },
         diff: details.diff,
         options: createStandardConfirmationOptions(),
@@ -197,8 +188,9 @@ export async function requestOperationConfirmation(
         toolArgs: Record<string, unknown>;
         additionalMessage?: string;
         diff?: DiffInfo;
-        /** Optional sub-type for finer-grained confirmation tracking (e.g., operation_type for bash_command) */
+        /** Optional read/read-write sub-type for finer-grained confirmation tracking (used by bash_command) */
         operationSubType?: string;
+        commandInfo?: CommandExecutionInfo;
     }
 ): Promise<ConfirmationResult> {
     // Build the confirmation key - includes sub-type if provided for finer-grained tracking

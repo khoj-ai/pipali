@@ -45,6 +45,19 @@ export interface DiffInfo {
 }
 
 /**
+ * Structured command execution information
+ * Used for bash_command operations to provide structured data instead of markdown
+ */
+export interface CommandExecutionInfo {
+    /** The bash command to execute */
+    command: string;
+    /** Reason/justification for why this command is needed */
+    reason: string;
+    /** Working directory for command execution */
+    workdir: string;
+}
+
+/**
  * Request sent from server to client asking for user confirmation
  */
 export interface ConfirmationRequest {
@@ -55,7 +68,7 @@ export interface ConfirmationRequest {
     /** Title/header for the confirmation dialog */
     title: string;
     /** Detailed message explaining what will happen */
-    message: string;
+    message?: string;
     /** The operation being confirmed (for logging/tracking) */
     operation: string;
     /** Additional context about the operation */
@@ -70,6 +83,8 @@ export interface ConfirmationRequest {
         riskLevel?: 'low' | 'medium' | 'high';
         /** Operation sub-type for display (e.g., 'read-only', 'write-only', 'read-write' for bash commands) */
         operationType?: string;
+        /** Structured command execution info (for bash_command operations) */
+        commandInfo?: CommandExecutionInfo;
     };
     /** Diff information for showing what changes will be made */
     diff?: DiffInfo;

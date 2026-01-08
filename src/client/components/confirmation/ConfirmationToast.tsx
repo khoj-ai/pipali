@@ -4,19 +4,23 @@ import React, { useState } from 'react';
 import { ChevronDown, ChevronUp, X, Bot, Clock, Send, MessageCircleQuestion } from 'lucide-react';
 import type { PendingConfirmation } from '../../types/confirmation';
 import { DiffView } from '../tool-views/DiffView';
-import { parseCommandMessage, shortenHomePath } from '../../utils/parseCommand';
-import { getButtonClass, formatTimeRemaining, hasExpandableContent, getMessagePreview } from './utils';
+import { shortenHomePath } from '../../utils/parseCommand';
+import { getButtonClass, formatTimeRemaining, hasExpandableContent, getMessagePreview, getOperationTypePillClass } from './utils';
 
 interface ConfirmationToastProps {
     confirmation: PendingConfirmation;
     onRespond: (key: string, optionId: string, guidance?: string) => void;
     onDismiss: (key: string) => void;
+    onNavigateToConversation?: (conversationId: string) => void;
+    onNavigateToAutomations?: () => void;
 }
 
 export function ConfirmationToast({
     confirmation,
     onRespond,
     onDismiss,
+    onNavigateToConversation,
+    onNavigateToAutomations,
 }: ConfirmationToastProps) {
     const [isExpanded, setIsExpanded] = useState(false);
     const [guidanceText, setGuidanceText] = useState('');
@@ -25,7 +29,8 @@ export function ConfirmationToast({
     const isAutomation = source.type === 'automation';
     const isAgentQuestion = request.operation === 'ask_user';
 
-    const commandInfo = request.message ? parseCommandMessage(request.message) : null;
+    // Get structured command info from context (for bash_command operations)
+    const commandInfo = request.context?.commandInfo;
     const expandable = hasExpandableContent(request);
     const messagePreview = getMessagePreview(request);
 
@@ -38,30 +43,64 @@ export function ConfirmationToast({
         }
     };
 
+    const handleNavigate = () => {
+        if (source.type === 'chat' && onNavigateToConversation) {
+            onNavigateToConversation(source.conversationId);
+        } else if (source.type === 'automation') {
+            // Navigate to automation's conversation if available, otherwise to automations page
+            if (source.conversationId && onNavigateToConversation) {
+                onNavigateToConversation(source.conversationId);
+            } else if (onNavigateToAutomations) {
+                onNavigateToAutomations();
+            }
+        }
+    };
+
+    const isClickable = (source.type === 'chat' && !!onNavigateToConversation) ||
+                        (source.type === 'automation' && (!!onNavigateToAutomations || (!!source.conversationId && !!onNavigateToConversation)));
+
     return (
         <div className={`confirmation-toast ${isAutomation ? 'confirmation-toast--automation' : ''} ${isAgentQuestion ? 'confirmation-toast--question' : ''}`}>
             <div className="toast-header">
                 <div className="toast-info">
-                    {/* Source indicator */}
+                    {/* Source indicator - clickable to navigate */}
                     {isAutomation ? (
-                        <span className="toast-conversation automation-source">
+                        <span
+                            className={`toast-conversation automation-source ${isClickable ? 'toast-conversation-clickable' : ''}`}
+                            onClick={isClickable ? handleNavigate : undefined}
+                            role={isClickable ? 'button' : undefined}
+                            tabIndex={isClickable ? 0 : undefined}
+                            onKeyDown={isClickable ? (e) => { if (e.key === 'Enter') handleNavigate(); } : undefined}
+                        >
                             <Bot size={12} />
                             {source.automationName}
                         </span>
                     ) : (
-                        <span className="toast-conversation">{source.conversationTitle}</span>
+                        <span
+                            className={`toast-conversation ${isClickable ? 'toast-conversation-clickable' : ''}`}
+                            onClick={isClickable ? handleNavigate : undefined}
+                            role={isClickable ? 'button' : undefined}
+                            tabIndex={isClickable ? 0 : undefined}
+                            onKeyDown={isClickable ? (e) => { if (e.key === 'Enter') handleNavigate(); } : undefined}
+                        >
+                            {source.conversationTitle}
+                        </span>
                     )}
 
-                    <span className={`toast-title ${isAgentQuestion ? 'agent-question-title' : ''}`}>
-                        {isAgentQuestion && <MessageCircleQuestion size={12} className="question-icon" />}
-                        {request.title}
-                    </span>
-                    {isAgentQuestion && <span className="question-badge">Question</span>}
+                    <div className="toast-title-row">
+                        <span className={`toast-title ${isAgentQuestion ? 'agent-question-title' : ''}`}>
+                            {isAgentQuestion && <MessageCircleQuestion size={12} className="question-icon" />}
+                            {request.title}
+                        </span>
+                        {isAgentQuestion && <span className="question-badge">Question</span>}
+                        {request.context?.operationType && !isAgentQuestion && (
+                            <span className={getOperationTypePillClass(request.context.operationType)}>
+                                {request.context.operationType}
+                            </span>
+                        )}
+                    </div>
 
                     {/* Command reason or message preview */}
-                    {commandInfo?.reason && (
-                        <span className="toast-preview">{commandInfo.reason}</span>
-                    )}
                     {messagePreview && (
                         <span className="toast-preview">{messagePreview}</span>
                     )}

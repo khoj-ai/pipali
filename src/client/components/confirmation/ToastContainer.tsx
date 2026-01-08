@@ -8,6 +8,8 @@ interface ToastContainerProps {
     currentConversationId?: string;
     onRespond: (confirmation: PendingConfirmation, optionId: string, guidance?: string) => void;
     onDismiss: (confirmation: PendingConfirmation) => void;
+    onNavigateToConversation?: (conversationId: string) => void;
+    onNavigateToAutomations?: () => void;
 }
 
 export function ToastContainer({
@@ -15,6 +17,8 @@ export function ToastContainer({
     currentConversationId,
     onRespond,
     onDismiss,
+    onNavigateToConversation,
+    onNavigateToAutomations,
 }: ToastContainerProps) {
     // Filter out confirmations for current conversation (shown inline instead)
     const toastConfirmations = confirmations.filter(c => {
@@ -35,6 +39,8 @@ export function ToastContainer({
                     confirmation={confirmation}
                     onRespond={(key, optionId, guidance) => onRespond(confirmation, optionId, guidance)}
                     onDismiss={() => onDismiss(confirmation)}
+                    onNavigateToConversation={onNavigateToConversation}
+                    onNavigateToAutomations={onNavigateToAutomations}
                 />
             ))}
         </div>

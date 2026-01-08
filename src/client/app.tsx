@@ -1171,6 +1171,7 @@ const App = () => {
             automationId: confirmation.automationId,
             automationName: confirmation.automationName,
             executionId: confirmation.executionId,
+            conversationId: confirmation.conversationId,
         },
         expiresAt: confirmation.expiresAt,
     }), []);
@@ -1448,6 +1449,8 @@ const App = () => {
                 currentConversationId={conversationId}
                 onRespond={handleConfirmationResponse}
                 onDismiss={handleConfirmationDismiss}
+                onNavigateToConversation={selectConversation}
+                onNavigateToAutomations={goToAutomationsPage}
             />
         </div>
     );

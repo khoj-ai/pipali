@@ -85,6 +85,7 @@ export type AutomationPendingConfirmation = {
     executionId: string;
     automationId: string;
     automationName: string;
+    conversationId: string | null;
     request: ConfirmationRequest;
     expiresAt: string;
 };
