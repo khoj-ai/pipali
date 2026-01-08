@@ -29,7 +29,7 @@ export function MessageItem({ message, onDelete }: MessageItemProps) {
         >
             <div className="message-header">
                 <div className="message-label">
-                    {isUser ? 'You' : 'Panini'}
+                    {isUser ? 'You' : 'Pipali'}
                 </div>
                 {canDelete && isHovered && (
                     <button

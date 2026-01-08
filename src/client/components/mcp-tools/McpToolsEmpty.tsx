@@ -12,7 +12,7 @@ export function McpToolsEmpty({ onAddServer }: McpToolsEmptyProps) {
         <div className="empty-state mcp-tools-empty">
             <Wrench className="empty-icon" size={32} strokeWidth={1.5} />
             <h2>No Tool Servers</h2>
-            <p>Connect MCP servers to extend Panini with external tools.</p>
+            <p>Connect MCP servers to extend Pipali with external tools.</p>
             <p className="empty-hint">
                 MCP (Model Context Protocol) servers provide additional capabilities like:
             </p>

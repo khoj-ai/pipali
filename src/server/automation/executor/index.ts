@@ -323,7 +323,7 @@ async function getOrCreateAutomationConversation(
     // Create a new conversation for this automation
     const conversation = await atifConversationService.createConversation(
         user,
-        'panini-automation',
+        'pipali-automation',
         '1.0.0',
         'default',
         `Automation: ${automation.name}`

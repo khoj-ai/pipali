@@ -48,7 +48,7 @@ export class McpClient {
         try {
             // Create the client
             this.client = new Client(
-                { name: 'panini', version: '1.0.0' },
+                { name: 'pipali', version: '1.0.0' },
                 { capabilities: {} }
             );
 

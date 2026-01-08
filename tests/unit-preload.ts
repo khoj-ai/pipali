@@ -12,16 +12,16 @@ import { mock } from 'bun:test';
 
 // Ensure unit tests never touch the persistent repo DB
 try {
-    const baseDir = '/tmp/panini';
+    const baseDir = '/tmp/pipali';
     const { mkdirSync } = await import('node:fs');
     mkdirSync(baseDir, { recursive: true });
-    process.env.POSTGRES_DB ||= `${baseDir}/panini-unit-${process.pid}-${Date.now()}`;
+    process.env.POSTGRES_DB ||= `${baseDir}/pipali-unit-${process.pid}-${Date.now()}`;
 } catch {
     // If /tmp isn't available, fall back to cwd
-    process.env.POSTGRES_DB ||= `${process.cwd()}/.panini-unit-test.db`;
+    process.env.POSTGRES_DB ||= `${process.cwd()}/.pipali-unit-test.db`;
 }
 
-process.env.PANINI_TEST_MODE ||= 'true';
+process.env.PIPALI_TEST_MODE ||= 'true';
 
 // Stub DB imports so PGlite/WASM never boots during unit tests
 const dbModule = import.meta.resolve('../src/server/db');
@@ -86,7 +86,7 @@ mock.module(dbModule, () => {
     };
 });
 
-// Import E2E mock-preload to set up globalThis.__paniniMockLLM
+// Import E2E mock-preload to set up globalThis.__pipaliMockLLM
 await import('./e2e/mock-preload');
 
 console.log('[UnitPreload] ✅ DB mocked, LLM mock initialized for unit tests');

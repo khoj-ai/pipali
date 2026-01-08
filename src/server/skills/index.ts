@@ -53,20 +53,20 @@ let cachedSkills: Skill[] = [];
  * Get the global skills directory path
  */
 export function getGlobalSkillsDir(): string {
-    return process.env.PANINI_SKILLS_GLOBAL_DIR || path.join(os.homedir(), '.panini', 'skills');
+    return process.env.PIPALI_SKILLS_GLOBAL_DIR || path.join(os.homedir(), '.pipali', 'skills');
 }
 
 /**
  * Get the local skills directory path
  */
 export function getLocalSkillsDir(): string {
-    return process.env.PANINI_SKILLS_LOCAL_DIR || path.join(process.cwd(), '.panini', 'skills');
+    return process.env.PIPALI_SKILLS_LOCAL_DIR || path.join(process.cwd(), '.pipali', 'skills');
 }
 
 /**
  * Get the paths to scan for skills
- * Returns global path (~/.panini/skills) and local path (<cwd>/.panini/skills)
- * Paths can be overridden via PANINI_SKILLS_GLOBAL_DIR and PANINI_SKILLS_LOCAL_DIR env vars
+ * Returns global path (~/.pipali/skills) and local path (<cwd>/.pipali/skills)
+ * Paths can be overridden via PIPALI_SKILLS_GLOBAL_DIR and PIPALI_SKILLS_LOCAL_DIR env vars
  */
 function getSkillsPaths(): { path: string; source: 'global' | 'local' }[] {
     return [

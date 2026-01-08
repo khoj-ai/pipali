@@ -62,7 +62,7 @@ export function Header({
                             }
                         }}
                     >
-                        Panini
+                        Pipali
                     </h1>
                 </div>
 

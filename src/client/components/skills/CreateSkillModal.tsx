@@ -113,7 +113,7 @@ export function CreateSkillModal({ onClose, onCreated }: CreateSkillModalProps) 
                             >
                                 <FolderOpen size={16} />
                                 <span>Local</span>
-                                <span className="source-hint">./.panini/skills/</span>
+                                <span className="source-hint">./.pipali/skills/</span>
                             </button>
                             <button
                                 type="button"
@@ -122,7 +122,7 @@ export function CreateSkillModal({ onClose, onCreated }: CreateSkillModalProps) 
                             >
                                 <Globe size={16} />
                                 <span>Global</span>
-                                <span className="source-hint">~/.panini/skills/</span>
+                                <span className="source-hint">~/.pipali/skills/</span>
                             </button>
                         </div>
                     </div>

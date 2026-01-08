@@ -66,15 +66,15 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: panini-${{ github.ref_name }}-macos-arm64.app
-          path: src-tauri/target/release/bundle/macos/Panini.app
+          name: pipali-${{ github.ref_name }}-macos-arm64.app
+          path: src-tauri/target/release/bundle/macos/Pipali.app
           if-no-files-found: error
 
       - name: ⏫ Upload macOS DMG (if built)
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: panini-${{ github.ref_name }}-macos-arm64.dmg
+          name: pipali-${{ github.ref_name }}-macos-arm64.dmg
           path: src-tauri/target/release/bundle/dmg/*.dmg
           if-no-files-found: ignore
 
@@ -132,7 +132,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: panini-${{ github.ref_name }}-linux-x64.deb
+          name: pipali-${{ github.ref_name }}-linux-x64.deb
           path: src-tauri/target/release/bundle/deb/*.deb
           if-no-files-found: error
 
@@ -140,7 +140,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: panini-${{ github.ref_name }}-linux-x64.AppImage
+          name: pipali-${{ github.ref_name }}-linux-x64.AppImage
           path: src-tauri/target/release/bundle/appimage/*.AppImage
           if-no-files-found: error
 
@@ -187,7 +187,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: panini-${{ github.ref_name }}-windows-x64.msi
+          name: pipali-${{ github.ref_name }}-windows-x64.msi
           path: src-tauri/target/release/bundle/msi/*.msi
           if-no-files-found: error
 
@@ -195,7 +195,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: panini-${{ github.ref_name }}-windows-x64-setup.exe
+          name: pipali-${{ github.ref_name }}-windows-x64-setup.exe
           path: src-tauri/target/release/bundle/nsis/*.exe
           if-no-files-found: error
 

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 
 export type Theme = 'light' | 'dark' | 'system';
 
-const THEME_STORAGE_KEY = 'panini-theme';
+const THEME_STORAGE_KEY = 'pipali-theme';
 
 /**
  * Hook to manage theme (light/dark mode)

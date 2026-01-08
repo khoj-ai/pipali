@@ -1,5 +1,5 @@
 function getDbName() {
-    const defaultDbPath = `${process.cwd()}/panini.db`;
+    const defaultDbPath = `${process.cwd()}/pipali.db`;
     return process.env.POSTGRES_DB || defaultDbPath;
 }
 

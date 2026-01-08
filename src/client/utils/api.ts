@@ -1,5 +1,5 @@
 /**
- * API client utilities for making requests to the Panini server.
+ * API client utilities for making requests to the Pipali server.
  *
  * In web mode, requests go to relative URLs (same origin).
  * In Tauri mode, requests go to the sidecar's localhost URL.

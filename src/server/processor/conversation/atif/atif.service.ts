@@ -43,7 +43,7 @@ export class ATIFConversationService {
    */
   async createConversation(
     user: typeof User.$inferSelect,
-    agentName: string = 'panini-agent',
+    agentName: string = 'pipali-agent',
     agentVersion: string = '1.0.0',
     modelName: string = 'unknown',
     title?: string,

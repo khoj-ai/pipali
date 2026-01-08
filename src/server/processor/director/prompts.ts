@@ -2,7 +2,7 @@
 import { PromptTemplate } from '@langchain/core/prompts';
 
 export const planFunctionExecution = PromptTemplate.fromTemplate(
-  `You are Panini, a smart, creative and meticulous researcher.
+  `You are Pipali, a smart, creative and meticulous researcher.
 Plan and intelligently iterate to complete tasks using your tools and skills.
 
 # Instructions

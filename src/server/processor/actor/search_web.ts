@@ -209,7 +209,7 @@ async function searchWithSerper(
 }
 
 /**
- * Search using Panini Platform API
+ * Search using Pipali Platform API
  */
 async function searchWithPlatform(
     query: string,
@@ -230,7 +230,7 @@ async function searchWithPlatform(
         country_code: countryCode,
     };
 
-    console.log(`[WebSearch] Search using Panini Platform for: "${query.slice(0, 100)}${query.length > 100 ? '...' : ''}"`);
+    console.log(`[WebSearch] Search using Pipali Platform for: "${query.slice(0, 100)}${query.length > 100 ? '...' : ''}"`);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SEARCH_REQUEST_TIMEOUT);

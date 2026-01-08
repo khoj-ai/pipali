@@ -13,7 +13,7 @@ export interface Skill {
     description: string;
     /** Absolute path to the SKILL.md file */
     location: string;
-    /** Source path: 'global' (~/.panini/skills) or 'local' (cwd/.panini/skills) */
+    /** Source path: 'global' (~/.pipali/skills) or 'local' (cwd/.pipali/skills) */
     source: 'global' | 'local';
 }
 

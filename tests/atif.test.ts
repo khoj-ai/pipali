@@ -239,7 +239,7 @@ describe('ATIF Import/Export', () => {
   test('should roundtrip complete conversation with all features', () => {
     const trajectory = createEmptyATIFTrajectory(
       'session-123',
-      'panini-agent',
+      'pipali-agent',
       '1.0.0',
       'gpt-4o'
     );
@@ -277,7 +277,7 @@ describe('ATIF Import/Export', () => {
     // Verify agent metadata
     expect(imported.schema_version).toBe(ATIF_SCHEMA_VERSION);
     expect(imported.session_id).toBe('session-123');
-    expect(imported.agent.name).toBe('panini-agent');
+    expect(imported.agent.name).toBe('pipali-agent');
     expect(imported.agent.model_name).toBe('gpt-4o');
 
     // Verify step count and sources

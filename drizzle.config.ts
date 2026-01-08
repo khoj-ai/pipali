@@ -6,6 +6,6 @@ export default {
   dialect: 'postgresql',
   driver: 'pglite',
   dbCredentials: {
-    url: process.env.POSTGRES_DB || './panini.db'
+    url: process.env.POSTGRES_DB || './pipali.db'
   }
 } satisfies Config;

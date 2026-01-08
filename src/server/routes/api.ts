@@ -82,7 +82,7 @@ api.post('/chat', zValidator('json', schema), async (c) => {
         const modelName = chatModelWithApi?.chatModel.name || 'unknown';
         conversation = await atifConversationService.createConversation(
             user,
-            'panini-agent',
+            'pipali-agent',
             '1.0.0',
             modelName
         );

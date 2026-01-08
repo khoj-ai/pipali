@@ -27,20 +27,20 @@ function getServerConfig() {
             host: {
                 type: "string",
                 short: "h",
-                default: process.env.PANINI_HOST || "127.0.0.1",
+                default: process.env.PIPALI_HOST || "127.0.0.1",
             },
             port: {
                 type: "string",
                 short: "p",
-                default: process.env.PANINI_PORT || "6464",
+                default: process.env.PIPALI_PORT || "6464",
             },
             anon: {
                 type: "boolean",
-                default: process.env.PANINI_ANON_MODE === "true",
+                default: process.env.PIPALI_ANON_MODE === "true",
             },
             "platform-url": {
                 type: "string",
-                default: process.env.PANINI_PLATFORM_URL || "https://panini.khoj.dev",
+                default: process.env.PIPALI_PLATFORM_URL || "https://pipali.ai",
             },
             help: {
                 type: "boolean",
@@ -53,22 +53,22 @@ function getServerConfig() {
 
     if (values.help) {
         log.info(`
-Panini - Personal AI Assistant
+Pipali - Personal AI Assistant
 
-Usage: panini [options]
+Usage: pipali [options]
 
 Options:
-  -h, --host <host>        Host to bind to (default: 127.0.0.1, env: PANINI_HOST)
-  -p, --port <port>        Port to listen on (default: 6464, env: PANINI_PORT)
-      --anon               Skip platform authentication, use local API keys (env: PANINI_ANON_MODE)
-      --platform-url <url> Platform URL for authentication (env: PANINI_PLATFORM_URL)
+  -h, --host <host>        Host to bind to (default: 127.0.0.1, env: PIPALI_HOST)
+  -p, --port <port>        Port to listen on (default: 6464, env: PIPALI_PORT)
+      --anon               Skip platform authentication, use local API keys (env: PIPALI_ANON_MODE)
+      --platform-url <url> Platform URL for authentication (env: PIPALI_PLATFORM_URL)
       --help               Show this help message
 
 Examples:
-  panini                        # Start with platform authentication
-  panini --anon                 # Start without authentication (use local API keys)
-  panini -p 8080                # Start on 127.0.0.1:8080
-  panini --host 0.0.0.0         # Start on all interfaces
+  pipali                        # Start with platform authentication
+  pipali --anon                 # Start without authentication (use local API keys)
+  pipali -p 8080                # Start on 127.0.0.1:8080
+  pipali --host 0.0.0.0         # Start on all interfaces
 `);
         process.exit(0);
     }
@@ -191,7 +191,7 @@ async function main() {
 
   // Disable development mode (hot reload) in test mode or compiled binary
   // This prevents Bun from restarting the server when files change during tests
-  const isDevelopmentMode = !IS_COMPILED_BINARY && process.env.PANINI_TEST_MODE !== 'true';
+  const isDevelopmentMode = !IS_COMPILED_BINARY && process.env.PIPALI_TEST_MODE !== 'true';
 
   const server = Bun.serve<WebSocketData, any>({
     async fetch(req, server) {

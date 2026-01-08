@@ -1,5 +1,5 @@
 /**
- * OAuth Flow for Panini App
+ * OAuth Flow for Pipali App
  *
  * Handles the browser-based OAuth flow:
  * 1. Open the browser to the platform's OAuth page

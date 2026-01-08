@@ -344,7 +344,7 @@ export const McpServer = pgTable('mcp_server', {
 });
 
 // Platform Authentication Token Storage
-// Stores tokens for authenticated sessions with the Panini Platform
+// Stores tokens for authenticated sessions with the Pipali Platform
 export const PlatformAuth = pgTable('platform_auth', {
     id: serial('id').primaryKey(),
     userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),

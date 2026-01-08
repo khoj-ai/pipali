@@ -143,7 +143,7 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
                     <div className="form-section">
                         <div className="form-section-header">
                             <h3>Instructions</h3>
-                            <p className="form-section-subtitle">What do you want Khoj to do?</p>
+                            <p className="form-section-subtitle">What do you want Pipali to do?</p>
                         </div>
 
                         <div className="instruction-suggestions">

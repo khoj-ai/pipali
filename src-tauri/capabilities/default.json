@@ -1,7 +1,7 @@
 {
   "$schema": "https://schemas.tauri.app/config/capability",
   "identifier": "default",
-  "description": "Default capability set for Panini",
+  "description": "Default capability set for Pipali",
   "permissions": [
     "core:default",
     "core:window:default",
@@ -10,7 +10,7 @@
       "identifier": "shell:allow-spawn",
       "allow": [
         {
-          "name": "binaries/panini-server",
+          "name": "binaries/pipali-server",
           "sidecar": true,
           "args": true
         }

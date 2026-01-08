@@ -1,10 +1,10 @@
-const maxIterations = parseInt(process.env.PANINI_RESEARCH_ITERATIONS || '15', 10);
+const maxIterations = parseInt(process.env.PIPALI_RESEARCH_ITERATIONS || '15', 10);
 
 function getDefaultUser() {
-    if (process.env.PANINI_ADMIN_EMAIL && process.env.PANINI_ADMIN_PASSWORD) {
+    if (process.env.PIPALI_ADMIN_EMAIL && process.env.PIPALI_ADMIN_PASSWORD) {
         return {
-            email: process.env.PANINI_ADMIN_EMAIL,
-            password: process.env.PANINI_ADMIN_PASSWORD,
+            email: process.env.PIPALI_ADMIN_EMAIL,
+            password: process.env.PIPALI_ADMIN_PASSWORD,
         };
     }
     return {

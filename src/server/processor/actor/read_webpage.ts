@@ -81,7 +81,7 @@ async function getEnabledWebScrapers(): Promise<(typeof WebScraper.$inferSelect)
 }
 
 /**
- * Read webpage content using Panini Platform API
+ * Read webpage content using Pipali Platform API
  */
 async function readWithPlatform(
     url: string,
@@ -100,7 +100,7 @@ async function readWithPlatform(
         payload.query = query;
     }
 
-    console.log(`[ReadWebpage] Read using Panini Platform: ${url}`);
+    console.log(`[ReadWebpage] Read using Pipali Platform: ${url}`);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), FETCH_REQUEST_TIMEOUT);

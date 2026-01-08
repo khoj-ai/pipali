@@ -2,7 +2,7 @@
  * Mock Preload Script for E2E Tests
  *
  * This script is preloaded before the server starts via --preload flag.
- * It sets globalThis.__paniniMockLLM which the conversation module checks
+ * It sets globalThis.__pipaliMockLLM which the conversation module checks
  * to return deterministic mock responses instead of calling real LLMs.
  */
 
@@ -16,12 +16,12 @@ let lastQuery = '';
 
 // Parse scenarios from environment if provided
 function getScenarios(): MockScenario[] {
-    const envScenarios = process.env.PANINI_MOCK_SCENARIOS;
+    const envScenarios = process.env.PIPALI_MOCK_SCENARIOS;
     if (envScenarios) {
         try {
             return JSON.parse(envScenarios);
         } catch {
-            console.warn('[MockPreload] Failed to parse PANINI_MOCK_SCENARIOS, using defaults');
+            console.warn('[MockPreload] Failed to parse PIPALI_MOCK_SCENARIOS, using defaults');
         }
     }
     return defaultMockScenarios;
@@ -118,7 +118,7 @@ function resetMockState() {
 
 // Set global mock function for the server to use
 declare global {
-    var __paniniMockLLM: ((query: string) => {
+    var __pipaliMockLLM: ((query: string) => {
         message?: string;
         raw: Array<{ name: string; args: Record<string, unknown>; id: string }>;
         thought?: string;
@@ -129,10 +129,10 @@ declare global {
             cost_usd: number;
         };
     }) | undefined;
-    var __paniniMockReset: typeof resetMockState | undefined;
+    var __pipaliMockReset: typeof resetMockState | undefined;
 }
 
-globalThis.__paniniMockLLM = getMockResponse;
-globalThis.__paniniMockReset = resetMockState;
+globalThis.__pipaliMockLLM = getMockResponse;
+globalThis.__pipaliMockReset = resetMockState;
 
 console.log('[MockPreload] ✅ Mock LLM initialized');

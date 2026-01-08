@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Build script for creating a TRUE single-file executable of Panini
+ * Build script for creating a TRUE single-file executable of Pipali
  *
  * This script:
  * 1. Builds the frontend (React app)
@@ -209,8 +209,8 @@ async function compile(target?: Target) {
     console.log(`🚀 Compiling single-file executable${target ? ` for ${target}` : ""}...`);
 
     const outputName = target
-        ? `panini-${target.replace("bun-", "")}${target.includes("windows") ? ".exe" : ""}`
-        : `panini${process.platform === "win32" ? ".exe" : ""}`;
+        ? `pipali-${target.replace("bun-", "")}${target.includes("windows") ? ".exe" : ""}`
+        : `pipali${process.platform === "win32" ? ".exe" : ""}`;
 
     const outputPath = path.join(DIST_DIR, outputName);
     const entrypoint = path.join(ROOT_DIR, "src/server/index.ts");
@@ -253,7 +253,7 @@ async function main() {
     const startTime = Date.now();
     const { target } = await parseArgs();
 
-    console.log("🍞 Panini Single-File Build Script");
+    console.log("🍞 Pipali Single-File Build Script");
     console.log("=".repeat(40));
 
     try {
@@ -281,7 +281,7 @@ async function main() {
     console.log(`✨ Build completed in ${elapsed}s`);
     console.log("");
     console.log("📝 To run the compiled app:");
-    console.log(`   ${path.join(DIST_DIR, "panini")}`);
+    console.log(`   ${path.join(DIST_DIR, "pipali")}`);
     console.log("");
     console.log("🎉 This is a TRUE single-file executable!");
     console.log("   No additional files or folders required.");

@@ -44,7 +44,7 @@ export interface ATIFTrajectory {
  */
 export interface ATIFAgent {
   /**
-   * Agent identifier (e.g., "panini-agent")
+   * Agent identifier (e.g., "pipali-agent")
    */
   name: string;
 

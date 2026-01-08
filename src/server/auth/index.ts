@@ -1,7 +1,7 @@
 /**
  * Platform Authentication Module
  *
- * Handles authentication with the Panini Platform for the local app.
+ * Handles authentication with the Pipali Platform for the local app.
  * Stores tokens in the local PGlite database and provides functions
  * to check auth status, get tokens, and refresh tokens.
  */
@@ -15,7 +15,7 @@ import { createChildLogger } from '../logger';
 const log = createChildLogger({ component: 'auth' });
 
 // Module state
-let platformUrl: string = process.env.PANINI_PLATFORM_URL || 'https://panini.khoj.dev';
+let platformUrl: string = process.env.PIPALI_PLATFORM_URL || 'https://pipali.ai';
 let anonMode: boolean = false;
 
 // Mutex for token refresh to prevent race conditions
@@ -83,19 +83,19 @@ async function updatePlatformProviderTokens(newToken: string): Promise<void> {
         await db
             .update(AiModelApi)
             .set({ apiKey: newToken, updatedAt: new Date() })
-            .where(eq(AiModelApi.name, 'Panini'));
+            .where(eq(AiModelApi.name, 'Pipali'));
 
         // Update web search provider
         await db
             .update(WebSearchProvider)
             .set({ apiKey: newToken, updatedAt: new Date() })
-            .where(eq(WebSearchProvider.name, 'Panini'));
+            .where(eq(WebSearchProvider.name, 'Pipali'));
 
         // Update web scraper
         await db
             .update(WebScraper)
             .set({ apiKey: newToken, updatedAt: new Date() })
-            .where(eq(WebScraper.name, 'Panini'));
+            .where(eq(WebScraper.name, 'Pipali'));
 
         log.info('Updated platform provider tokens');
     } catch (error) {
@@ -352,7 +352,7 @@ export async function getPlatformUserInfo(): Promise<PlatformUserInfo | null> {
 
 /**
  * Sync platform models to the app's local database
- * This sets up Panini Platform as an AI provider and adds available models
+ * This sets up Pipali Platform as an AI provider and adds available models
  */
 export async function syncPlatformModels(): Promise<void> {
     const tokens = await getStoredTokens();
@@ -411,33 +411,33 @@ export async function syncPlatformModels(): Promise<void> {
             return;
         }
 
-        // Check if Panini provider already exists
+        // Check if Pipali provider already exists
         const [existingProvider] = await db
             .select()
             .from(AiModelApi)
-            .where(eq(AiModelApi.name, 'Panini'));
+            .where(eq(AiModelApi.name, 'Pipali'));
 
         let providerId: number;
 
         if (existingProvider) {
             providerId = existingProvider.id;
-            log.debug('Panini provider already exists');
+            log.debug('Pipali provider already exists');
         } else {
-            // Create the Panini provider
+            // Create the Pipali provider
             // The API key will be the access token, and base URL is the platform URL
             const [newProvider] = await db.insert(AiModelApi).values({
-                name: 'Panini',
+                name: 'Pipali',
                 apiKey: tokens.accessToken, // This will be refreshed when needed
                 apiBaseUrl: `${platformUrl}/openai/v1`,
             }).returning();
 
             if (!newProvider) {
-                log.error('Failed to create Panini provider');
+                log.error('Failed to create Pipali provider');
                 return;
             }
 
             providerId = newProvider.id;
-            log.info('Created Panini provider');
+            log.info('Created Pipali provider');
         }
 
         // Get existing models for this provider
@@ -528,7 +528,7 @@ export async function syncPlatformModels(): Promise<void> {
 
 /**
  * Sync platform web tools (web search and web scraper) to the app's local database
- * This sets up Panini as a web search and web scraper provider
+ * This sets up Pipali as a web search and web scraper provider
  * Platform tools are only used if the user hasn't configured local API keys
  */
 export async function syncPlatformWebTools(): Promise<void> {
@@ -545,7 +545,7 @@ export async function syncPlatformWebTools(): Promise<void> {
         const [existingSearchProvider] = await db
             .select()
             .from(WebSearchProvider)
-            .where(eq(WebSearchProvider.name, 'Panini'));
+            .where(eq(WebSearchProvider.name, 'Pipali'));
 
         if (existingSearchProvider) {
             // Update API key and ensure it's enabled with low priority (local keys take precedence)
@@ -558,25 +558,25 @@ export async function syncPlatformWebTools(): Promise<void> {
                     updatedAt: new Date(),
                 })
                 .where(eq(WebSearchProvider.id, existingSearchProvider.id));
-            log.debug('Updated Panini web search provider');
+            log.debug('Updated Pipali web search provider');
         } else {
-            // Create the Panini web search provider
+            // Create the Pipali web search provider
             await db.insert(WebSearchProvider).values({
-                name: 'Panini',
+                name: 'Pipali',
                 type: 'platform',
                 apiKey: tokens.accessToken,
                 apiBaseUrl: `${platformUrl}/tools`,
                 priority: 100, // Low priority so local API keys are tried first
                 enabled: true,
             });
-            log.info('Created Panini web search provider');
+            log.info('Created Pipali web search provider');
         }
 
         // Check if platform web scraper already exists
         const [existingScraper] = await db
             .select()
             .from(WebScraper)
-            .where(eq(WebScraper.name, 'Panini'));
+            .where(eq(WebScraper.name, 'Pipali'));
 
         if (existingScraper) {
             // Update API key and ensure it's enabled with low priority
@@ -589,18 +589,18 @@ export async function syncPlatformWebTools(): Promise<void> {
                     updatedAt: new Date(),
                 })
                 .where(eq(WebScraper.id, existingScraper.id));
-            log.debug('Updated Panini web scraper');
+            log.debug('Updated Pipali web scraper');
         } else {
-            // Create the Panini web scraper
+            // Create the Pipali web scraper
             await db.insert(WebScraper).values({
-                name: 'Panini',
+                name: 'Pipali',
                 type: 'platform',
                 apiKey: tokens.accessToken,
                 apiBaseUrl: `${platformUrl}/tools`,
                 priority: 100, // Low priority so local API keys are tried first
                 enabled: true,
             });
-            log.info('Created Panini web scraper');
+            log.info('Created Pipali web scraper');
         }
 
         log.info('Platform web tools sync complete');

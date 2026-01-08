@@ -8,7 +8,7 @@ import { getValidAccessToken } from '../../auth';
 
 // Test mock interface - set by E2E test preload scripts via globalThis
 declare global {
-    var __paniniMockLLM: ((query: string) => ResponseWithThought) | undefined;
+    var __pipaliMockLLM: ((query: string) => ResponseWithThought) | undefined;
 }
 
 export async function sendMessageToModel(
@@ -24,10 +24,10 @@ export async function sendMessageToModel(
     user?: typeof User.$inferSelect,
 ) {
     // Check for test mock (E2E tests inject this via preload)
-    if (globalThis.__paniniMockLLM) {
+    if (globalThis.__pipaliMockLLM) {
         const actualQuery = query || history?.steps?.findLast(s => s.source === 'user')?.message || '';
         console.log(`[LLM] 🧪 Using mock for: "${actualQuery.substring(0, 50)}..."`);
-        return globalThis.__paniniMockLLM(actualQuery);
+        return globalThis.__pipaliMockLLM(actualQuery);
     }
 
     const chatModelWithApi: ChatModelWithApi | undefined = await getDefaultChatModel(user);
@@ -65,9 +65,9 @@ export async function sendMessageToModel(
     if (aiModelType === 'openai') {
         const startTime = Date.now();
 
-        // For Panini provider, get a valid access token
+        // For Pipali provider, get a valid access token
         let apiKey = chatModelWithApi.aiModelApi?.apiKey;
-        if (aiModelApiName === 'Panini') {
+        if (aiModelApiName === 'Pipali') {
             const validToken = await getValidAccessToken();
             if (validToken) {
                 apiKey = validToken;

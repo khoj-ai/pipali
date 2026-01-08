@@ -2,7 +2,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Panini",
+            "name": "Pipali",
             "type": "bun",
             "request": "launch",
             "cwd": "${workspaceFolder}",

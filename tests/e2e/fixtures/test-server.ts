@@ -34,9 +34,9 @@ export class TestServer {
         this.port = config.port;
         this.host = config.host || '127.0.0.1';
         const testId = Date.now();
-        this.dbPath = `/tmp/panini/panini-test-${testId}`;
-        this.skillsGlobalDir = `/tmp/panini/panini-test-${testId}-skills-global`;
-        this.skillsLocalDir = `/tmp/panini/panini-test-${testId}-skills-local`;
+        this.dbPath = `/tmp/pipali/pipali-test-${testId}`;
+        this.skillsGlobalDir = `/tmp/pipali/pipali-test-${testId}-skills-global`;
+        this.skillsLocalDir = `/tmp/pipali/pipali-test-${testId}-skills-local`;
         this.mockScenarios = config.mockScenarios || [];
     }
 
@@ -65,22 +65,22 @@ export class TestServer {
         // Set environment variables for the test server
         const env: NodeJS.ProcessEnv = {
             ...process.env,
-            PANINI_PORT: String(this.port),
-            PANINI_HOST: this.host,
+            PIPALI_PORT: String(this.port),
+            PIPALI_HOST: this.host,
             POSTGRES_DB: this.dbPath,
-            PANINI_TEST_MODE: 'true',
+            PIPALI_TEST_MODE: 'true',
             // Use isolated skills directories for testing
-            PANINI_SKILLS_GLOBAL_DIR: this.skillsGlobalDir,
-            PANINI_SKILLS_LOCAL_DIR: this.skillsLocalDir,
+            PIPALI_SKILLS_GLOBAL_DIR: this.skillsGlobalDir,
+            PIPALI_SKILLS_LOCAL_DIR: this.skillsLocalDir,
         };
 
         // Pass mock scenarios if provided
         if (this.mockScenarios.length > 0) {
-            env.PANINI_MOCK_SCENARIOS = JSON.stringify(this.mockScenarios);
+            env.PIPALI_MOCK_SCENARIOS = JSON.stringify(this.mockScenarios);
         }
 
         // Start the server with --preload to inject mock LLM before any modules load
-        // The preload script sets globalThis.__paniniTestMock which sendMessageToModel checks
+        // The preload script sets globalThis.__pipaliTestMock which sendMessageToModel checks
         const preloadPath = resolve(__dirname, '../mock-preload.ts');
         this.process = spawn('bun', ['run', '--preload', preloadPath, 'src/server/index.ts'], {
             cwd: process.cwd(),

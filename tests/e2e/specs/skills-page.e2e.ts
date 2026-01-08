@@ -628,8 +628,8 @@ test.describe('Skills Page', () => {
 
             // Should mention both global and local paths
             const pathsText = await freshSkillsPage.skillsEmpty.locator('.skills-paths').textContent();
-            expect(pathsText).toContain('~/.panini/skills');
-            expect(pathsText).toContain('./.panini/skills');
+            expect(pathsText).toContain('~/.pipali/skills');
+            expect(pathsText).toContain('./.pipali/skills');
         });
     });
 });

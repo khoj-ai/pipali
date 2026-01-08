@@ -1,8 +1,8 @@
 [package]
-name = "panini"
+name = "pipali"
 version = "0.1.0"
-description = "Panini - Personal AI Assistant"
-authors = ["Khoj Team"]
+description = "Pipali - Personal AI"
+authors = ["Pipali Team"]
 edition = "2021"
 
 # Note: crate-type not specified - defaults to rlib, which is what we need

@@ -3,7 +3,7 @@
  * Build script for Tauri desktop application
  *
  * This script:
- * 1. Builds the Panini sidecar executable for the target platform
+ * 1. Builds the Pipali sidecar executable for the target platform
  * 2. Copies it to src-tauri/binaries with proper Rust target triple naming
  * 3. Invokes the Tauri build process
  *
@@ -91,9 +91,9 @@ async function copySidecarToBinaries(platform: Platform) {
 
     const targetTriple = TARGET_TRIPLE_MAP[platform];
     const sourceExt = platform.includes("windows") ? ".exe" : "";
-    const sourceName = `panini-${platform}${sourceExt}`;
-    // Sidecar named "panini-server" to avoid conflict with Cargo package name "panini"
-    const destName = `panini-server-${targetTriple}${sourceExt}`;
+    const sourceName = `pipali-${platform}${sourceExt}`;
+    // Sidecar named "pipali-server" to avoid conflict with Cargo package name "pipali"
+    const destName = `pipali-server-${targetTriple}${sourceExt}`;
 
     const sourcePath = path.join(DIST_DIR, sourceName);
     const destPath = path.join(TAURI_BINARIES_DIR, destName);
@@ -147,7 +147,7 @@ async function main() {
     const startTime = Date.now();
     const { platform, debug } = await parseArgs();
 
-    console.log("🍞 Panini Tauri Desktop Build");
+    console.log("🍞 Pipali Tauri Desktop Build");
     console.log("=".repeat(50));
     console.log(`Platform: ${platform}`);
     console.log(`Mode: ${debug ? "debug" : "release"}`);

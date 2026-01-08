@@ -355,7 +355,7 @@ export const websocketHandler = {
             const modelName = chatModelWithApi?.chatModel.name || 'unknown';
             conversation = await atifConversationService.createConversation(
                 user,
-                'panini-agent',
+                'pipali-agent',
                 '1.0.0',
                 modelName
             );
@@ -394,7 +394,7 @@ export const websocketHandler = {
     open(_ws: ServerWebSocket<WebSocketData>) {
         log.info("🔌 Client connected");
         // Reset mock state for test isolation (no-op in production)
-        globalThis.__paniniMockReset?.();
+        globalThis.__pipaliMockReset?.();
     },
     close(ws: ServerWebSocket<WebSocketData>) {
         log.info("🔌 Client disconnected");

@@ -67,7 +67,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
                             <path d="M2 12l10 5 10-5" />
                         </svg>
                     </div>
-                    <h1>Welcome to Panini</h1>
+                    <h1>Welcome to Pipali</h1>
                     <p>Sign in to continue to your personal AI assistant</p>
                 </div>
 
@@ -131,7 +131,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
 
                 <div className="login-footer">
                     <p>
-                        By continuing, you agree to Panini's Terms of Service and Privacy Policy.
+                        By continuing, you agree to Pipali's Terms of Service and Privacy Policy.
                     </p>
                 </div>
             </div>

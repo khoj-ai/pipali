@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Panini",
+  "productName": "Pipali",
   "version": "0.1.0",
-  "identifier": "dev.khoj.panini",
+  "identifier": "ai.pipali",
   "build": {
     "beforeDevCommand": "cd src-tauri-frontend && bun run dev",
     "devUrl": "http://localhost:5173",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Panini",
+        "title": "Pipali",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -37,7 +37,7 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/panini-server"
+      "binaries/pipali-server"
     ],
     "macOS": {
       "minimumSystemVersion": "10.15"

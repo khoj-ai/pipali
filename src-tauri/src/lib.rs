@@ -48,7 +48,7 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
 
     let sidecar_command = app
         .shell()
-        .sidecar("panini-server")
+        .sidecar("pipali-server")
         .map_err(|e| format!("Failed to create sidecar command: {}", e))?
         .args([
             "--port",
