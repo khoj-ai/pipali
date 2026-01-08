@@ -15,6 +15,9 @@ import {
 import { startAutomationSystem, stopAutomationSystem } from "./automation";
 import { loadEnabledMcpServers, closeMcpClients } from "./processor/mcp";
 import { configureAuth, isAuthenticated } from "./auth";
+import { createChildLogger } from './logger';
+
+const log = createChildLogger({ component: 'server' });
 
 // Parse CLI arguments
 function getServerConfig() {
@@ -49,7 +52,7 @@ function getServerConfig() {
     });
 
     if (values.help) {
-        console.log(`
+        log.info(`
 Panini - Personal AI Assistant
 
 Usage: panini [options]
@@ -79,7 +82,7 @@ Examples:
 }
 
 async function runEmbeddedMigrations() {
-    console.log("Running embedded migrations...");
+    log.info("Running embedded migrations...");
 
     // Create migrations table if it doesn't exist
     await db.execute(sql`
@@ -99,11 +102,11 @@ async function runEmbeddedMigrations() {
         const hash = migration.tag;
 
         if (appliedHashes.has(hash)) {
-            console.log(`  ⏭️  Skipping ${hash} (already applied)`);
+            log.info(`  ⏭️  Skipping ${hash} (already applied)`);
             continue;
         }
 
-        console.log(`  🔄 Running migration: ${hash}`);
+        log.info(`  🔄 Running migration: ${hash}`);
 
         // Split by the Drizzle breakpoint marker and execute each statement
         const statements = migration.sql.split('--> statement-breakpoint');
@@ -121,10 +124,10 @@ async function runEmbeddedMigrations() {
             VALUES (${hash}, ${Date.now()})
         `);
 
-        console.log(`  ✅ Applied: ${hash}`);
+        log.info(`  ✅ Applied: ${hash}`);
     }
 
-    console.log("Migrations complete.");
+    log.info("Migrations complete.");
 }
 
 async function main() {
@@ -150,20 +153,20 @@ async function main() {
     // Check if already authenticated (before starting server)
     const alreadyAuthenticated = !config.anon && await isAuthenticated();
     if (alreadyAuthenticated) {
-        console.log('🔐 Using existing platform authentication');
+        log.info('🔐 Using existing platform authentication');
     } else if (config.anon) {
-        console.log('🔓 Running in anonymous mode (using local API keys)');
+        log.info('🔓 Running in anonymous mode (using local API keys)');
     }
 
     // Load skills from global and local paths
     const skillResult = await loadSkills();
     if (skillResult.errors.length > 0) {
         for (const error of skillResult.errors) {
-            console.warn(`[Skills] ⚠️  ${error.path}: ${error.message}`);
+            log.warn(`⚠️  ${error.path}: ${error.message}`);
         }
     }
     if (skillResult.skills.length > 0) {
-        console.log(`🎯 Loaded ${skillResult.skills.length} skill(s): ${skillResult.skills.map(s => s.name).join(', ')}`);
+        log.info(`🎯 Loaded ${skillResult.skills.length} skill(s): ${skillResult.skills.map(s => s.name).join(', ')}`);
     }
 
     // Start automation system (cron scheduler, file watchers)
@@ -171,19 +174,19 @@ async function main() {
 
     // Load enabled MCP servers asynchronously to not block server startup
     loadEnabledMcpServers().catch(error => {
-        console.warn(`[MCP] ⚠️ Failed to load MCP servers:`, error);
+        log.warn(`⚠️ Failed to load MCP servers:`, error);
     });
 
     // Build frontend only in development mode (not when running as compiled binary)
     if (!IS_COMPILED_BINARY) {
-        console.log("Building frontend...");
+        log.info("Building frontend...");
         await Bun.build({
             entrypoints: ["src/client/app.tsx"],
             outdir: "src/client/dist",
         });
-        console.log("Frontend built.");
+        log.info("Frontend built.");
     } else {
-        console.log("Running in compiled mode - using embedded assets.");
+        log.info("Running in compiled mode - using embedded assets.");
     }
 
   // Disable development mode (hot reload) in test mode or compiled binary
@@ -193,7 +196,7 @@ async function main() {
   const server = Bun.serve<WebSocketData, any>({
     async fetch(req, server) {
         const url = new URL(req.url);
-        console.log(`[${req.method}] ${url.pathname}`);
+        log.info(`[${req.method}] ${url.pathname}`);
 
         // WebSocket
         if (url.pathname === "/ws/chat") {
@@ -223,22 +226,22 @@ async function main() {
     development: isDevelopmentMode,
   });
 
-  console.log(`Server listening on http://${config.host}:${server.port}`);
+  log.info(`Server listening on http://${config.host}:${server.port}`);
 
   // Log auth status (authentication is now handled via the frontend login page)
   if (!config.anon && !alreadyAuthenticated) {
-      console.log('🔐 Authentication required - sign in via the web interface');
-      console.log(`   Platform: ${config.platformUrl}`);
+      log.info('🔐 Authentication required - sign in via the web interface');
+      log.info(`   Platform: ${config.platformUrl}`);
   }
 
   // Graceful shutdown handlers to prevent database corruption
   const shutdown = async (signal: string) => {
-    console.log(`\n[Server] Received ${signal}, shutting down gracefully...`);
+    log.info(`\nReceived ${signal}, shutting down gracefully...`);
     server.stop();
     await stopAutomationSystem();
     await closeMcpClients();
     await closeDatabase();
-    console.log('[Server] Shutdown complete.');
+    log.info('Shutdown complete.');
     process.exit(0);
   };
 

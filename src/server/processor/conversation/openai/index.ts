@@ -4,6 +4,9 @@ import type { Responses } from 'openai/resources/responses/responses';
 import type { ChatMessage, ResponseWithThought, ToolDefinition, UsageMetrics } from '../conversation';
 import { toOpenaiTools, formatMessagesForOpenAI, getReasoningText } from './utils';
 import { calculateCost, type PricingConfig } from '../costs';
+import { createChildLogger } from '../../../logger';
+
+const log = createChildLogger({ component: 'llm' });
 
 export async function sendMessageToGpt(
     messages: ChatMessage[],
@@ -74,7 +77,7 @@ export async function sendMessageToGpt(
             cache_write_tokens: cacheWriteTokens,
             cost_usd: costUsd,
         };
-        console.log(`[LLM] Usage: ${promptTokens} prompt, ${completionTokens} completion, ${cachedReadTokens} cache read, ${cacheWriteTokens} cache write, $${costUsd.toFixed(6)}`);
+        log.info(`Usage: ${promptTokens} prompt, ${completionTokens} completion, ${cachedReadTokens} cache read, ${cacheWriteTokens} cache write, $${costUsd.toFixed(6)}`);
     }
 
     return { thought, message: response.text, raw: rawOutput, usage };

@@ -5,6 +5,10 @@
  * cron schedules or file system changes.
  */
 
+import { createChildLogger } from '../logger';
+
+const log = createChildLogger({ component: 'automation' });
+
 export * from './types';
 
 export {
@@ -44,7 +48,7 @@ export async function startAutomationSystem(): Promise<void> {
     // Start the schedulers
     const { startSchedulers } = await import('./scheduler');
     await startSchedulers();
-    console.log('[Automation] System started');
+    log.info('System started');
 }
 
 /**
@@ -53,7 +57,7 @@ export async function startAutomationSystem(): Promise<void> {
 export async function stopAutomationSystem(): Promise<void> {
     const { stopSchedulers } = await import('./scheduler');
     await stopSchedulers();
-    console.log('[Automation] System stopped');
+    log.info('System stopped');
 }
 
 /**

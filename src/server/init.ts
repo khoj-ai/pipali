@@ -2,6 +2,9 @@ import { db } from './db';
 import { User, AiModelApi, ChatModel } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { getDefaultUser } from './utils';
+import { createChildLogger } from './logger';
+
+const log = createChildLogger({ component: 'init' });
 
 const defaultGeminiModels = ['gemini-3-pro-preview', 'gemini-2.5-flash'];
 const defaultOpenAIModels = ['gpt-5.2'];
@@ -10,7 +13,7 @@ const defaultAnthropicModels = ['claude-opus-4-5-20251101', 'claude-sonnet-4-5-2
 async function setupChatModelProvider(providerName: string, modelType: 'openai' | 'google' | 'anthropic', apiKey: string, defaultModels: string[], visionEnabled: boolean, apiBaseUrl?: string) {
     const [existingProvider] = await db.select().from(AiModelApi).where(eq(AiModelApi.name, providerName));
     if (existingProvider) {
-        console.log(`${providerName} provider already exists.`);
+        log.info(`${providerName} provider already exists.`);
         return;
     }
 
@@ -29,7 +32,7 @@ async function setupChatModelProvider(providerName: string, modelType: 'openai' 
             aiModelApiId: apiProvider?.id,
         });
     }
-    console.log(`🤖 Added ${providerName} ai models.`);
+    log.info(`🤖 Added ${providerName} ai models.`);
 }
 
 export async function initializeDatabase() {
@@ -40,7 +43,7 @@ export async function initializeDatabase() {
     const [existingAdmin] = await db.select().from(User).where(eq(User.email, adminUserEmail));
 
     if (!existingAdmin) {
-        console.log(`👩‍✈️ Creating admin user: ${adminUserEmail}. These credentials will allow you to configure your server at /server/admin.`);
+        log.info(`👩‍✈️ Creating admin user: ${adminUserEmail}. These credentials will allow you to configure your server at /server/admin.`);
         await db.insert(User).values({
             email: adminUserEmail,
             username: adminUserEmail,
@@ -63,5 +66,5 @@ export async function initializeDatabase() {
         }
     }
 
-    console.log('📀 Database initialization complete.');
+    log.info('📀 Database initialization complete.');
 }

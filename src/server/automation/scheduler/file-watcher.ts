@@ -15,6 +15,9 @@ import { eq, and } from 'drizzle-orm';
 import { queueExecution } from '../executor';
 import type { FileWatchTriggerConfig, TriggerEventData } from '../types';
 import { minimatch } from 'minimatch';
+import { createChildLogger } from '../../logger';
+
+const log = createChildLogger({ component: 'automation' });
 
 // Map of automation ID -> watcher instances
 const fileWatchers = new Map<string, FSWatcher[]>();
@@ -39,7 +42,7 @@ export async function startFileWatchers(): Promise<void> {
         await setupFileWatcher(automation);
     }
 
-    console.log(`[Automation] Started ${automations.length} file watchers`);
+    log.info(`Started ${automations.length} file watchers`);
 }
 
 /**
@@ -79,7 +82,7 @@ export async function setupFileWatcher(automation: typeof Automation.$inferSelec
 
         // Check if path exists
         if (!isDirectory(expandedPath)) {
-            console.warn(`[Automation] Watch path does not exist or is not a directory: ${expandedPath}`);
+            log.warn(`Watch path does not exist or is not a directory: ${expandedPath}`);
             continue;
         }
 
@@ -120,13 +123,13 @@ export async function setupFileWatcher(automation: typeof Automation.$inferSelec
             });
 
             watcher.on('error', (error) => {
-                console.error(`[Automation] Watcher error for ${expandedPath}:`, error);
+                log.error({ err: error, path: expandedPath }, 'Watcher error');
             });
 
             watchers.push(watcher);
-            console.log(`[Automation] Watching: ${expandedPath} for ${automation.name}`);
+            log.info(`Watching: ${expandedPath} for ${automation.name}`);
         } catch (error) {
-            console.error(`[Automation] Failed to watch ${expandedPath}:`, error);
+            log.error({ err: error, path: expandedPath }, 'Failed to watch path');
         }
     }
 
@@ -182,7 +185,7 @@ function handleFileEvent(
             },
         };
 
-        console.log(`[Automation] File event: ${event} ${filePath}`);
+        log.info(`File event: ${event} ${filePath}`);
         await queueExecution(automationId, triggerData);
     }, debounceMs);
 
@@ -199,7 +202,7 @@ export function stopFileWatcher(automationId: string): void {
             watcher.close();
         }
         fileWatchers.delete(automationId);
-        console.log(`[Automation] Stopped file watcher for ${automationId}`);
+        log.info(`Stopped file watcher for ${automationId}`);
     }
 
     // Clear any pending debounce timers for this automation
@@ -218,7 +221,7 @@ export function stopAllFileWatchers(): void {
     for (const [id] of fileWatchers) {
         stopFileWatcher(id);
     }
-    console.log(`[Automation] Stopped all file watchers`);
+    log.info(`Stopped all file watchers`);
 }
 
 /**

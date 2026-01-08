@@ -21,6 +21,9 @@ import {
     type TriggerConfig,
     type TriggerEventData,
 } from '../automation';
+import { createChildLogger } from '../logger';
+
+const log = createChildLogger({ component: 'automations' });
 
 const automations = new Hono();
 
@@ -120,7 +123,7 @@ automations.post('/confirmations/:id/respond', zValidator('json', confirmationRe
         return c.json({ error: 'Confirmation not found or already processed' }, 404);
     }
 
-    console.log(`[API] Confirmation ${id} responded: ${data.selectedOptionId}${data.guidance ? ' with guidance' : ''}`);
+    log.info(`Confirmation ${id} responded: ${data.selectedOptionId}${data.guidance ? ' with guidance' : ''}`);
     return c.json({ success: true });
 });
 
@@ -207,7 +210,7 @@ automations.post('/', zValidator('json', createAutomationSchema), async (c) => {
         await activateAutomation(automation);
     }
 
-    console.log(`[API] Created automation: ${automation.name} (${automation.id})`);
+    log.info(`Created automation: ${automation.name} (${automation.id})`);
     return c.json({ automation }, 201);
 });
 
@@ -232,7 +235,7 @@ automations.put('/:id', zValidator('json', createAutomationSchema.partial()), as
     // Reload scheduler/watcher if trigger changed
     await reloadAutomation(automation.id);
 
-    console.log(`[API] Updated automation: ${automation.name} (${automation.id})`);
+    log.info(`Updated automation: ${automation.name} (${automation.id})`);
     return c.json({ automation });
 });
 
@@ -250,7 +253,7 @@ automations.delete('/:id', async (c) => {
 
     await db.delete(Automation).where(eq(Automation.id, id));
 
-    console.log(`[API] Deleted automation: ${id}`);
+    log.info(`Deleted automation: ${id}`);
     return c.json({ success: true });
 });
 
@@ -271,7 +274,7 @@ automations.post('/:id/pause', async (c) => {
 
     await deactivateAutomation(id);
 
-    console.log(`[API] Paused automation: ${id}`);
+    log.info(`Paused automation: ${id}`);
     return c.json({ success: true });
 });
 
@@ -293,7 +296,7 @@ automations.post('/:id/resume', async (c) => {
         await activateAutomation(automation);
     }
 
-    console.log(`[API] Resumed automation: ${id}`);
+    log.info(`Resumed automation: ${id}`);
     return c.json({ success: true });
 });
 
@@ -324,7 +327,7 @@ automations.post('/:id/trigger', async (c) => {
         return c.json({ error: 'Failed to queue execution (rate limit or inactive)' }, 429);
     }
 
-    console.log(`[API] Manually triggered automation: ${id}, execution: ${executionId}`);
+    log.info(`Manually triggered automation: ${id}, execution: ${executionId}`);
     return c.json({ success: true, executionId });
 });
 

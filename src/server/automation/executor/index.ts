@@ -15,6 +15,9 @@ import type { ConfirmationContext } from '../../processor/confirmation';
 import { createEmptyPreferences } from '../../processor/confirmation';
 import type { ConfirmationRequest, ConfirmationResponse } from '../../processor/confirmation/confirmation.types';
 import { createStandardConfirmationOptions } from '../../processor/confirmation/confirmation.types';
+import { createChildLogger } from '../../logger';
+
+const log = createChildLogger({ component: 'automation' });
 
 // Max concurrent executions
 const MAX_CONCURRENT = 3;
@@ -63,7 +66,7 @@ async function checkRateLimits(automation: typeof Automation.$inferSelect): Prom
             ));
 
         if (Number(hourlyCount[0]?.count ?? 0) >= automation.maxExecutionsPerHour) {
-            console.log(`[Automation] Rate limit exceeded (hourly) for ${automation.id}`);
+            log.info(`Rate limit exceeded (hourly) for ${automation.id}`);
             return false;
         }
     }
@@ -79,7 +82,7 @@ async function checkRateLimits(automation: typeof Automation.$inferSelect): Prom
             ));
 
         if (Number(dailyCount[0]?.count ?? 0) >= automation.maxExecutionsPerDay) {
-            console.log(`[Automation] Rate limit exceeded (daily) for ${automation.id}`);
+            log.info(`Rate limit exceeded (daily) for ${automation.id}`);
             return false;
         }
     }
@@ -94,7 +97,7 @@ export async function queueExecution(
     automationId: string,
     triggerData: TriggerEventData
 ): Promise<string | null> {
-    console.log(`[Automation] Queuing execution for ${automationId}`);
+    log.info(`Queuing execution for ${automationId}`);
 
     // Get automation to check rate limits
     const [automation] = await db.select()
@@ -102,12 +105,12 @@ export async function queueExecution(
         .where(eq(Automation.id, automationId));
 
     if (!automation) {
-        console.error(`[Automation] Not found: ${automationId}`);
+        log.error(`Not found: ${automationId}`);
         return null;
     }
 
     if (automation.status !== 'active') {
-        console.log(`[Automation] Skipping inactive automation: ${automationId}`);
+        log.info(`Skipping inactive automation: ${automationId}`);
         return null;
     }
 
@@ -128,7 +131,7 @@ export async function queueExecution(
 
     const execution = insertResult[0];
     if (!execution) {
-        console.error(`[Automation] Failed to create execution record for ${automationId}`);
+        log.error(`Failed to create execution record for ${automationId}`);
         return null;
     }
 
@@ -185,7 +188,7 @@ async function runExecutionWithRetry(
                 errorMessage === 'User not found' ||
                 errorMessage === 'Automation cancelled'
             ) {
-                console.log(`[Automation] Non-retryable error for ${executionId}: ${errorMessage}`);
+                log.info(`Non-retryable error for ${executionId}: ${errorMessage}`);
                 return;
             }
 
@@ -196,14 +199,14 @@ async function runExecutionWithRetry(
 
             if (attempt < MAX_RETRIES) {
                 const delay = RETRY_DELAYS[attempt] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
-                console.log(`[Automation] Retry ${attempt + 1}/${MAX_RETRIES} for ${executionId} in ${delay}ms`);
+                log.info(`Retry ${attempt + 1}/${MAX_RETRIES} for ${executionId} in ${delay}ms`);
                 await new Promise(resolve => setTimeout(resolve, delay));
             }
         }
     }
 
     // All retries failed
-    console.error(`[Automation] All retries failed for ${executionId}:`, lastError);
+    log.error({ err: lastError, executionId }, 'All retries failed');
     await markExecutionFailed(executionId, lastError?.message || 'Unknown error after retries');
 }
 
@@ -241,7 +244,7 @@ function createAutomationConfirmationContext(executionId: string, automationId: 
     return {
         preferences,
         requestConfirmation: async (request: ConfirmationRequest): Promise<ConfirmationResponse> => {
-            console.log(`[Automation] Confirmation requested for execution ${executionId}`);
+            log.info(`Confirmation requested for execution ${executionId}`);
 
             // Update execution status
             await db.update(AutomationExecution)
@@ -348,7 +351,7 @@ async function runExecution(
 ): Promise<void> {
     // Check if already running
     if (runningExecutions.has(automationId)) {
-        console.log(`[Automation] ${automationId} already running, skipping`);
+        log.info(`${automationId} already running, skipping`);
         return;
     }
 
@@ -362,7 +365,7 @@ async function runExecution(
             .where(eq(Automation.id, automationId));
 
         if (!automation) {
-            console.error(`[Automation] Not found: ${automationId}`);
+            log.error(`Not found: ${automationId}`);
             await markExecutionFailed(executionId, 'Automation not found');
             return;
         }
@@ -373,7 +376,7 @@ async function runExecution(
             .where(eq(User.id, automation.userId));
 
         if (!user) {
-            console.error(`[Automation] User not found for: ${automationId}`);
+            log.error(`User not found for: ${automationId}`);
             await markExecutionFailed(executionId, 'User not found');
             return;
         }
@@ -383,7 +386,7 @@ async function runExecution(
             .set({ status: 'running', startedAt: new Date() })
             .where(eq(AutomationExecution.id, executionId));
 
-        console.log(`[Automation] Starting execution ${executionId}`);
+        log.info(`Starting execution ${executionId}`);
 
         // Get or create the automation's conversation
         const conversationId = await getOrCreateAutomationConversation(automation, user);
@@ -423,11 +426,11 @@ async function runExecution(
             .set({ lastExecutedAt: new Date() })
             .where(eq(Automation.id, automationId));
 
-        console.log(`[Automation] Execution ${executionId} completed (${result.iterationCount} iterations)`);
+        log.info(`Execution ${executionId} completed (${result.iterationCount} iterations)`);
 
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[Automation] Execution error:`, error);
+        log.error({ err: error }, 'Execution error');
 
         // Check if it's a confirmation timeout - handle specially, don't retry
         if (errorMessage === 'Confirmation timeout expired') {
@@ -475,12 +478,12 @@ export async function respondToConfirmation(
         .where(eq(PendingConfirmation.id, confirmationId));
 
     if (!dbPending) {
-        console.error(`[Automation] Confirmation not found: ${confirmationId}`);
+        log.error(`Confirmation not found: ${confirmationId}`);
         return false;
     }
 
     if (dbPending.status !== 'pending') {
-        console.error(`[Automation] Confirmation already processed: ${confirmationId}`);
+        log.error(`Confirmation already processed: ${confirmationId}`);
         return false;
     }
 
@@ -516,7 +519,7 @@ export async function respondToConfirmation(
         pending.resolve(response);
     } else {
         // Server may have restarted - the execution is orphaned but DB is updated
-        console.log(`[Automation] Confirmation ${confirmationId} responded but no in-memory promise (server restart?)`);
+        log.info(`Confirmation ${confirmationId} responded but no in-memory promise (server restart?)`);
     }
 
     return true;
@@ -624,7 +627,7 @@ export async function cleanupOrphanedExecutions(): Promise<number> {
     }
 
     if (result.length > 0) {
-        console.log(`[Automation] Cleaned up ${result.length} orphaned execution(s) from previous server instance`);
+        log.info(`Cleaned up ${result.length} orphaned execution(s) from previous server instance`);
     }
 
     return result.length;

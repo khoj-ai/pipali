@@ -16,6 +16,9 @@ import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, executeMcpTool, isMcpTool } from '../mcp';
+import { createChildLogger } from '../../logger';
+
+const log = createChildLogger({ component: 'director' });
 
 /** Returns a human-readable time of day based on the hour */
 function getTimeOfDay(date: Date): string {
@@ -324,7 +327,7 @@ async function getAllTools(): Promise<ToolDefinition[]> {
         const mcpTools = await getMcpToolDefinitions();
         return [...builtInTools, ...mcpTools];
     } catch (error) {
-        console.error('[Director] Failed to load MCP tools:', error);
+        log.error({ err: error }, 'Failed to load MCP tools');
         return builtInTools;
     }
 }
@@ -449,7 +452,7 @@ async function pickNextTool(
             systemPrompt: isFirstIteration ? systemPrompt : undefined,
         };
     } catch (error) {
-        console.error('Failed to pick next tool:', error);
+        log.error({ err: error }, 'Failed to pick next tool');
         return {
             toolCalls: [],
             warning: `Failed to infer information sources to refer: ${error instanceof Error ? error.message : String(error)}`,

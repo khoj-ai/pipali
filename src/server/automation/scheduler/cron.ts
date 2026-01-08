@@ -11,6 +11,9 @@ import { Automation } from '../../db/schema';
 import { eq, and } from 'drizzle-orm';
 import { queueExecution } from '../executor';
 import type { CronTriggerConfig, TriggerEventData } from '../types';
+import { createChildLogger } from '../../logger';
+
+const log = createChildLogger({ component: 'automation' });
 
 // Map of automation ID -> Cron job instance
 const cronJobs = new Map<string, Cron>();
@@ -33,7 +36,7 @@ export async function startCronScheduler(): Promise<void> {
         scheduleCronJob(automation);
     }
 
-    console.log(`[Automation] Scheduled ${automations.length} cron jobs`);
+    log.info(`Scheduled ${automations.length} cron jobs`);
 }
 
 /**
@@ -69,12 +72,12 @@ export function scheduleCronJob(automation: typeof Automation.$inferSelect): voi
                 .set({ nextScheduledAt: nextRun })
                 .where(eq(Automation.id, automation.id))
                 .execute()
-                .catch(err => console.error(`[Automation] Failed to update next scheduled time:`, err));
+                .catch(err => log.error({ err }, 'Failed to update next scheduled time'));
         }
 
-        console.log(`[Automation] Scheduled cron job for ${automation.name} (${config.schedule})`);
+        log.info(`Scheduled cron job for ${automation.name} (${config.schedule})`);
     } catch (error) {
-        console.error(`[Automation] Failed to schedule cron job for ${automation.name}:`, error);
+        log.error({ err: error, name: automation.name }, 'Failed to schedule cron job');
     }
 }
 
@@ -86,7 +89,7 @@ export function stopCronJob(automationId: string): void {
     if (job) {
         job.stop();
         cronJobs.delete(automationId);
-        console.log(`[Automation] Stopped cron job for ${automationId}`);
+        log.info(`Stopped cron job for ${automationId}`);
     }
 }
 
@@ -98,7 +101,7 @@ export function stopAllCronJobs(): void {
         job.stop();
     }
     cronJobs.clear();
-    console.log(`[Automation] Stopped all cron jobs`);
+    log.info(`Stopped all cron jobs`);
 }
 
 /**

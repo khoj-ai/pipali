@@ -10,6 +10,9 @@ import { db } from '../db';
 import { PlatformAuth, User, AiModelApi, ChatModel, WebSearchProvider, WebScraper } from '../db/schema';
 import { eq, desc } from 'drizzle-orm';
 import type { AuthTokens, PlatformUserInfo } from './types';
+import { createChildLogger } from '../logger';
+
+const log = createChildLogger({ component: 'auth' });
 
 // Module state
 let platformUrl: string = process.env.PANINI_PLATFORM_URL || 'https://panini.khoj.dev';
@@ -58,7 +61,7 @@ export async function getValidAccessToken(): Promise<string | null> {
     // Check if access token is expired or about to expire (within 1 minute)
     const expiryBuffer = 60 * 1000; // 1 minute
     if (tokens.expiresAt && tokens.expiresAt.getTime() - expiryBuffer < Date.now()) {
-        console.log('[Auth] Access token expired or expiring soon, refreshing...');
+        log.info('Access token expired or expiring soon, refreshing...');
         const newToken = await refreshAccessToken();
         if (newToken) {
             // Update all platform providers with the new token
@@ -94,9 +97,9 @@ async function updatePlatformProviderTokens(newToken: string): Promise<void> {
             .set({ apiKey: newToken, updatedAt: new Date() })
             .where(eq(WebScraper.name, 'Panini'));
 
-        console.log('[Auth] Updated platform provider tokens');
+        log.info('Updated platform provider tokens');
     } catch (error) {
-        console.error('[Auth] Failed to update platform provider tokens:', error);
+        log.error({ err: error }, 'Failed to update platform provider tokens');
     }
 }
 
@@ -152,7 +155,7 @@ export async function getStoredTokens(): Promise<AuthTokens | null> {
             expiresAt: auth.expiresAt || undefined,
         };
     } catch (error) {
-        console.error('[Auth] Failed to get stored tokens:', error);
+        log.error({ err: error }, 'Failed to get stored tokens');
         return null;
     }
 }
@@ -205,9 +208,9 @@ export async function storeTokens(
             });
         }
 
-        console.log('[Auth] Tokens stored successfully');
+        log.info('Tokens stored successfully');
     } catch (error) {
-        console.error('[Auth] Failed to store tokens:', error);
+        log.error({ err: error }, 'Failed to store tokens');
         throw error;
     }
 }
@@ -223,9 +226,9 @@ export async function clearTokens(): Promise<void> {
         }
 
         await db.delete(PlatformAuth).where(eq(PlatformAuth.userId, user.id));
-        console.log('[Auth] Tokens cleared');
+        log.info('Tokens cleared');
     } catch (error) {
-        console.error('[Auth] Failed to clear tokens:', error);
+        log.error({ err: error }, 'Failed to clear tokens');
     }
 }
 
@@ -239,7 +242,7 @@ export async function clearTokens(): Promise<void> {
 export async function refreshAccessToken(): Promise<string | null> {
     // If a refresh is already in progress, wait for it instead of starting another
     if (refreshPromise) {
-        console.log('[Auth] Token refresh already in progress, waiting...');
+        log.debug('Token refresh already in progress, waiting...');
         return refreshPromise;
     }
 
@@ -264,7 +267,7 @@ async function doRefreshAccessToken(): Promise<string | null> {
     }
 
     try {
-        console.log('[Auth] Refreshing access token...');
+        log.info('Refreshing access token...');
 
         const response = await fetch(`${platformUrl}/auth/refresh`, {
             method: 'POST',
@@ -277,8 +280,8 @@ async function doRefreshAccessToken(): Promise<string | null> {
         });
 
         if (!response.ok) {
-            const error = await response.text();
-            console.error('[Auth] Token refresh failed:', error);
+            const errorText = await response.text();
+            log.error({ status: response.status, error: errorText }, 'Token refresh failed');
 
             // If refresh fails, clear tokens (user needs to re-authenticate)
             if (response.status === 401) {
@@ -299,10 +302,10 @@ async function doRefreshAccessToken(): Promise<string | null> {
             expiresAt,
         });
 
-        console.log('[Auth] Token refreshed successfully');
+        log.info('Token refreshed successfully');
         return data.accessToken;
     } catch (error) {
-        console.error('[Auth] Token refresh error:', error);
+        log.error({ err: error }, 'Token refresh error');
         return null;
     }
 }
@@ -342,7 +345,7 @@ export async function getPlatformUserInfo(): Promise<PlatformUserInfo | null> {
             isServerOwner: data.user.isServerOwner,
         };
     } catch (error) {
-        console.error('[Auth] Failed to get user info:', error);
+        log.error({ err: error }, 'Failed to get user info');
         return null;
     }
 }
@@ -354,16 +357,16 @@ export async function getPlatformUserInfo(): Promise<PlatformUserInfo | null> {
 export async function syncPlatformModels(): Promise<void> {
     const tokens = await getStoredTokens();
     if (!tokens) {
-        console.log('[Auth] No tokens available, skipping platform model sync');
+        log.debug('No tokens available, skipping platform model sync');
         return;
     }
 
     try {
-        console.log('[Auth] Syncing platform models...');
+        log.info('Syncing platform models...');
 
         // Fetch models from platform
         const modelsUrl = `${platformUrl}/openai/v1/models`;
-        console.log(`[Auth] Fetching models from: ${modelsUrl}`);
+        log.debug({ url: modelsUrl }, 'Fetching models from platform');
 
         const response = await fetch(modelsUrl, {
             headers: {
@@ -374,14 +377,14 @@ export async function syncPlatformModels(): Promise<void> {
         if (!response.ok) {
             if (response.status === 401) {
                 // Token expired, try refresh
-                console.log('[Auth] Got 401, attempting token refresh...');
+                log.debug('Got 401, attempting token refresh...');
                 const newToken = await refreshAccessToken();
                 if (newToken) {
                     return syncPlatformModels(); // Retry
                 }
             }
             const errorText = await response.text();
-            console.error(`[Auth] Failed to fetch platform models: ${response.status} - ${errorText.substring(0, 200)}`);
+            log.error({ status: response.status, error: errorText.substring(0, 200) }, 'Failed to fetch platform models');
             return;
         }
 
@@ -389,7 +392,7 @@ export async function syncPlatformModels(): Promise<void> {
         const contentType = response.headers.get('content-type');
         if (!contentType?.includes('application/json')) {
             const text = await response.text();
-            console.error(`[Auth] Platform returned non-JSON response (${contentType}): ${text.substring(0, 200)}`);
+            log.error({ contentType, response: text.substring(0, 200) }, 'Platform returned non-JSON response');
             return;
         }
 
@@ -404,7 +407,7 @@ export async function syncPlatformModels(): Promise<void> {
         }>;
 
         if (!platformModels || platformModels.length === 0) {
-            console.log('[Auth] No models available from platform');
+            log.info('No models available from platform');
             return;
         }
 
@@ -418,7 +421,7 @@ export async function syncPlatformModels(): Promise<void> {
 
         if (existingProvider) {
             providerId = existingProvider.id;
-            console.log('[Auth] Panini provider already exists');
+            log.debug('Panini provider already exists');
         } else {
             // Create the Panini provider
             // The API key will be the access token, and base URL is the platform URL
@@ -429,12 +432,12 @@ export async function syncPlatformModels(): Promise<void> {
             }).returning();
 
             if (!newProvider) {
-                console.error('[Auth] Failed to create Panini provider');
+                log.error('Failed to create Panini provider');
                 return;
             }
 
             providerId = newProvider.id;
-            console.log('[Auth] Created Panini provider');
+            log.info('Created Panini provider');
         }
 
         // Get existing models for this provider
@@ -503,9 +506,9 @@ export async function syncPlatformModels(): Promise<void> {
         }
 
         if (addedCount > 0 || removedCount > 0 || updatedCount > 0) {
-            console.log(`[Auth] Platform models synced: ${addedCount} added, ${updatedCount} updated, ${removedCount} removed`);
+            log.info({ added: addedCount, updated: updatedCount, removed: removedCount }, 'Platform models synced');
         } else {
-            console.log('[Auth] Platform models already up to date');
+            log.debug('Platform models already up to date');
         }
 
         // Update the provider's API key with current access token
@@ -517,9 +520,9 @@ export async function syncPlatformModels(): Promise<void> {
             })
             .where(eq(AiModelApi.id, providerId));
 
-        console.log('[Auth] Platform model sync complete');
+        log.info('Platform model sync complete');
     } catch (error) {
-        console.error('[Auth] Failed to sync platform models:', error);
+        log.error({ err: error }, 'Failed to sync platform models');
     }
 }
 
@@ -531,12 +534,12 @@ export async function syncPlatformModels(): Promise<void> {
 export async function syncPlatformWebTools(): Promise<void> {
     const tokens = await getStoredTokens();
     if (!tokens) {
-        console.log('[Auth] No tokens available, skipping platform web tools sync');
+        log.debug('No tokens available, skipping platform web tools sync');
         return;
     }
 
     try {
-        console.log('[Auth] Syncing platform web tools...');
+        log.info('Syncing platform web tools...');
 
         // Check if platform web search provider already exists
         const [existingSearchProvider] = await db
@@ -555,7 +558,7 @@ export async function syncPlatformWebTools(): Promise<void> {
                     updatedAt: new Date(),
                 })
                 .where(eq(WebSearchProvider.id, existingSearchProvider.id));
-            console.log('[Auth] Updated Panini web search provider');
+            log.debug('Updated Panini web search provider');
         } else {
             // Create the Panini web search provider
             await db.insert(WebSearchProvider).values({
@@ -566,7 +569,7 @@ export async function syncPlatformWebTools(): Promise<void> {
                 priority: 100, // Low priority so local API keys are tried first
                 enabled: true,
             });
-            console.log('[Auth] Created Panini web search provider');
+            log.info('Created Panini web search provider');
         }
 
         // Check if platform web scraper already exists
@@ -586,7 +589,7 @@ export async function syncPlatformWebTools(): Promise<void> {
                     updatedAt: new Date(),
                 })
                 .where(eq(WebScraper.id, existingScraper.id));
-            console.log('[Auth] Updated Panini web scraper');
+            log.debug('Updated Panini web scraper');
         } else {
             // Create the Panini web scraper
             await db.insert(WebScraper).values({
@@ -597,12 +600,12 @@ export async function syncPlatformWebTools(): Promise<void> {
                 priority: 100, // Low priority so local API keys are tried first
                 enabled: true,
             });
-            console.log('[Auth] Created Panini web scraper');
+            log.info('Created Panini web scraper');
         }
 
-        console.log('[Auth] Platform web tools sync complete');
+        log.info('Platform web tools sync complete');
     } catch (error) {
-        console.error('[Auth] Failed to sync platform web tools:', error);
+        log.error({ err: error }, 'Failed to sync platform web tools');
     }
 }
 

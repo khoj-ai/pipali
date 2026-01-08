@@ -9,7 +9,9 @@ import {
     syncPlatformModels,
     syncPlatformWebTools,
 } from '../auth';
+import { createChildLogger } from '../logger';
 
+const log = createChildLogger({ component: 'auth' });
 const auth = new Hono();
 
 // OAuth callback - serves a page that extracts tokens from URL fragment
@@ -21,7 +23,7 @@ auth.get('/callback', async (c) => {
     const error = c.req.query('error');
 
     if (error) {
-        console.error('[Auth] OAuth callback error:', error);
+        log.error({ error }, 'OAuth callback error');
         return c.html(getAuthErrorHtml(error));
     }
 
@@ -36,7 +38,7 @@ auth.post('/complete', async (c) => {
         const { accessToken, refreshToken, expiresIn } = body;
 
         if (!accessToken || !refreshToken) {
-            console.error('[Auth] Missing tokens in completion request');
+            log.error('Missing tokens in completion request');
             return c.json({ error: 'Missing authentication tokens' }, 400);
         }
 
@@ -47,15 +49,15 @@ auth.post('/complete', async (c) => {
 
         // Store tokens
         await storeTokens({ accessToken, refreshToken, expiresAt });
-        console.log('[Auth] Tokens stored successfully');
+        log.info('Tokens stored successfully');
 
         // Sync platform models and web tools in background
-        syncPlatformModels().catch(err => console.error('[Auth] Failed to sync platform models:', err));
-        syncPlatformWebTools().catch(err => console.error('[Auth] Failed to sync platform web tools:', err));
+        syncPlatformModels().catch(err => log.error({ err }, 'Failed to sync platform models'));
+        syncPlatformWebTools().catch(err => log.error({ err }, 'Failed to sync platform web tools'));
 
         return c.json({ success: true, redirectUrl: '/' });
     } catch (err) {
-        console.error('[Auth] Failed to complete authentication:', err);
+        log.error({ err }, 'Failed to complete authentication');
         return c.json({ error: 'Failed to complete authentication' }, 500);
     }
 });
@@ -81,10 +83,10 @@ auth.get('/status', async (c) => {
 auth.post('/logout', async (c) => {
     try {
         await clearTokens();
-        console.log('[Auth] User logged out');
+        log.info('User logged out');
         return c.json({ success: true });
     } catch (err) {
-        console.error('[Auth] Logout error:', err);
+        log.error({ err }, 'Logout error');
         return c.json({ error: 'Failed to logout' }, 500);
     }
 });

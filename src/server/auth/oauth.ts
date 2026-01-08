@@ -10,6 +10,9 @@
 
 import { isAuthenticated, getPlatformUrl } from './index';
 import type { OAuthFlowResult } from './types';
+import { createChildLogger } from '../logger';
+
+const log = createChildLogger({ component: 'oauth' });
 
 // Timeout for OAuth flow (5 minutes)
 const DEFAULT_TIMEOUT = 5 * 60 * 1000;
@@ -54,18 +57,18 @@ export async function startOAuthFlow(
 ): Promise<OAuthFlowResult> {
     const platformUrl = customPlatformUrl || getPlatformUrl();
 
-    console.log('[OAuth] Starting authentication flow...');
+    log.info('Starting authentication flow...');
 
     // Build callback URL pointing to our existing server
     const callbackUrl = `http://localhost:${serverPort}/api/auth/callback`;
-    console.log(`[OAuth] Callback URL: ${callbackUrl}`);
+    log.debug({ callbackUrl }, 'Callback URL configured');
 
     // Build the OAuth URL
     const oauthUrl = `${platformUrl}/auth/oauth/google/authorize?redirect_uri=${encodeURIComponent(callbackUrl)}`;
 
     // Open the browser
-    console.log('[OAuth] Opening browser for authentication...');
-    console.log(`[OAuth] URL: ${oauthUrl}`);
+    log.info('Opening browser for authentication...');
+    log.debug({ url: oauthUrl }, 'OAuth URL');
 
     await openBrowser(oauthUrl);
 
@@ -76,7 +79,7 @@ export async function startOAuthFlow(
         // Check if we're now authenticated
         const authenticated = await isAuthenticated();
         if (authenticated) {
-            console.log('[OAuth] Authentication successful!');
+            log.info('Authentication successful!');
             return { success: true };
         }
 
@@ -84,7 +87,7 @@ export async function startOAuthFlow(
         await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL));
     }
 
-    console.error('[OAuth] Authentication timed out');
+    log.error('Authentication timed out');
     return {
         success: false,
         error: 'Authentication timed out. Please try again.',

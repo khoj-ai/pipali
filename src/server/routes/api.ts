@@ -17,6 +17,9 @@ import { runResearchToCompletion } from '../processor/research-runner';
 import { getActiveStatus } from '../sessions';
 import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill } from '../skills';
 import { syncPlatformModels } from '../auth';
+import { createChildLogger } from '../logger';
+
+const log = createChildLogger({ component: 'api' });
 
 const api = new Hono().basePath('/api');
 
@@ -46,26 +49,26 @@ const schema = z.object({
 api.post('/chat', zValidator('json', schema), async (c) => {
     const { message, conversationId } = c.req.valid('json');
 
-    console.log(`\n${'='.repeat(60)}`);
-    console.log(`[API] 💬 New message received`);
-    console.log(`[API] Query: "${message.slice(0, 100)}${message.length > 100 ? '...' : ''}"`);
-    console.log(`[API] Conversation: ${conversationId || 'new'}`);
+    log.info(`\n${'='.repeat(60)}`);
+    log.info(`💬 New message received`);
+    log.info(`Query: "${message.slice(0, 100)}${message.length > 100 ? '...' : ''}"`);
+    log.info(`Conversation: ${conversationId || 'new'}`);
 
     // Get the user
     const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
     if (!user) {
-        console.error(`[API] ❌ User not found: ${getDefaultUser().email}`);
+        log.error(`❌ User not found: ${getDefaultUser().email}`);
         return c.json({ error: 'User not found' }, 404);
     }
-    console.log(`[API] User: ${user.email} (id: ${user.id})`);
+    log.info(`User: ${user.email} (id: ${user.id})`);
 
     // Get the user's selected model
     const chatModelWithApi = await getDefaultChatModel(user);
     if (chatModelWithApi) {
-        console.log(`[API] 🤖 Model: ${chatModelWithApi.chatModel.name} (${chatModelWithApi.chatModel.modelType})`);
-        console.log(`[API] Provider: ${chatModelWithApi.aiModelApi?.name || 'Unknown'}`);
+        log.info(`🤖 Model: ${chatModelWithApi.chatModel.name} (${chatModelWithApi.chatModel.modelType})`);
+        log.info(`Provider: ${chatModelWithApi.aiModelApi?.name || 'Unknown'}`);
     } else {
-        console.warn(`[API] ⚠️ No chat model configured`);
+        log.warn(`⚠️ No chat model configured`);
         return c.json({ error: 'No chat model configured. Please configure an AI provider.' }, 500);
     }
 
@@ -91,7 +94,7 @@ api.post('/chat', zValidator('json', schema), async (c) => {
     }
 
     // Run research using shared runner
-    console.log(`[API] 🔬 Starting research...`);
+    log.info(`🔬 Starting research...`);
 
     const result = await runResearchToCompletion({
         conversationId: conversation.id,
@@ -99,11 +102,11 @@ api.post('/chat', zValidator('json', schema), async (c) => {
         userMessage: message,
     });
 
-    console.log(`[API] ✅ Research complete`);
-    console.log(`[API] Iterations: ${result.iterationCount}`);
-    console.log(`[API] Response length: ${result.response.length} chars`);
-    console.log(`[API] Conversation ID: ${conversation.id}`);
-    console.log(`${'='.repeat(60)}\n`);
+    log.info(`✅ Research complete`);
+    log.info(`Iterations: ${result.iterationCount}`);
+    log.info(`Response length: ${result.response.length} chars`);
+    log.info(`Conversation ID: ${conversation.id}`);
+    log.info(`${'='.repeat(60)}\n`);
 
     return c.json({
         response: result.response,
@@ -246,7 +249,7 @@ api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
             return c.json({ success: true, deletedCount: 1 });
         }
     } catch (error) {
-        console.error('[API] Error deleting message:', error);
+        log.error({ err: error }, 'Error deleting message');
         return c.json({ error: error instanceof Error ? error.message : 'Failed to delete message' }, 500);
     }
 });
@@ -365,7 +368,7 @@ api.get('/conversations/:conversationId/export/atif', async (c) => {
 
         return c.text(atifJson);
     } catch (error) {
-        console.error('[API] Error exporting conversation:', error);
+        log.error({ err: error }, 'Error exporting conversation');
         return c.json({ error: error instanceof Error ? error.message : 'Failed to export conversation' }, 500);
     }
 });
@@ -398,7 +401,7 @@ api.post('/conversations/import/atif', zValidator('json', importSchema), async (
             title: newConversation.title,
         });
     } catch (error) {
-        console.error('[API] Error importing conversation:', error);
+        log.error({ err: error }, 'Error importing conversation');
         return c.json({ error: error instanceof Error ? error.message : 'Failed to import conversation' }, 400);
     }
 });
@@ -414,16 +417,16 @@ api.get('/skills', async (c) => {
 
 // Reload skills from disk
 api.post('/skills/reload', async (c) => {
-    console.log('[API] 🔄 Reloading skills...');
+    log.info('🔄 Reloading skills...');
     const result = await loadSkills();
 
     if (result.errors.length > 0) {
         for (const error of result.errors) {
-            console.warn(`[Skills] ⚠️  ${error.path}: ${error.message}`);
+            log.warn(`⚠️  ${error.path}: ${error.message}`);
         }
     }
 
-    console.log(`[API] 🎯 Loaded ${result.skills.length} skill(s)`);
+    log.info(`🎯 Loaded ${result.skills.length} skill(s)`);
 
     return c.json({
         success: true,
@@ -442,26 +445,26 @@ const createSkillSchema = z.object({
 
 api.post('/skills', zValidator('json', createSkillSchema), async (c) => {
     const input = c.req.valid('json');
-    console.log(`[API] ✨ Creating skill "${input.name}" (${input.source})`);
+    log.info(`✨ Creating skill "${input.name}" (${input.source})`);
 
     const result = await createSkill(input);
 
     if (!result.success) {
-        console.warn(`[API] ⚠️  Failed to create skill: ${result.error}`);
+        log.warn(`⚠️  Failed to create skill: ${result.error}`);
         return c.json({ error: result.error }, 400);
     }
 
     // Reload skills to include the new one
     await loadSkills();
 
-    console.log(`[API] 🎯 Created skill "${input.name}"`);
+    log.info(`🎯 Created skill "${input.name}"`);
     return c.json({ success: true, skill: result.skill });
 });
 
 // Get a specific skill with its instructions
 api.get('/skills/:name', async (c) => {
     const name = c.req.param('name');
-    console.log(`[API] 📖 Getting skill "${name}"`);
+    log.info(`📖 Getting skill "${name}"`);
 
     const result = await getSkill(name);
 
@@ -484,32 +487,32 @@ const updateSkillSchema = z.object({
 api.put('/skills/:name', zValidator('json', updateSkillSchema), async (c) => {
     const name = c.req.param('name');
     const input = c.req.valid('json');
-    console.log(`[API] ✏️  Updating skill "${name}"`);
+    log.info(`✏️  Updating skill "${name}"`);
 
     const result = await updateSkill(name, input);
 
     if (!result.success) {
-        console.warn(`[API] ⚠️  Failed to update skill: ${result.error}`);
+        log.warn(`⚠️  Failed to update skill: ${result.error}`);
         return c.json({ error: result.error }, 400);
     }
 
-    console.log(`[API] ✅ Updated skill "${name}"`);
+    log.info(`✅ Updated skill "${name}"`);
     return c.json({ success: true, skill: result.skill });
 });
 
 // Delete a skill
 api.delete('/skills/:name', async (c) => {
     const name = c.req.param('name');
-    console.log(`[API] 🗑️  Deleting skill "${name}"`);
+    log.info(`🗑️  Deleting skill "${name}"`);
 
     const result = await deleteSkill(name);
 
     if (!result.success) {
-        console.warn(`[API] ⚠️  Failed to delete skill: ${result.error}`);
+        log.warn(`⚠️  Failed to delete skill: ${result.error}`);
         return c.json({ error: result.error }, 400);
     }
 
-    console.log(`[API] ✅ Deleted skill "${name}"`);
+    log.info(`✅ Deleted skill "${name}"`);
     return c.json({ success: true });
 });
 

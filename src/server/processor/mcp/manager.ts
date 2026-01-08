@@ -8,6 +8,9 @@ import {
 } from '../confirmation';
 import { McpClient } from './client';
 import type { McpServerConfig, McpToolInfo, McpContentType } from './types';
+import { createChildLogger } from '../../logger';
+
+const log = createChildLogger({ component: 'mcp' });
 
 /**
  * Global registry of active MCP clients
@@ -24,13 +27,13 @@ export async function loadEnabledMcpServers(): Promise<void> {
         .from(McpServer)
         .where(eq(McpServer.enabled, true));
 
-    console.log(`[MCP] Loading ${servers.length} enabled MCP server(s)...`);
+    log.info(`Loading ${servers.length} enabled MCP server(s)...`);
 
     // Connect to each server
     const connectPromises = servers.map(async (server) => {
         try {
             await connectMcpServer(server);
-            console.log(`[MCP] Connected to server: ${server.name}`);
+            log.info(`Connected to server: ${server.name}`);
 
             // Update lastConnectedAt timestamp
             await db
@@ -39,7 +42,7 @@ export async function loadEnabledMcpServers(): Promise<void> {
                 .where(eq(McpServer.id, server.id));
         } catch (error) {
             const errorMessage = error instanceof Error ? error.message : String(error);
-            console.error(`[MCP] Failed to connect to server ${server.name}:`, errorMessage);
+            log.error({ err: errorMessage, server: server.name }, 'Failed to connect to MCP server');
 
             // Store the error in the database
             await db
@@ -115,7 +118,7 @@ export async function getMcpToolDefinitions(): Promise<ToolDefinition[]> {
                 });
             }
         } catch (error) {
-            console.error(`[MCP] Failed to get tools from ${client.serverName}:`, error);
+            log.error({ err: error, server: client.serverName }, 'Failed to get tools from MCP server');
         }
     }
 
@@ -229,13 +232,13 @@ function formatMcpResult(content: McpContentType[]): string | Array<{ type: stri
  * Close all MCP client connections
  */
 export async function closeMcpClients(): Promise<void> {
-    console.log(`[MCP] Closing ${activeClients.size} MCP client(s)...`);
+    log.info(`Closing ${activeClients.size} MCP client(s)...`);
 
     const closePromises = Array.from(activeClients.values()).map(async (client) => {
         try {
             await client.close();
         } catch (error) {
-            console.error(`[MCP] Error closing client ${client.serverName}:`, error);
+            log.error({ err: error, server: client.serverName }, 'Error closing MCP client');
         }
     });
 

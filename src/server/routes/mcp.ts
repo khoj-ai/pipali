@@ -11,6 +11,9 @@ import {
     closeMcpClients,
 } from '../processor/mcp';
 import { McpClient } from '../processor/mcp/client';
+import { createChildLogger } from '../logger';
+
+const log = createChildLogger({ component: 'mcp' });
 
 const mcp = new Hono();
 
@@ -31,7 +34,7 @@ const updateMcpServerSchema = createMcpServerSchema.partial().omit({ name: true 
 
 // GET /api/mcp/servers - List all MCP servers
 mcp.get('/servers', async (c) => {
-    console.log('[MCP API] 📋 Listing MCP servers');
+    log.info('📋 Listing MCP servers');
 
     const servers = await db.select().from(McpServer);
 
@@ -50,7 +53,7 @@ mcp.get('/servers', async (c) => {
 // POST /api/mcp/servers - Create new MCP server
 mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
     const input = c.req.valid('json');
-    console.log(`[MCP API] ✨ Creating MCP server "${input.name}"`);
+    log.info(`✨ Creating MCP server "${input.name}"`);
 
     // Check if name already exists
     const [existing] = await db.select().from(McpServer).where(eq(McpServer.name, input.name));
@@ -76,15 +79,15 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
             return c.json({ error: 'Failed to create MCP server' }, 500);
         }
 
-        console.log(`[MCP API] ✅ Created MCP server "${input.name}" (id: ${server.id})`);
+        log.info(`✅ Created MCP server "${input.name}" (id: ${server.id})`);
 
         // If enabled, connect to the server
         if (server.enabled) {
             try {
                 await reconnectMcpServer(server.name);
-                console.log(`[MCP API] 🔗 Connected to MCP server "${server.name}"`);
+                log.info(`🔗 Connected to MCP server "${server.name}"`);
             } catch (error) {
-                console.warn(`[MCP API] ⚠️ Failed to connect to server:`, error);
+                log.warn({ err: error }, 'Failed to connect to server');
                 // Update last error
                 await db.update(McpServer)
                     .set({ lastError: error instanceof Error ? error.message : String(error) })
@@ -94,7 +97,7 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
 
         return c.json({ success: true, server });
     } catch (error) {
-        console.error('[MCP API] ❌ Failed to create server:', error);
+        log.error({ err: error }, 'Failed to create server');
         return c.json({ error: 'Failed to create MCP server' }, 500);
     }
 });
@@ -131,7 +134,7 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
     }
 
     const input = c.req.valid('json');
-    console.log(`[MCP API] ✏️ Updating MCP server ${id}`);
+    log.info(`✏️ Updating MCP server ${id}`);
 
     const [existing] = await db.select().from(McpServer).where(eq(McpServer.id, id));
     if (!existing) {
@@ -160,21 +163,21 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
             return c.json({ error: 'Failed to update MCP server' }, 500);
         }
 
-        console.log(`[MCP API] ✅ Updated MCP server "${updated.name}"`);
+        log.info(`✅ Updated MCP server "${updated.name}"`);
 
         // Reconnect if enabled
         if (updated.enabled) {
             try {
                 await reconnectMcpServer(updated.name);
-                console.log(`[MCP API] 🔗 Reconnected to MCP server "${updated.name}"`);
+                log.info(`🔗 Reconnected to MCP server "${updated.name}"`);
             } catch (error) {
-                console.warn(`[MCP API] ⚠️ Failed to reconnect:`, error);
+                log.warn({ err: error }, 'Failed to reconnect');
             }
         }
 
         return c.json({ success: true, server: updated });
     } catch (error) {
-        console.error('[MCP API] ❌ Failed to update server:', error);
+        log.error({ err: error }, 'Failed to update server');
         return c.json({ error: 'Failed to update MCP server' }, 500);
     }
 });
@@ -191,7 +194,7 @@ mcp.delete('/servers/:id', async (c) => {
         return c.json({ error: 'MCP server not found' }, 404);
     }
 
-    console.log(`[MCP API] 🗑️ Deleting MCP server "${existing.name}"`);
+    log.info(`🗑️ Deleting MCP server "${existing.name}"`);
 
     await db.delete(McpServer).where(eq(McpServer.id, id));
 
@@ -199,7 +202,7 @@ mcp.delete('/servers/:id', async (c) => {
     await closeMcpClients();
     await loadEnabledMcpServers();
 
-    console.log(`[MCP API] ✅ Deleted MCP server "${existing.name}"`);
+    log.info(`✅ Deleted MCP server "${existing.name}"`);
     return c.json({ success: true });
 });
 
@@ -215,7 +218,7 @@ mcp.post('/servers/:id/test', async (c) => {
         return c.json({ error: 'MCP server not found' }, 404);
     }
 
-    console.log(`[MCP API] 🧪 Testing connection to MCP server "${server.name}"`);
+    log.info(`🧪 Testing connection to MCP server "${server.name}"`);
 
     try {
         const client = new McpClient(server);
@@ -228,7 +231,7 @@ mcp.post('/servers/:id/test', async (c) => {
             .set({ lastConnectedAt: new Date(), lastError: null })
             .where(eq(McpServer.id, id));
 
-        console.log(`[MCP API] ✅ Connection test successful - ${tools.length} tools available`);
+        log.info(`✅ Connection test successful - ${tools.length} tools available`);
 
         return c.json({
             success: true,
@@ -240,7 +243,7 @@ mcp.post('/servers/:id/test', async (c) => {
         });
     } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error);
-        console.error(`[MCP API] ❌ Connection test failed:`, errorMessage);
+        log.error({ err: errorMessage }, 'Connection test failed');
 
         // Update last error
         await db.update(McpServer)
@@ -263,7 +266,7 @@ mcp.get('/servers/:id/tools', async (c) => {
         return c.json({ error: 'MCP server not found' }, 404);
     }
 
-    console.log(`[MCP API] 📋 Listing tools from MCP server "${server.name}"`);
+    log.info(`📋 Listing tools from MCP server "${server.name}"`);
 
     try {
         const client = new McpClient(server);
@@ -281,7 +284,7 @@ mcp.get('/servers/:id/tools', async (c) => {
             })),
         });
     } catch (error) {
-        console.error(`[MCP API] ❌ Failed to list tools:`, error);
+        log.error({ err: error }, 'Failed to list tools');
         return c.json({
             error: error instanceof Error ? error.message : 'Failed to list tools'
         }, 500);
@@ -290,21 +293,21 @@ mcp.get('/servers/:id/tools', async (c) => {
 
 // POST /api/mcp/reload - Reload all MCP servers
 mcp.post('/reload', async (c) => {
-    console.log('[MCP API] 🔄 Reloading all MCP servers...');
+    log.info('Reloading all MCP servers...');
 
     try {
         await closeMcpClients();
         await loadEnabledMcpServers();
 
         const statuses = getMcpServerStatuses();
-        console.log(`[MCP API] ✅ Reloaded ${statuses.length} MCP server(s)`);
+        log.info({ count: statuses.length }, 'Reloaded MCP servers');
 
         return c.json({
             success: true,
             servers: statuses,
         });
     } catch (error) {
-        console.error('[MCP API] ❌ Failed to reload servers:', error);
+        log.error({ err: error }, 'Failed to reload servers');
         return c.json({ error: 'Failed to reload MCP servers' }, 500);
     }
 });
