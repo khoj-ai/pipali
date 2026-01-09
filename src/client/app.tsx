@@ -1459,8 +1459,8 @@ const App = () => {
 // Export for use in Tauri wrapper
 export default App;
 
-// Direct render for web mode (when not imported as a module)
-if (typeof window !== 'undefined' && document.getElementById("root")) {
+// Direct render for web mode only (skip in Tauri - main.tsx handles rendering with SidecarProvider)
+if (typeof window !== 'undefined' && document.getElementById("root") && !('__TAURI_INTERNALS__' in window)) {
     const root = createRoot(document.getElementById("root")!);
     root.render(<App />);
 }

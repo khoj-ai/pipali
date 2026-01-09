@@ -134,3 +134,33 @@
     margin: 0;
     line-height: 1.5;
 }
+
+/* Waiting for external browser auth */
+.login-waiting {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    padding: 2rem 0;
+    color: var(--color-text-secondary);
+}
+
+.login-waiting svg {
+    color: var(--color-accent);
+}
+
+.login-waiting p {
+    margin: 0;
+    font-size: 0.9375rem;
+}
+
+.login-btn.secondary {
+    background: var(--color-bg-muted);
+    color: var(--color-text-secondary);
+    border-color: var(--color-border);
+}
+
+.login-btn.secondary:hover:not(:disabled) {
+    background: var(--color-bg-elevated);
+    color: var(--color-text);
+}

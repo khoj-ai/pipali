@@ -35,7 +35,7 @@ auth.get('/callback', async (c) => {
 auth.post('/complete', async (c) => {
     try {
         const body = await c.req.json();
-        const { accessToken, refreshToken, expiresIn } = body;
+        const { accessToken, refreshToken, expiresIn, desktopAuth } = body;
 
         if (!accessToken || !refreshToken) {
             log.error('Missing tokens in completion request');
@@ -54,6 +54,11 @@ auth.post('/complete', async (c) => {
         // Sync platform models and web tools in background
         syncPlatformModels().catch(err => log.error({ err }, 'Failed to sync platform models'));
         syncPlatformWebTools().catch(err => log.error({ err }, 'Failed to sync platform web tools'));
+
+        // For desktop auth, return a flag to show "close tab" message instead of redirecting
+        if (desktopAuth) {
+            return c.json({ success: true, desktopAuth: true });
+        }
 
         return c.json({ success: true, redirectUrl: '/' });
     } catch (err) {
@@ -150,17 +155,42 @@ function getTokenExtractorHtml(): string {
         h1 { color: #fafafa; margin: 0 0 0.5rem; font-size: 1.25rem; }
         p { color: #a1a1aa; margin: 0; font-size: 0.875rem; }
         .error { color: #f87171; margin-top: 1rem; display: none; }
+        .success { display: none; }
+        .success-icon {
+            width: 64px;
+            height: 64px;
+            border-radius: 50%;
+            background: #22c55e;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 0 auto 1.5rem;
+        }
+        .success-icon svg { width: 32px; height: 32px; color: white; }
     </style>
 </head>
 <body>
-    <div class="card">
+    <div class="card" id="loading">
         <div class="spinner" id="spinner"></div>
         <h1>Completing Authentication</h1>
         <p>Please wait...</p>
         <p class="error" id="error"></p>
     </div>
+    <div class="card success" id="success">
+        <div class="success-icon">
+            <svg fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path>
+            </svg>
+        </div>
+        <h1>Authentication Complete</h1>
+        <p>You can close this tab and return to the Pipali app.</p>
+    </div>
     <script>
         (function() {
+            // Check if this is a desktop auth flow (query param indicates desktop app)
+            const urlParams = new URLSearchParams(window.location.search);
+            const isDesktopAuth = urlParams.get('desktop') === '1';
+
             // Parse tokens from URL fragment (after #)
             // Fragments are never sent to the server, providing better security
             const hash = window.location.hash.substring(1);
@@ -193,14 +223,21 @@ function getTokenExtractorHtml(): string {
                 body: JSON.stringify({
                     accessToken: accessToken,
                     refreshToken: refreshToken,
-                    expiresIn: expiresIn ? parseInt(expiresIn, 10) : null
+                    expiresIn: expiresIn ? parseInt(expiresIn, 10) : null,
+                    desktopAuth: isDesktopAuth
                 })
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success && data.redirectUrl) {
-                    // Clear the fragment from URL before redirecting
-                    window.location.replace(data.redirectUrl);
+                if (data.success) {
+                    if (data.desktopAuth) {
+                        // Desktop auth - show success message, user should return to app
+                        document.getElementById('loading').style.display = 'none';
+                        document.getElementById('success').style.display = 'block';
+                    } else if (data.redirectUrl) {
+                        // Web auth - redirect to app
+                        window.location.replace(data.redirectUrl);
+                    }
                 } else {
                     throw new Error(data.error || 'Authentication failed');
                 }

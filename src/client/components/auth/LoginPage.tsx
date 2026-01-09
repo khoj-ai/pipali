@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { apiFetch, getApiBaseUrl } from '../../utils/api';
+import { isDesktopMode, openInBrowser } from '../../utils/tauri';
 
 interface LoginPageProps {
     onLoginSuccess: () => void;
@@ -8,23 +9,70 @@ interface LoginPageProps {
 
 export function LoginPage({ onLoginSuccess }: LoginPageProps) {
     const [isLoading, setIsLoading] = useState(false);
+    const [isWaitingForAuth, setIsWaitingForAuth] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const logoUrl = `${getApiBaseUrl()}/icons/pipali_128.png`;
+    const isDesktop = isDesktopMode();
+
+    // Poll for auth status when waiting for external browser auth
+    const checkAuthStatus = useCallback(async () => {
+        try {
+            const res = await apiFetch('/api/auth/status');
+            if (res.ok) {
+                const data = await res.json();
+                if (data.authenticated) {
+                    setIsWaitingForAuth(false);
+                    onLoginSuccess();
+                    return true;
+                }
+            }
+        } catch (err) {
+            console.error('[LoginPage] Auth status poll error:', err);
+        }
+        return false;
+    }, [onLoginSuccess]);
+
+    // Poll for auth completion when user is signing in via external browser
+    useEffect(() => {
+        if (!isWaitingForAuth) return;
+
+        const interval = setInterval(async () => {
+            const authenticated = await checkAuthStatus();
+            if (authenticated) {
+                clearInterval(interval);
+            }
+        }, 2000); // Poll every 2 seconds
+
+        return () => clearInterval(interval);
+    }, [isWaitingForAuth, checkAuthStatus]);
 
     const handleGoogleSignIn = async () => {
         setIsLoading(true);
         setError(null);
 
         try {
-            // Get the OAuth URL from the server
-            const res = await apiFetch('/api/auth/oauth/google/url');
+            // Build callback URL with desktop flag if in desktop mode
+            const baseUrl = getApiBaseUrl() || window.location.origin;
+            const callbackUrl = isDesktop
+                ? `${baseUrl}/api/auth/callback?desktop=1`
+                : `${baseUrl}/api/auth/callback`;
+
+            // Get the OAuth URL from the server with custom callback
+            const res = await apiFetch(`/api/auth/oauth/google/url?callback_url=${encodeURIComponent(callbackUrl)}`);
             if (!res.ok) {
                 throw new Error('Failed to get OAuth URL');
             }
             const { url } = await res.json();
 
-            // Redirect to Google OAuth
-            window.location.href = url;
+            // In desktop mode, open in system browser and poll for completion
+            if (isDesktop) {
+                await openInBrowser(url);
+                setIsLoading(false);
+                setIsWaitingForAuth(true);
+            } else {
+                // Web mode - redirect in same window
+                window.location.href = url;
+            }
         } catch (err) {
             console.error('Google sign-in error:', err);
             setError('Failed to start Google sign-in. Please try again.');
@@ -44,18 +92,61 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
             }
             const { url } = await res.json();
 
-            // Get callback URL for this app (use sidecar URL if configured)
+            // Build callback URL with desktop flag if in desktop mode
             const baseUrl = getApiBaseUrl() || window.location.origin;
-            const callbackUrl = `${baseUrl}/api/auth/callback`;
+            const callbackUrl = isDesktop
+                ? `${baseUrl}/api/auth/callback?desktop=1`
+                : `${baseUrl}/api/auth/callback`;
 
-            // Redirect to platform login with callback
-            window.location.href = `${url}/login?redirect_uri=${encodeURIComponent(callbackUrl)}`;
+            // Build full login URL
+            const loginUrl = `${url}/login?redirect_uri=${encodeURIComponent(callbackUrl)}`;
+
+            // In desktop mode, open in system browser and poll for completion
+            if (isDesktop) {
+                await openInBrowser(loginUrl);
+                setIsLoading(false);
+                setIsWaitingForAuth(true);
+            } else {
+                // Web mode - redirect in same window
+                window.location.href = loginUrl;
+            }
         } catch (err) {
             console.error('Email sign-in error:', err);
             setError('Failed to start sign-in. Please try again.');
             setIsLoading(false);
         }
     };
+
+    // Show waiting state when authenticating in external browser
+    if (isWaitingForAuth) {
+        return (
+            <div className="login-page">
+                <div className="login-card">
+                    <div className="login-header">
+                        <div className="login-logo">
+                            <img src={logoUrl} alt="Pipali" width="64" height="64" />
+                        </div>
+                        <h1>Complete sign in</h1>
+                        <p>Finish signing in using your browser, then return here.</p>
+                    </div>
+
+                    <div className="login-waiting">
+                        <Loader2 size={32} className="spinning" />
+                        <p>Waiting for authentication...</p>
+                    </div>
+
+                    <div className="login-buttons">
+                        <button
+                            className="login-btn secondary"
+                            onClick={() => setIsWaitingForAuth(false)}
+                        >
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className="login-page">
