@@ -32,22 +32,32 @@ export function isDesktopMode(): boolean {
  * @param options - Options for opening the URL
  */
 export async function openInBrowser(url: string, options?: { newTab?: boolean }): Promise<void> {
+    console.log('[openInBrowser] Opening URL:', url, { isTauri: isTauri(), isDesktop: isDesktopMode() });
+
     // Try Tauri opener plugin first (only available in Tauri webview)
     if (isTauri()) {
         try {
             const { openUrl } = await import('@tauri-apps/plugin-opener');
+            console.log('[openInBrowser] Using Tauri opener plugin...');
             await openUrl(url);
+            console.log('[openInBrowser] Tauri opener succeeded');
             return;
-        } catch {
+        } catch (err) {
+            console.warn('[openInBrowser] Tauri opener failed, falling back to window.open:', err);
             // Fall through to window.open
         }
     }
 
     if (isDesktopMode() || options?.newTab) {
         // Desktop mode or explicit new tab - open in system browser
-        window.open(url, '_blank', 'noopener,noreferrer');
+        console.log('[openInBrowser] Using window.open...');
+        const newWindow = window.open(url, '_blank', 'noopener,noreferrer');
+        if (!newWindow) {
+            console.warn('[openInBrowser] window.open returned null (popup blocked?)');
+        }
     } else {
         // Web mode - redirect in same window
+        console.log('[openInBrowser] Redirecting in same window...');
         window.location.href = url;
     }
 }
