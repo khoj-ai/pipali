@@ -106,15 +106,17 @@ pub fn wait_for_sidecar_ready(port: u16) -> Result<(), String> {
     let health_url = format!("http://127.0.0.1:{}/api/health", port);
     let max_attempts = 50; // 10 seconds total (50 * 200ms)
 
+    // Create a ureq agent with a short timeout for health checks
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_millis(500))
+        .timeout(Duration::from_secs(2))
+        .build();
+
     for attempt in 1..=max_attempts {
-        // Use a simple blocking HTTP request
-        match std::process::Command::new("curl")
-            .args(["-s", "-o", "/dev/null", "-w", "%{http_code}", &health_url])
-            .output()
-        {
-            Ok(output) => {
-                let status = String::from_utf8_lossy(&output.stdout);
-                if status.trim() == "200" {
+        // Use native Rust HTTP client (no console windows on Windows)
+        match agent.get(&health_url).call() {
+            Ok(response) => {
+                if response.status() == 200 {
                     log::info!("[Sidecar] Server ready after {} attempts", attempt);
                     return Ok(());
                 }
