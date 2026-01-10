@@ -1,13 +1,13 @@
 import { type User } from '../../db/schema';
 import type { ToolDefinition } from '../conversation/conversation';
 import { sendMessageToModel } from '../conversation/index';
-import type { ResearchIteration, ToolCall, ToolResult, ToolExecutionContext, MetricsAccumulator } from './types';
+import type { ResearchIteration, ToolExecutionContext, MetricsAccumulator } from './types';
 import { listFiles, type ListFilesArgs } from '../actor/list_files';
 import { readFile, type ReadFileArgs } from '../actor/read_file';
 import { grepFiles, type GrepFilesArgs } from '../actor/grep_files';
 import { editFile, type EditFileArgs } from '../actor/edit_file';
 import { writeFile, type WriteFileArgs } from '../actor/write_file';
-import { bashCommand, type BashCommandArgs } from '../actor/bash_command';
+import { shellCommand, type ShellCommandArgs } from '../actor/shell_command';
 import { webSearch, type WebSearchArgs } from '../actor/search_web';
 import { readWebpage, type ReadWebpageArgs } from '../actor/read_webpage';
 import { askUser, type AskUserArgs } from '../actor/ask_user';
@@ -183,8 +183,10 @@ REQUIRED:
         },
     },
     {
-        name: 'bash_command',
-        description: 'Execute a bash command on the user\'s system. Use this to run shell commands, scripts, or CLI tools. Useful for tasks like: data analysis, generating reports, file manipulation via CLI tools, etc. All command runs are logged remotely for security audit.',
+        name: 'shell_command',
+        description: process.platform === 'win32'
+            ? 'Execute a PowerShell command on the user\'s Windows system. Use this to run shell commands, scripts, or CLI tools. Useful for tasks like: data analysis, generating reports, file manipulation via CLI tools, etc. All command runs are logged remotely for security audit. Use PowerShell syntax (Get-ChildItem/ls, Get-Content/cat, Copy-Item/cp, Move-Item/mv, Remove-Item/rm, etc.).'
+            : 'Execute a Bash command on the user\'s system. Use this to run shell commands, scripts, or CLI tools. Useful for tasks like: data analysis, generating reports, file manipulation via CLI tools, etc. All command runs are logged remotely for security audit.',
         schema: {
             type: 'object',
             properties: {
@@ -194,12 +196,16 @@ REQUIRED:
                 },
                 command: {
                     type: 'string',
-                    description: 'The bash command to execute.',
+                    description: process.platform === 'win32'
+                        ? 'The PowerShell command to execute.'
+                        : 'The bash command to execute.',
                 },
                 operation_type: {
                     type: 'string',
                     enum: ['read-only', 'write-only', 'read-write'],
-                    description: 'Whether the command is read-only (no side effects, e.g., ls, cat, grep, find), write-only (creates new state without reading, e.g., mkdir, touch, echo > newfile), or read-write (reads and modifies state, e.g., sed -i, mv, rm, apt install).',
+                    description: process.platform === 'win32'
+                        ? 'Whether the command is read-only (no side effects, e.g., Get-ChildItem, Get-Content), write-only (creates new state without reading, e.g., New-Item, Set-Content), or read-write (reads and modifies state, e.g., Move-Item, Remove-Item, Copy-Item).'
+                        : 'Whether the command is read-only (no side effects, e.g., ls, cat, grep, find), write-only (creates new state without reading, e.g., mkdir, touch, echo > newfile), or read-write (reads and modifies state, e.g., sed -i, mv, rm, apt install).',
                 },
                 cwd: {
                     type: 'string',
@@ -512,9 +518,9 @@ async function executeTool(
                 );
                 return result.compiled;
             }
-            case 'bash_command': {
-                const result = await bashCommand(
-                    toolCall.arguments as BashCommandArgs,
+            case 'shell_command': {
+                const result = await shellCommand(
+                    toolCall.arguments as ShellCommandArgs,
                     { confirmationContext: context?.confirmation }
                 );
                 return result.compiled;

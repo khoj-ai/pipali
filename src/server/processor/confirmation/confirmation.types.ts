@@ -46,10 +46,10 @@ export interface DiffInfo {
 
 /**
  * Structured command execution information
- * Used for bash_command operations to provide structured data instead of markdown
+ * Used for shell_command operations to provide structured data instead of markdown
  */
 export interface CommandExecutionInfo {
-    /** The bash command to execute */
+    /** The shell command to execute */
     command: string;
     /** Reason/justification for why this command is needed */
     reason: string;
@@ -81,9 +81,9 @@ export interface ConfirmationRequest {
         affectedFiles?: string[];
         /** Risk level indicator */
         riskLevel?: 'low' | 'medium' | 'high';
-        /** Operation sub-type for display (e.g., 'read-only', 'write-only', 'read-write' for bash commands) */
+        /** Operation sub-type for display (e.g., 'read-only', 'write-only', 'read-write' for shell commands) */
         operationType?: string;
-        /** Structured command execution info (for bash_command operations) */
+        /** Structured command execution info (for shell_command operations) */
         commandInfo?: CommandExecutionInfo;
     };
     /** Diff information for showing what changes will be made */

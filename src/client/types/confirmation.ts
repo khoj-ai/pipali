@@ -32,9 +32,9 @@ export type ConfirmationRequest = {
         toolArgs: Record<string, unknown>;
         affectedFiles?: string[];
         riskLevel?: 'low' | 'medium' | 'high';
-        /** Operation sub-type for display (e.g., 'read-only', 'write-only', 'read-write' for bash commands) */
+        /** Operation sub-type for display (e.g., 'read-only', 'write-only', 'read-write' for shell commands) */
         operationType?: string;
-        /** Structured command execution info (for bash_command operations) */
+        /** Structured command execution info (for shell_command operations) */
         commandInfo?: CommandExecutionInfo;
     };
     diff?: DiffInfo;

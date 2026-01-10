@@ -172,7 +172,7 @@ export function simpleResponseNoTools(): MockScenario {
 }
 
 /**
- * Create a shell command scenario that triggers bash_command with confirmation
+ * Create a shell command scenario that triggers shell_command with confirmation
  */
 export function shellCommandScenario(): MockScenario {
     return {
@@ -183,20 +183,20 @@ export function shellCommandScenario(): MockScenario {
                 thought: 'I will run a shell command to list the files.',
                 toolCalls: [
                     {
-                        function_name: 'bash_command',
+                        function_name: 'shell_command',
                         arguments: {
                             justification: 'User requested to list files in the directory',
                             command: 'ls -la',
                             cwd: '.',
                             operation_type: 'read-only',
                         },
-                        tool_call_id: 'tc-bash-1',
+                        tool_call_id: 'tc-shell-1',
                     },
                 ],
                 // Note: toolResults are for documentation only - actual tools are executed
                 toolResults: [
                     {
-                        source_call_id: 'tc-bash-1',
+                        source_call_id: 'tc-shell-1',
                         content:
                             'total 24\ndrwxr-xr-x  5 user  staff  160 Jan  1 12:00 .\ndrwxr-xr-x  3 user  staff   96 Jan  1 12:00 ..\n-rw-r--r--  1 user  staff  100 Jan  1 12:00 file.txt',
                     },
@@ -220,20 +220,20 @@ export function readWriteShellCommandScenario(): MockScenario {
                 thought: 'I will modify the file as requested.',
                 toolCalls: [
                     {
-                        function_name: 'bash_command',
+                        function_name: 'shell_command',
                         arguments: {
                             justification: 'User requested to modify the file contents',
                             command: 'echo "new content" >> file.txt',
                             cwd: '.',
                             operation_type: 'read-write',
                         },
-                        tool_call_id: 'tc-bash-rw-1',
+                        tool_call_id: 'tc-shell-rw-1',
                     },
                 ],
                 // Note: toolResults are for documentation only - actual tools are executed
                 toolResults: [
                     {
-                        source_call_id: 'tc-bash-rw-1',
+                        source_call_id: 'tc-shell-rw-1',
                         content: 'File modified successfully.',
                     },
                 ],

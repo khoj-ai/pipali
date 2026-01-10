@@ -115,7 +115,7 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
         }
     };
 
-    // Get structured command info from context (for bash_command operations)
+    // Get structured command info from context (for shell_command operations)
     const commandInfo = request.context?.commandInfo;
 
     // Check if this is an MCP tool call

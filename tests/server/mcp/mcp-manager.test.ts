@@ -36,7 +36,7 @@ describe('MCP Manager', () => {
             expect(isMcpTool('list_files')).toBe(false);
             expect(isMcpTool('grep_files')).toBe(false);
             expect(isMcpTool('edit_file')).toBe(false);
-            expect(isMcpTool('bash_command')).toBe(false);
+            expect(isMcpTool('shell_command')).toBe(false);
             expect(isMcpTool('search_web')).toBe(false);
             expect(isMcpTool('text')).toBe(false);
         });

@@ -29,7 +29,7 @@ export function ConfirmationToast({
     const isAutomation = source.type === 'automation';
     const isAgentQuestion = request.operation === 'ask_user';
 
-    // Get structured command info from context (for bash_command operations)
+    // Get structured command info from context (for shell_command operations)
     const commandInfo = request.context?.commandInfo;
     const expandable = hasExpandableContent(request);
     const messagePreview = getMessagePreview(request);

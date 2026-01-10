@@ -28,8 +28,8 @@ export function getToolResultStatus(toolResult: string | undefined, toolName: st
         }
     }
 
-    // For bash_command, check for errors or non-zero exit codes
-    if (toolName === 'bash_command') {
+    // For shell_command, check for errors or non-zero exit codes
+    if (toolName === 'shell_command') {
         if (lowerResult.includes('cancelled') || lowerResult.includes('[exit code:') || lowerResult.startsWith('error')) {
             return 'error';
         }

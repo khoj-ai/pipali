@@ -7,22 +7,22 @@ import {
 
 /**
  * Operation type indicating whether command modifies state
- * - read-only: No side effects (e.g., ls, cat, grep, find)
+ * - read-only: No side effects (e.g., ls, cat, grep)
  * - write-only: Creates new state without reading (e.g., mkdir, touch, echo > newfile)
- * - read-write: Reads and modifies state (e.g., sed -i, mv, rm, apt install)
+ * - read-write: Reads and modifies state (e.g., sed -i, mv, rm)
  */
-export type BashOperationType = 'read-only' | 'write-only' | 'read-write';
+export type ShellOperationType = 'read-only' | 'write-only' | 'read-write';
 
 /**
- * Arguments for the bash_command tool.
+ * Arguments for the shell_command tool.
  */
-export interface BashCommandArgs {
+export interface ShellCommandArgs {
     /** A clear explanation of why this command needs to be run */
     justification: string;
-    /** The bash command to execute */
+    /** The shell command to execute (bash on Unix, PowerShell on Windows) */
     command: string;
     /** Whether the command is read-only (no side effects) or read-write (modifies state) */
-    operation_type: BashOperationType;
+    operation_type: ShellOperationType;
     /** Optional working directory for command execution (defaults to home directory) */
     cwd?: string;
     /** Optional timeout in milliseconds (defaults to 30000ms / 30 seconds) */
@@ -30,9 +30,9 @@ export interface BashCommandArgs {
 }
 
 /**
- * Result from executing a bash command
+ * Result from executing a shell command
  */
-export interface BashCommandResult {
+export interface ShellCommandResult {
     query: string;
     file: string;
     uri: string;
@@ -40,9 +40,9 @@ export interface BashCommandResult {
 }
 
 /**
- * Options for bash command execution
+ * Options for shell command execution
  */
-export interface BashCommandOptions {
+export interface ShellCommandOptions {
     /** Confirmation context for requesting user approval */
     confirmationContext?: ConfirmationContext;
 }
@@ -54,7 +54,8 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 60_000;
 
 /**
- * Executes a bash command on the user's system.
+ * Executes a shell command on the user's system.
+ * Uses bash on Unix/macOS and PowerShell on Windows.
  *
  * Features:
  * - Requires user confirmation before execution (high-risk operation)
@@ -67,10 +68,10 @@ const MAX_TIMEOUT_MS = 60_000;
  * - All commands require explicit user approval
  * - Commands run in a subshell with user's default shell
  */
-export async function bashCommand(
-    args: BashCommandArgs,
-    options?: BashCommandOptions
-): Promise<BashCommandResult> {
+export async function shellCommand(
+    args: ShellCommandArgs,
+    options?: ShellCommandOptions
+): Promise<ShellCommandResult> {
     const { justification, command, cwd, timeout } = args;
 
     const query = `Execute command: ${command}`;
@@ -97,25 +98,26 @@ export async function bashCommand(
         workingDir = os.homedir();
     }
 
-    // Validate working directory exists
-    const cwdFile = Bun.file(workingDir);
-    // Check if it's a directory by trying to stat it
+    // Validate working directory exists using cross-platform fs.stat
     try {
-        const stat = await Bun.file(workingDir + '/.').exists();
-        if (!stat) {
-            // Try parent to check if cwd itself exists as directory
-            const dirCheck = await Bun.$`test -d ${workingDir}`.quiet().nothrow();
-            if (dirCheck.exitCode !== 0) {
-                return {
-                    query,
-                    file: '',
-                    uri: '',
-                    compiled: `Error: Working directory does not exist: ${workingDir}`,
-                };
-            }
+        const fs = await import('node:fs/promises');
+        const stat = await fs.stat(workingDir);
+        if (!stat.isDirectory()) {
+            return {
+                query,
+                file: '',
+                uri: '',
+                compiled: `Error: Working directory is not a directory: ${workingDir}`,
+            };
         }
-    } catch {
-        // Directory check failed, try anyway and let the command fail if needed
+    } catch (err) {
+        // Directory doesn't exist or can't be accessed
+        return {
+            query,
+            file: '',
+            uri: '',
+            compiled: `Error: Working directory does not exist: ${workingDir}`,
+        };
     }
 
     // Clamp timeout to valid range
@@ -134,7 +136,7 @@ export async function bashCommand(
             workingDir,
             options.confirmationContext,
             {
-                toolName: 'bash_command',
+                toolName: 'shell_command',
                 toolArgs: {
                     command,
                     cwd: workingDir,
@@ -161,12 +163,16 @@ export async function bashCommand(
     }
 
     try {
-        console.log(`[Bash] Executing: ${command} in ${workingDir}`);
+        console.log(`[Shell] Executing: ${command} in ${workingDir}`);
 
-        // Execute command using Bun.spawn with /bin/bash -c for full bash compatibility
-        // This handles heredocs, complex quoting, pipes, and all bash features
+        // Determine shell based on platform
+        const isWindows = process.platform === 'win32';
+        const shellCmd = isWindows
+            ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command]
+            : ['/bin/bash', '-c', command];
+
         const proc = Bun.spawn({
-            cmd: ['/bin/bash', '-c', command],
+            cmd: shellCmd,
             cwd: workingDir,
             stdout: 'pipe',
             stderr: 'pipe',
@@ -198,7 +204,7 @@ export async function bashCommand(
             output += `\n\n[Exit code: ${exitCode}]`;
         }
 
-        console.log(`[Bash] Command completed with exit code ${exitCode}`);
+        console.log(`[Shell] Command completed with exit code ${exitCode}`);
 
         return {
             query,
@@ -210,7 +216,7 @@ export async function bashCommand(
         // Handle timeout specifically
         if (error instanceof Error && error.message.includes('timed out')) {
             const errorMsg = `Command timed out after ${effectiveTimeout}ms: ${command}`;
-            console.error(`[Bash] ${errorMsg}`);
+            console.error(`[Shell] ${errorMsg}`);
             return {
                 query,
                 file: workingDir,
@@ -220,7 +226,7 @@ export async function bashCommand(
         }
 
         const errorMsg = `Error executing command: ${error instanceof Error ? error.message : String(error)}`;
-        console.error(`[Bash] ${errorMsg}`, error);
+        console.error(`[Shell] ${errorMsg}`, error);
 
         return {
             query,

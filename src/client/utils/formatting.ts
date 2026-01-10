@@ -43,7 +43,7 @@ export function formatToolArgs(toolName: string, args: any): string {
         case 'write_file':
             return args.file_path || '';
 
-        case 'bash_command':
+        case 'shell_command':
             return args.justification || '';
 
         default:
@@ -82,7 +82,7 @@ export function formatToolCallsForSidebar(toolCalls: any[]): string {
         "grep_files": "Search",
         "edit_file": "Edit",
         "write_file": "Write",
-        "bash_command": "Shell",
+        "shell_command": "Shell",
         "read_file": "Read",
         "text": "Respond",
     };
@@ -110,7 +110,7 @@ export function formatToolCallsForSidebar(toolCalls: any[]): string {
             case 'write_file':
                 detail = args.file_path ? ` ${getFileName(args.file_path)}` : '';
                 break;
-            case 'bash_command':
+            case 'shell_command':
                 detail = args.justification ? ` ${args.justification}` : '';
                 break;
         }
@@ -132,7 +132,7 @@ export function getFriendlyToolName(toolName: string): string {
         "grep_files": "Search",
         "edit_file": "Edit",
         "write_file": "Write",
-        "bash_command": "Shell",
+        "shell_command": "Shell",
     };
     return friendlyNames[toolName] || formatToolName(toolName);
 }

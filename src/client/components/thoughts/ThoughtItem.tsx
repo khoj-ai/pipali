@@ -40,7 +40,7 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
         const isWriteOp = toolName === 'write_file' && thought.toolArgs?.content;
         const isGrepOp = toolName === 'grep_files' && thought.toolResult;
         const isListOp = toolName === 'list_files' && thought.toolResult;
-        const isBashOp = toolName === 'bash_command' && thought.toolArgs?.command;
+        const isShellOp = toolName === 'shell_command' && thought.toolArgs?.command;
 
         // Determine success/error status for step indicator (pending takes precedence)
         const stepStatus = thought.isPending ? 'pending' : getToolResultStatus(thought.toolResult, toolName);
@@ -79,7 +79,7 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
                         <ListResultView result={thought.toolResult} />
                     )}
                     {/* Show bash command view */}
-                    {isBashOp && (
+                    {isShellOp && (
                         <BashCommandView
                             command={thought.toolArgs.command}
                             justification={thought.toolArgs.justification}
@@ -88,7 +88,7 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
                         />
                     )}
                     {/* Show regular result for other tools */}
-                    {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isBashOp && thought.toolResult && (
+                    {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isShellOp && thought.toolResult && (
                         <pre className="thought-result">
                             {thought.toolResult.slice(0, 200)}
                             {thought.toolResult.length > 200 && '...'}

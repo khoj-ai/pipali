@@ -575,7 +575,7 @@ test.describe('Automations Page', () => {
          * These tests verify that automations requiring user confirmation display
          * the appropriate UI elements on the automations page, home page, and in toasts.
          *
-         * The tests create an automation with a prompt that triggers a bash_command tool,
+         * The tests create an automation with a prompt that triggers a shell_command tool,
          * which requires user confirmation before execution.
          */
 

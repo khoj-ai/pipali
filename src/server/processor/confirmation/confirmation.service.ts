@@ -94,7 +94,7 @@ export function createFileOperationConfirmation(
         additionalMessage?: string;
         diff?: DiffInfo;
         operationSubType?: string;
-        /** Structured command execution info (for bash_command operations) */
+        /** Structured command execution info (for shell_command operations) */
         commandInfo?: CommandExecutionInfo;
     }
 ): ConfirmationRequest {
@@ -188,7 +188,7 @@ export async function requestOperationConfirmation(
         toolArgs: Record<string, unknown>;
         additionalMessage?: string;
         diff?: DiffInfo;
-        /** Optional read/read-write sub-type for finer-grained confirmation tracking (used by bash_command) */
+        /** Optional read/read-write sub-type for finer-grained confirmation tracking (used by shell_command) */
         operationSubType?: string;
         commandInfo?: CommandExecutionInfo;
     }
