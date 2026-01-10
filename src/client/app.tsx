@@ -305,6 +305,7 @@ const App = () => {
             const historyMessages: Message[] = [];
             let currentAgentMessage: Message | null = null;
             let thoughts: Thought[] = [];
+            let firstAgentStepId: string | null = null;
 
             const finalizeCurrentAgent = () => {
                 if (currentAgentMessage) {
@@ -313,15 +314,17 @@ const App = () => {
                     }
                     historyMessages.push(currentAgentMessage);
                 } else if (thoughts.length > 0) {
+                    // Use the first agent step_id for orphaned thoughts so deletion works
                     historyMessages.push({
                         role: 'assistant',
                         content: '',
                         thoughts: thoughts,
-                        id: generateUUID(),
+                        id: firstAgentStepId ?? generateUUID(),
                     });
                 }
                 thoughts = [];
                 currentAgentMessage = null;
+                firstAgentStepId = null;
             };
 
             for (const msg of data.history) {
@@ -335,6 +338,10 @@ const App = () => {
                 }
 
                 if (msg.source === 'agent') {
+                    // Track first agent step_id for this message group (used for orphaned thoughts)
+                    if (firstAgentStepId === null) {
+                        firstAgentStepId = msg.step_id;
+                    }
                     let toolResultsMap: Map<string, string> = new Map();
                     const hasMessage = msg.message && msg.message.trim() !== '';
 
