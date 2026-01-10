@@ -173,31 +173,31 @@ jobs:
       - name: ⤵️ Install Tauri Frontend Dependencies
         run: cd src-tauri-frontend && bun install
 
-      - name: 🔨 Build Desktop App
-        run: bun run tauri:build:windows-x64
+      - name: 🔨 Build Desktop App (Debug)
+        run: bun run tauri:build:windows-x64 -- --debug
 
       - name: 📁 List Build Artifacts
         shell: bash
         run: |
           echo "=== Bundle directory ==="
-          ls -la src-tauri/target/release/bundle/ || true
+          ls -la src-tauri/target/debug/bundle/ || true
           echo "=== msi ==="
-          ls -la src-tauri/target/release/bundle/msi/ || true
+          ls -la src-tauri/target/debug/bundle/msi/ || true
           echo "=== nsis ==="
-          ls -la src-tauri/target/release/bundle/nsis/ || true
+          ls -la src-tauri/target/debug/bundle/nsis/ || true
 
       - name: ⏫ Upload Windows MSI
         uses: actions/upload-artifact@v4
         with:
           name: pipali-windows-x64.msi
-          path: src-tauri/target/release/bundle/msi/*.msi
+          path: src-tauri/target/debug/bundle/msi/*.msi
           if-no-files-found: error
 
       - name: ⏫ Upload Windows Installer (NSIS)
         uses: actions/upload-artifact@v4
         with:
           name: pipali-windows-x64-setup.exe
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          path: src-tauri/target/debug/bundle/nsis/*.exe
           if-no-files-found: error
 
   release:
