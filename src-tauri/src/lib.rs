@@ -181,6 +181,17 @@ pub fn run() {
         .expect("error while building tauri application")
         .run(|app_handle, event| {
             match event {
+                tauri::RunEvent::WindowEvent {
+                    label,
+                    event: tauri::WindowEvent::CloseRequested { .. },
+                    ..
+                } => {
+                    // Window close button clicked - stop sidecar before window closes
+                    log::info!("[App] Window '{}' close requested, stopping sidecar...", label);
+                    if let Err(e) = stop_sidecar(app_handle) {
+                        log::error!("Error stopping sidecar on window close: {}", e);
+                    }
+                }
                 tauri::RunEvent::ExitRequested { .. } => {
                     // Graceful shutdown on app exit (Cmd+Q, etc.)
                     log::info!("[App] Exit requested, stopping sidecar...");
