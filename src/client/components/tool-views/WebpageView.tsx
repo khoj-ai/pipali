@@ -4,6 +4,7 @@
 import { Globe } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { ExternalLink } from '../ExternalLink';
 
 interface WebpageViewProps {
     result: string;
@@ -34,7 +35,7 @@ export function WebpageView({ result, url }: WebpageViewProps) {
                 <span className="webpage-domain">{domain}</span>
             </div>
             <div className="webpage-content webpage-markdown">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown remarkPlugins={[remarkGfm]} components={{ a: ExternalLink }}>
                     {result}
                 </ReactMarkdown>
             </div>

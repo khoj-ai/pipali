@@ -9,6 +9,7 @@ import { Trash2 } from 'lucide-react';
 import type { Message } from '../../types';
 import { ThoughtsSection } from '../thoughts/ThoughtsSection';
 import { StreamingIndicator } from './StreamingIndicator';
+import { ExternalLink } from '../ExternalLink';
 
 interface MessageItemProps {
     message: Message;
@@ -53,6 +54,7 @@ export function MessageItem({ message, onDelete }: MessageItemProps) {
                     <ReactMarkdown
                         remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
                         rehypePlugins={[rehypeKatex]}
+                        components={{ a: ExternalLink }}
                     >
                         {message.content}
                     </ReactMarkdown>
