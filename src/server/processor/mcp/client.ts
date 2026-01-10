@@ -3,6 +3,49 @@ import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotoc
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServerConfig, McpToolInfo, McpToolCallResult, McpClientStatus, McpContentType } from './types';
 
+// Cache the shell PATH to avoid repeated shell invocations
+let cachedShellPath: string | null = null;
+
+/**
+ * Get the PATH from the user's login shell.
+ * Desktop apps often don't inherit the full PATH that includes tools like npx from nvm/volta.
+ * This function queries the shell to get the complete PATH.
+ */
+async function getShellPath(): Promise<string | undefined> {
+    if (cachedShellPath !== null) {
+        return cachedShellPath || undefined;
+    }
+
+    try {
+        const isWindows = process.platform === 'win32';
+        const shellCmd = isWindows
+            ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 'echo $env:PATH']
+            : ['/bin/bash', '-lc', 'echo $PATH'];
+
+        const proc = Bun.spawn({
+            cmd: shellCmd,
+            stdout: 'pipe',
+            stderr: 'pipe',
+            timeout: 5000,
+        });
+
+        const exitCode = await proc.exited;
+        if (exitCode === 0) {
+            const shellPath = (await new Response(proc.stdout).text()).trim();
+            if (shellPath) {
+                cachedShellPath = shellPath;
+                console.log('[MCP] Resolved shell PATH:', shellPath.substring(0, 100) + '...');
+                return shellPath;
+            }
+        }
+    } catch (error) {
+        console.warn('[MCP] Failed to get shell PATH:', error);
+    }
+
+    cachedShellPath = '';
+    return undefined;
+}
+
 /**
  * MCP Client for connecting to and interacting with MCP servers.
  * Supports both stdio (local scripts/npm packages) and HTTP (remote servers) transports.
@@ -76,8 +119,13 @@ export class McpClient {
         const { command, args } = this.parseStdioCommand();
 
         // Build environment with user-specified overrides
+        // Use shell PATH to ensure tools like npx are found (important for desktop apps)
+        const defaultEnv = getDefaultEnvironment();
+        const shellPath = await getShellPath();
+
         const env = {
-            ...getDefaultEnvironment(),
+            ...defaultEnv,
+            ...(shellPath ? { PATH: shellPath } : {}),
             ...this.config.env,
         };
 
