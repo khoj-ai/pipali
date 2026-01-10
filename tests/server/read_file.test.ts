@@ -181,12 +181,28 @@ describe('readFile', () => {
         expect(result.compiled).toBe(specialContent);
     });
 
-    test('should read file with case-insensitive path', async () => {
+    test('should read file with case-insensitive path on case-insensitive FS', async () => {
         // Deliberately change casing in the filename
         const wrongCasePath = path.join(testDir, 'mixedcase.txt');
+
+        // Check if filesystem is case-insensitive
+        let caseInsensitive = false;
+        try {
+            await fs.stat(wrongCasePath);
+            caseInsensitive = true;
+        } catch {
+            caseInsensitive = false;
+        }
+
         const result = await readFile({ path: wrongCasePath });
 
-        expect(result.compiled).toBe('Mixed case content');
+        if (caseInsensitive) {
+            // On case-insensitive FS (macOS/Windows), should find the file
+            expect(result.compiled).toBe('Mixed case content');
+        } else {
+            // On case-sensitive FS (Linux), should not find the file
+            expect(result.compiled).toBe(`File '${wrongCasePath}' not found`);
+        }
     });
 
     describe('image files', () => {

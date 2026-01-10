@@ -170,7 +170,7 @@ export async function grepFiles(
             }
         }
 
-        // Normalize to on-disk casing when input casing differs (common on macOS).
+        // Normalize to on-disk casing when input casing differs (only on case-insensitive FS like macOS/Windows).
         const caseResolvedSearchPath = await resolveCaseInsensitivePath(path.resolve(searchPath));
         if (caseResolvedSearchPath) {
             searchPath = caseResolvedSearchPath;

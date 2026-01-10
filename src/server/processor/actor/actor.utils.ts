@@ -3,6 +3,10 @@ import os from 'os';
 import fs from 'fs/promises';
 import type { Dirent } from 'fs';
 
+// Linux is typically case-sensitive, macOS/Windows are case-insensitive.
+// Only do case-insensitive path resolution on case-insensitive filesystems.
+const isCaseInsensitiveFS = process.platform === 'darwin' || process.platform === 'win32';
+
 async function resolveCaseInsensitivePath(absolutePath: string): Promise<string | null> {
     // Cross-platform resolver for absolute paths (Windows/macOS/Linux).
     // If a path exists but its casing differs (common on case-insensitive FS),
@@ -27,7 +31,8 @@ async function resolveCaseInsensitivePath(absolutePath: string): Promise<string 
 
         // Prefer exact match first to avoid changing casing when not needed.
         let match = entries.find(e => e === part);
-        if (!match) {
+        if (!match && isCaseInsensitiveFS) {
+            // Only try case-insensitive matching on case-insensitive filesystems
             const partLower = part.toLowerCase();
             match = entries.find(e => e.toLowerCase() === partLower);
         }
@@ -129,7 +134,7 @@ async function* walkFilePaths(
     const excluded = getExcludedDirNamesForRootDir(rootDir, { includeAppFolders: opts.includeAppFolders });
     let resolvedRoot = path.resolve(rootDir);
 
-    // If the provided root exists but has incorrect casing (common on macOS),
+    // If the provided root exists but has incorrect casing (only on case-insensitive FS like macOS/Windows),
     // normalize it to on-disk casing so returned paths are case-correct.
     const caseResolvedRoot = await resolveCaseInsensitivePath(resolvedRoot);
     if (caseResolvedRoot) {
