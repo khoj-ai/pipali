@@ -1,6 +1,5 @@
 // Message list container with empty state
 
-import React, { useRef, useEffect } from 'react';
 import { Sparkles } from 'lucide-react';
 import type { Message } from '../../types';
 import { MessageItem } from './MessageItem';
@@ -11,13 +10,6 @@ interface MessageListProps {
 }
 
 export function MessageList({ messages, onDeleteMessage }: MessageListProps) {
-    const messagesEndRef = useRef<HTMLDivElement>(null);
-
-    // Auto-scroll to bottom when messages change
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-    }, [messages]);
-
     return (
         <main className="main-content">
             <div className="messages-container">
@@ -32,7 +24,6 @@ export function MessageList({ messages, onDeleteMessage }: MessageListProps) {
                         {messages.map((msg) => (
                             <MessageItem key={msg.id} message={msg} onDelete={onDeleteMessage} />
                         ))}
-                        <div ref={messagesEndRef} />
                     </div>
                 )}
             </div>
