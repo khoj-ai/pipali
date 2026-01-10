@@ -1,34 +1,33 @@
 // Compact diff view for edit operations in thoughts section
 
-import React from 'react';
+import { Pencil } from 'lucide-react';
 import { computeUnifiedDiff } from '../../utils/diff';
 
 interface ThoughtDiffViewProps {
     oldText: string;
     newText: string;
+    filePath?: string;
 }
 
-export function ThoughtDiffView({ oldText, newText }: ThoughtDiffViewProps) {
+export function ThoughtDiffView({ oldText, newText, filePath }: ThoughtDiffViewProps) {
     const diffLines = computeUnifiedDiff(oldText, newText);
-    const maxLines = 10;
-    const truncated = diffLines.length > maxLines;
-    const displayLines = truncated ? diffLines.slice(0, maxLines) : diffLines;
+
+    // Get display filename from path
+    const filename = filePath?.split('/').pop() || 'file';
 
     return (
         <div className="thought-diff">
-            {displayLines.map((line, idx) => (
-                <div key={idx} className={`thought-diff-line ${line.type}`}>
-                    <span className="thought-diff-indicator">
-                        {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
-                    </span>
-                    <span className="thought-diff-content">{line.content || ' '}</span>
-                </div>
-            ))}
-            {truncated && (
-                <div className="thought-diff-truncated">
-                    ... {diffLines.length - maxLines} more lines
-                </div>
-            )}
+            <div className="thought-diff-file-header"><Pencil size={12} /> {filename}</div>
+            <div className="diff-file-content">
+                {diffLines.map((line, idx) => (
+                    <div key={idx} className={`thought-diff-line ${line.type}`}>
+                        <span className="thought-diff-indicator">
+                            {line.type === 'removed' ? '−' : line.type === 'added' ? '+' : ' '}
+                        </span>
+                        <span className="thought-diff-content">{line.content || ' '}</span>
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }

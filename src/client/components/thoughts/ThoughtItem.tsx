@@ -9,6 +9,10 @@ import { ThoughtWriteView } from '../tool-views/ThoughtWriteView';
 import { GrepResultView } from '../tool-views/GrepResultView';
 import { ListResultView } from '../tool-views/ListResultView';
 import { BashCommandView } from '../tool-views/BashCommandView';
+import { ReadFileView } from '../tool-views/ReadFileView';
+import { WebSearchView } from '../tool-views/WebSearchView';
+import { WebpageView } from '../tool-views/WebpageView';
+import { ToolResultView } from '../tool-views/ToolResultView';
 
 interface ThoughtItemProps {
     thought: Thought;
@@ -41,6 +45,9 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
         const isGrepOp = toolName === 'grep_files' && thought.toolResult;
         const isListOp = toolName === 'list_files' && thought.toolResult;
         const isShellOp = toolName === 'shell_command' && thought.toolArgs?.command;
+        const isReadOp = toolName === 'view_file' && thought.toolResult;
+        const isWebSearchOp = toolName === 'search_web' && thought.toolResult;
+        const isWebpageOp = toolName === 'read_webpage' && thought.toolResult;
 
         // Determine success/error status for step indicator (pending takes precedence)
         const stepStatus = thought.isPending ? 'pending' : getToolResultStatus(thought.toolResult, toolName);
@@ -62,12 +69,14 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
                         <ThoughtDiffView
                             oldText={thought.toolArgs.old_string}
                             newText={thought.toolArgs.new_string}
+                            filePath={thought.toolArgs.file_path}
                         />
                     )}
                     {/* Show content preview for write operations */}
                     {isWriteOp && (
                         <ThoughtWriteView
                             content={thought.toolArgs.content}
+                            filePath={thought.toolArgs.file_path}
                         />
                     )}
                     {/* Show formatted grep results */}
@@ -87,12 +96,33 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
                             result={thought.toolResult}
                         />
                     )}
+                    {/* Show formatted read file results */}
+                    {isReadOp && thought.toolResult && (
+                        <ReadFileView
+                            result={thought.toolResult}
+                            filePath={thought.toolArgs?.path}
+                        />
+                    )}
+                    {/* Show formatted web search results */}
+                    {isWebSearchOp && thought.toolResult && (
+                        <WebSearchView
+                            result={thought.toolResult}
+                            query={thought.toolArgs?.query}
+                        />
+                    )}
+                    {/* Show formatted webpage content */}
+                    {isWebpageOp && thought.toolResult && (
+                        <WebpageView
+                            result={thought.toolResult}
+                            url={thought.toolArgs?.url}
+                        />
+                    )}
                     {/* Show regular result for other tools */}
-                    {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isShellOp && thought.toolResult && (
-                        <pre className="thought-result">
-                            {thought.toolResult.slice(0, 200)}
-                            {thought.toolResult.length > 200 && '...'}
-                        </pre>
+                    {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isShellOp && !isReadOp && !isWebSearchOp && !isWebpageOp && thought.toolResult && (
+                        <ToolResultView
+                            result={thought.toolResult}
+                            toolName={friendlyToolName}
+                        />
                     )}
                 </div>
             </div>

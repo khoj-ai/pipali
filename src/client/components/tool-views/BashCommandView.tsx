@@ -11,13 +11,10 @@ interface BashCommandViewProps {
 }
 
 export function BashCommandView({ command, cwd, result }: BashCommandViewProps) {
-    const [expanded, setExpanded] = useState(false);
     const hasOutput = result && result.length > 0;
     const isError = result?.toLowerCase().includes('error') ||
                     result?.toLowerCase().includes('cancelled') ||
                     result?.includes('[Exit code:');
-    const outputPreview = result?.slice(0, 150) || '';
-    const needsTruncation = result && result.length > 150;
 
     // Shorten home directory path for display
     const displayCwd = cwd?.replace(/^\/Users\/[^/]+/, '~') || '~';
@@ -35,19 +32,12 @@ export function BashCommandView({ command, cwd, result }: BashCommandViewProps) 
                 <div className={`bash-output ${isError ? 'error' : 'success'}`}>
                     <div
                         className="bash-output-header"
-                        onClick={() => needsTruncation && setExpanded(!expanded)}
-                        style={{ cursor: needsTruncation ? 'pointer' : 'default' }}
+                        style={{ cursor: 'default' }}
                     >
                         <span className="bash-label">Output</span>
-                        {needsTruncation && (
-                            <span className="bash-expand-hint">
-                                {expanded ? '▼ collapse' : '▶ expand'}
-                            </span>
-                        )}
                     </div>
                     <pre className="bash-output-text">
-                        {expanded ? result : outputPreview}
-                        {!expanded && needsTruncation && '...'}
+                        {result}
                     </pre>
                 </div>
             )}

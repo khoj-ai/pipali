@@ -1,30 +1,29 @@
-// Compact content preview for write operations in thoughts section
+// Scrollable content preview for write operations in thoughts section
 
-import React from 'react';
+import { FilePlus } from 'lucide-react';
 
 interface ThoughtWriteViewProps {
     content: string;
+    filePath?: string;
 }
 
-export function ThoughtWriteView({ content }: ThoughtWriteViewProps) {
+export function ThoughtWriteView({ content, filePath }: ThoughtWriteViewProps) {
     const lines = content.split('\n');
-    const maxLines = 8;
-    const truncated = lines.length > maxLines;
-    const displayLines = truncated ? lines.slice(0, maxLines) : lines;
+
+    // Get display filename from path
+    const filename = filePath?.split('/').pop() || 'new file';
 
     return (
-        <div className="thought-diff">
-            {displayLines.map((line, idx) => (
-                <div key={idx} className="thought-diff-line added">
-                    <span className="thought-diff-indicator">+</span>
-                    <span className="thought-diff-content">{line || ' '}</span>
-                </div>
-            ))}
-            {truncated && (
-                <div className="thought-diff-truncated">
-                    ... {lines.length - maxLines} more lines
-                </div>
-            )}
+        <div className="thought-write">
+            <div className="write-file-header"><FilePlus size={12} /> {filename}</div>
+            <div className="write-file-content">
+                {lines.map((line, idx) => (
+                    <div key={idx} className="write-file-line">
+                        <span className="write-line-num">{idx + 1}</span>
+                        <span className="write-line-text">{line || ' '}</span>
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }

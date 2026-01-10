@@ -1,7 +1,7 @@
 // Formatted list files view for the thoughts section
 // Groups files by directory with directory as heading and filenames below
 
-import React from 'react';
+import { FolderOpen } from 'lucide-react';
 
 interface ListResultViewProps {
     result: string;
@@ -75,45 +75,20 @@ export function ListResultView({ result }: ListResultViewProps) {
         .map(([dir, files]) => ({ dir, displayDir: getShortDir(dir), files }))
         .sort((a, b) => a.dir.localeCompare(b.dir));
 
-    // Calculate total files for truncation message
-    const totalFiles = dirGroups.reduce((sum, g) => sum + g.files.length, 0);
-
-    // Limit total files shown
-    const maxTotalFiles = 15;
-    let fileCount = 0;
-    let truncated = false;
-
     return (
         <div className="thought-list">
-            {dirGroups.map((group) => {
-                if (fileCount >= maxTotalFiles) {
-                    truncated = true;
-                    return null;
-                }
-
-                const remainingFiles = maxTotalFiles - fileCount;
-                const filesToShow = group.files.slice(0, remainingFiles);
-                fileCount += filesToShow.length;
-
-                if (filesToShow.length < group.files.length) {
-                    truncated = true;
-                }
-
-                return (
-                    <div key={group.dir} className="list-dir-group">
-                        <div className="list-dir-header">{group.displayDir}</div>
-                        {filesToShow.map((file, fileIdx) => (
-                            <div key={fileIdx} className="list-file-item">
-                                <span className="list-file-name">{file.filename}</span>
-                            </div>
-                        ))}
-                    </div>
-                );
-            })}
-            {(truncated || truncationMessage) && (
-                <div className="list-result-truncated">
-                    {truncationMessage || `... ${totalFiles - maxTotalFiles} more files`}
+            {dirGroups.map((group) => (
+                <div key={group.dir} className="list-dir-group">
+                    <div className="list-dir-header"><FolderOpen size={12} /> {group.displayDir}</div>
+                    {group.files.map((file, fileIdx) => (
+                        <div key={fileIdx} className="list-file-item">
+                            <span className="list-file-name">{file.filename}</span>
+                        </div>
+                    ))}
                 </div>
+            ))}
+            {truncationMessage && (
+                <div className="list-result-truncated">{truncationMessage}</div>
             )}
         </div>
     );
