@@ -1,0 +1,8 @@
+{
+  "name": "document-creator-scripts",
+  "type": "module",
+  "private": true,
+  "dependencies": {
+    "docx": "^8.5.0"
+  }
+}
