@@ -16,5 +16,8 @@ export const EMBEDDED_APP_JS = "";
 // Icon assets (base64 encoded)
 export const EMBEDDED_ICONS: { [key: string]: string } = {};
 
+// Builtin skills (path -> content, binary files are base64 encoded)
+export const EMBEDDED_BUILTIN_SKILLS: { [path: string]: { content: string; binary: boolean } } = {};
+
 // Flag to check if assets are embedded (set to true during build)
 export const IS_COMPILED_BINARY = false;

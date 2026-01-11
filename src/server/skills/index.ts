@@ -10,8 +10,9 @@ import { mkdir, rm, readdir, cp } from 'fs/promises';
 import { scanSkillsDirectory, isValidSkillName, isValidDescription } from './loader';
 import { formatSkillsForPrompt } from './utils';
 import type { Skill, SkillLoadResult } from './types';
+import { IS_COMPILED_BINARY, EMBEDDED_BUILTIN_SKILLS } from '../embedded-assets';
 
-// Path to builtin skills shipped with the app
+// Path to builtin skills shipped with the app (used in development mode)
 const BUILTIN_SKILLS_DIR = path.join(import.meta.dir, 'builtin');
 
 export interface DeleteSkillResult {
@@ -63,6 +64,9 @@ export function getSkillsDir(): string {
  * Install builtin skills to the skills directory.
  * Only copies skills that don't already exist (won't overwrite user modifications).
  * Called on app startup/first run.
+ *
+ * In compiled binary mode, uses embedded skills from EMBEDDED_BUILTIN_SKILLS.
+ * In development mode, copies from the builtin/ directory.
  */
 export async function installBuiltinSkills(): Promise<{ installed: string[]; skipped: string[] }> {
     const installed: string[] = [];
@@ -72,6 +76,78 @@ export async function installBuiltinSkills(): Promise<{ installed: string[]; ski
     // Ensure skills directory exists
     await mkdir(skillsDir, { recursive: true });
 
+    if (IS_COMPILED_BINARY) {
+        // Use embedded skills in compiled binary
+        return installEmbeddedSkills(skillsDir, installed, skipped);
+    } else {
+        // Use filesystem skills in development
+        return installFilesystemSkills(skillsDir, installed, skipped);
+    }
+}
+
+/**
+ * Install skills from embedded assets (compiled binary mode)
+ */
+async function installEmbeddedSkills(
+    skillsDir: string,
+    installed: string[],
+    skipped: string[]
+): Promise<{ installed: string[]; skipped: string[] }> {
+    // Group files by skill name (first path segment)
+    const skillFiles = new Map<string, Array<{ relativePath: string; content: string; binary: boolean }>>();
+
+    for (const [filePath, { content, binary }] of Object.entries(EMBEDDED_BUILTIN_SKILLS)) {
+        const parts = filePath.split(path.sep);
+        const skillName = parts[0];
+        const relativePath = parts.slice(1).join(path.sep);
+
+        if (!skillFiles.has(skillName)) {
+            skillFiles.set(skillName, []);
+        }
+        skillFiles.get(skillName)!.push({ relativePath, content, binary });
+    }
+
+    // Install each skill
+    for (const [skillName, files] of skillFiles) {
+        const destDir = path.join(skillsDir, skillName);
+
+        // Check if skill already exists
+        const destSkillMd = Bun.file(path.join(destDir, 'SKILL.md'));
+        if (await destSkillMd.exists()) {
+            skipped.push(skillName);
+            continue;
+        }
+
+        // Write all files for this skill
+        try {
+            for (const { relativePath, content, binary } of files) {
+                const destPath = path.join(destDir, relativePath);
+                await mkdir(path.dirname(destPath), { recursive: true });
+
+                if (binary) {
+                    // Decode base64 for binary files
+                    await Bun.write(destPath, Buffer.from(content, 'base64'));
+                } else {
+                    await Bun.write(destPath, content);
+                }
+            }
+            installed.push(skillName);
+        } catch (err) {
+            console.error(`Failed to install builtin skill "${skillName}":`, err);
+        }
+    }
+
+    return { installed, skipped };
+}
+
+/**
+ * Install skills from filesystem (development mode)
+ */
+async function installFilesystemSkills(
+    skillsDir: string,
+    installed: string[],
+    skipped: string[]
+): Promise<{ installed: string[]; skipped: string[] }> {
     // Read builtin skills directory
     let builtinEntries: Dirent[];
     try {
