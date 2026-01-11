@@ -6,6 +6,7 @@ import type { AutomationInfo, FrequencyType, DayOfWeek, AutomationPendingConfirm
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
 import { DiffView } from '../tool-views/DiffView';
 import { shortenHomePath } from '../../utils/parseCommand';
+import { apiFetch } from '../../utils/api';
 
 interface AutomationDetailModalProps {
     automation: AutomationInfo;
@@ -193,7 +194,7 @@ export function AutomationDetailModal({
                 ? `/api/automations/${automation.id}/pause`
                 : `/api/automations/${automation.id}/resume`;
 
-            const res = await fetch(endpoint, { method: 'POST' });
+            const res = await apiFetch(endpoint, { method: 'POST' });
             if (res.ok) {
                 onUpdated();
             } else {
@@ -213,7 +214,7 @@ export function AutomationDetailModal({
         setTriggerSuccess(false);
 
         try {
-            const res = await fetch(`/api/automations/${automation.id}/trigger`, {
+            const res = await apiFetch(`/api/automations/${automation.id}/trigger`, {
                 method: 'POST',
             });
 
@@ -265,7 +266,7 @@ export function AutomationDetailModal({
                 body.triggerConfig = null;
             }
 
-            const res = await fetch(`/api/automations/${automation.id}`, {
+            const res = await apiFetch(`/api/automations/${automation.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(body),
@@ -290,7 +291,7 @@ export function AutomationDetailModal({
         setError(null);
 
         try {
-            const res = await fetch(`/api/automations/${automation.id}`, {
+            const res = await apiFetch(`/api/automations/${automation.id}`, {
                 method: 'DELETE',
             });
 

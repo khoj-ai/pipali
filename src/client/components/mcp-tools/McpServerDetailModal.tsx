@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Trash2, Save, Play, Terminal, Globe, Plus, AlertCircle, CheckCircle } from 'lucide-react';
 import type { McpServerInfo, McpTransportType, McpToolInfo, UpdateMcpServerInput } from '../../types/mcp';
+import { apiFetch } from '../../utils/api';
 
 interface McpServerDetailModalProps {
     server: McpServerInfo;
@@ -132,7 +133,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         };
 
         try {
-            const res = await fetch(`/api/mcp/servers/${server.id}`, {
+            const res = await apiFetch(`/api/mcp/servers/${server.id}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(input),
@@ -157,7 +158,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         setError(null);
 
         try {
-            const res = await fetch(`/api/mcp/servers/${server.id}`, {
+            const res = await apiFetch(`/api/mcp/servers/${server.id}`, {
                 method: 'DELETE',
             });
 
@@ -182,7 +183,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         setTools([]);
 
         try {
-            const res = await fetch(`/api/mcp/servers/${server.id}/test`, {
+            const res = await apiFetch(`/api/mcp/servers/${server.id}/test`, {
                 method: 'POST',
             });
 
@@ -214,7 +215,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
     const loadTools = async () => {
         setIsLoadingTools(true);
         try {
-            const res = await fetch(`/api/mcp/servers/${server.id}/tools`);
+            const res = await apiFetch(`/api/mcp/servers/${server.id}/tools`);
             if (res.ok) {
                 const data = await res.json();
                 setTools(data.tools || []);

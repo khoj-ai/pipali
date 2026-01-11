@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { X, Loader2, Globe, FolderOpen, Trash2, FileText, Save } from 'lucide-react';
 import type { SkillInfo } from '../../types/skills';
+import { apiFetch } from '../../utils/api';
 
 interface SkillDetailModalProps {
     skill: SkillInfo;
@@ -34,7 +35,7 @@ export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: Skill
     useEffect(() => {
         const loadInstructions = async () => {
             try {
-                const res = await fetch(`/api/skills/${encodeURIComponent(skill.name)}`);
+                const res = await apiFetch(`/api/skills/${encodeURIComponent(skill.name)}`);
                 if (res.ok) {
                     const data = await res.json();
                     const loadedInstructions = data.instructions || '';
@@ -57,7 +58,7 @@ export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: Skill
         setError(null);
 
         try {
-            const res = await fetch(`/api/skills/${encodeURIComponent(skill.name)}`, {
+            const res = await apiFetch(`/api/skills/${encodeURIComponent(skill.name)}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ description, instructions }),
@@ -84,7 +85,7 @@ export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: Skill
         setError(null);
 
         try {
-            const res = await fetch(`/api/skills/${encodeURIComponent(skill.name)}`, {
+            const res = await apiFetch(`/api/skills/${encodeURIComponent(skill.name)}`, {
                 method: 'DELETE',
             });
 
