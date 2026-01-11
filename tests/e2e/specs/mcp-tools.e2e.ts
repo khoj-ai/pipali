@@ -38,15 +38,15 @@ test.describe('MCP Tools Page', () => {
     test.describe('Page Layout', () => {
         test('should display MCP tools page header', async () => {
             await expect(mcpToolsPage.mcpToolsHeader).toBeVisible();
-            // Header contains h2 with "MCP Tool Servers" text
+            // Header contains h2 with "Tools" text
             const headerTitle = mcpToolsPage.mcpToolsHeader.locator('h2');
-            await expect(headerTitle).toContainText('Tool Servers');
+            await expect(headerTitle).toContainText('Tools');
         });
 
         test('should show create button', async () => {
             await expect(mcpToolsPage.createBtn).toBeVisible();
             const btnText = await mcpToolsPage.createBtn.textContent();
-            expect(btnText).toContain('Add Server');
+            expect(btnText).toContain('Connect Tool');
         });
 
         test('should show empty state when no servers exist', async () => {

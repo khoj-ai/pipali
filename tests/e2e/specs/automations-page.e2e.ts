@@ -398,7 +398,7 @@ test.describe('Automations Page', () => {
             await automationsPage.clickDeleteButton();
 
             await expect(automationsPage.deleteConfirmText).toBeVisible();
-            await expect(automationsPage.deleteConfirmText).toHaveText('Delete this automation?');
+            await expect(automationsPage.deleteConfirmText).toHaveText('Delete this routine?');
         });
 
         test('should cancel deletion when cancel is clicked', async () => {
