@@ -46,6 +46,9 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     log::info!("[Sidecar] Starting on port {}...", port);
     log::info!("[Sidecar] Data directory: {:?}", data_dir);
 
+    // Use NODE_USE_SYSTEM_CA=1 to ensure Bun uses the OS certificate store for SSL verification.
+    // This handles corporate proxies, custom CAs, and system-trusted certificates properly.
+    // See: https://bun.com/blog/bun-v1.2.23
     let sidecar_command = app
         .shell()
         .sidecar("pipali-server")
@@ -56,6 +59,7 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
             "--host",
             "127.0.0.1",
         ])
+        .env("NODE_USE_SYSTEM_CA", "1")
         .current_dir(data_dir);
 
     let (mut rx, child) = sidecar_command
