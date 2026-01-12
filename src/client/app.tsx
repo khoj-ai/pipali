@@ -1456,7 +1456,7 @@ const App = () => {
                     <McpToolsPage />
                 )}
                 {currentPage === 'chat' && (
-                    <MessageList messages={messages} onDeleteMessage={deleteMessage} />
+                    <MessageList messages={messages} conversationId={conversationId} onDeleteMessage={deleteMessage} />
                 )}
 
                 <InputArea
