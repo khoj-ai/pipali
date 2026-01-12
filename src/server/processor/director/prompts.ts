@@ -27,10 +27,11 @@ Assuming you can search through files and the web.
 
 # Background Context
 - Current Date, Time (in User Local Timezone): {day_of_week}, {current_date} {current_time}
+- Operating System: {os_info}
 - User Location: {location}
 - User Name: {username}
-- Operating System: {os_info}
 
+{personality_context}
 {skills_context}
 `);
 

@@ -19,6 +19,7 @@ import { research, ResearchPausedError } from './director';
 import { atifConversationService } from './conversation/atif/atif.service';
 import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
+import { loadUserContext } from '../user-context';
 import type { ResearchIteration } from './director/types';
 import type { ConfirmationContext } from './confirmation';
 
@@ -132,12 +133,18 @@ export async function* runResearchWithConversation(
     let iterationCount = 0;
     let systemPromptPersisted = false;
 
+    // Load user context for personalization
+    const userContext = await loadUserContext();
+
     // Run research loop
     for await (const iteration of research({
         chatHistory: trajectory,
         maxIterations,
         currentDate: new Date().toLocaleDateString('en-CA'), // YYYY-MM-DD in local time
         dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
+        username: userContext.name,
+        location: userContext.location,
+        personality: userContext.instructions,
         user,
         abortSignal,
         confirmationContext,

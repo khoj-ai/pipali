@@ -34,6 +34,7 @@
 @import './pages/skills.css';
 @import './pages/automations.css';
 @import './pages/tools.css';
+@import './pages/settings.css';
 
 /* Utilities */
 @import './utilities/animations.css';

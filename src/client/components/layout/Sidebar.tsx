@@ -1,7 +1,7 @@
 // Sidebar with conversation list
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Loader2, MessageSquare, AlertCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Hammer, User, LogOut, Shield, Sun, Moon, Monitor } from 'lucide-react';
+import { Loader2, MessageSquare, AlertCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Hammer, Settings, User, LogOut, Shield, Sun, Moon, Monitor } from 'lucide-react';
 import type { ConversationSummary, ConversationState, ConfirmationRequest, AuthStatus } from '../../types';
 import { useTheme } from '../../hooks';
 
@@ -42,7 +42,7 @@ interface SidebarProps {
     pendingConfirmations: Map<string, ConfirmationRequest[]>;
     currentConversationId?: string;
     exportingConversationId: string | null;
-    currentPage?: 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools';
+    currentPage?: 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools' | 'settings';
     authStatus?: AuthStatus | null;
     onNewChat: () => void;
     onSelectConversation: (id: string) => void;
@@ -51,6 +51,7 @@ interface SidebarProps {
     onGoToSkills?: () => void;
     onGoToAutomations?: () => void;
     onGoToMcpTools?: () => void;
+    onGoToSettings?: () => void;
     onLogout?: () => void;
     onClose?: () => void;
 }
@@ -71,6 +72,7 @@ export function Sidebar({
     onGoToSkills,
     onGoToAutomations,
     onGoToMcpTools,
+    onGoToSettings,
     onLogout,
     onClose,
 }: SidebarProps) {
@@ -378,6 +380,13 @@ export function Sidebar({
                     >
                         <Hammer size={16} />
                         <span>Tools</span>
+                    </button>
+                    <button
+                        className={`sidebar-nav-btn ${currentPage === 'settings' ? 'active' : ''}`}
+                        onClick={onGoToSettings}
+                    >
+                        <Settings size={16} />
+                        <span>Settings</span>
                     </button>
                 </div>
 

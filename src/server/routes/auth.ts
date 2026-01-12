@@ -10,6 +10,7 @@ import {
     syncPlatformModels,
     syncPlatformWebTools,
 } from '../auth';
+import { initializeUserContext } from '../user-context';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'auth' });
@@ -55,6 +56,11 @@ auth.post('/complete', async (c) => {
         // Sync platform models and web tools in background
         syncPlatformModels().catch(err => log.error({ err }, 'Failed to sync platform models'));
         syncPlatformWebTools().catch(err => log.error({ err }, 'Failed to sync platform web tools'));
+
+        // Initialize user context with user info from platform (runs in background)
+        getPlatformUserInfo()
+            .then(userInfo => initializeUserContext({ name: userInfo?.name ?? undefined }))
+            .catch(err => log.error({ err }, 'Failed to initialize user context'));
 
         // For desktop auth, return a flag to show "close tab" message instead of redirecting
         if (desktopAuth) {

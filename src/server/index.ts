@@ -7,6 +7,7 @@ import api from "./routes/api";
 import { initializeDatabase } from "./init";
 import { getMigrationsFolder } from "./utils";
 import { loadSkills, installBuiltinSkills } from "./skills";
+import { initializeUserContext } from "./user-context";
 import { websocketHandler, type WebSocketData } from "./routes/ws";
 import {
     IS_COMPILED_BINARY,
@@ -14,7 +15,7 @@ import {
 } from "./embedded-assets";
 import { startAutomationSystem, stopAutomationSystem } from "./automation";
 import { loadEnabledMcpServers, closeMcpClients } from "./processor/mcp";
-import { configureAuth, isAuthenticated } from "./auth";
+import { configureAuth, isAuthenticated, getPlatformUserInfo } from "./auth";
 import { createChildLogger } from './logger';
 
 const log = createChildLogger({ component: 'server' });
@@ -174,6 +175,17 @@ async function main() {
     if (skillResult.skills.length > 0) {
         log.info(`🎯 Loaded ${skillResult.skills.length} skill(s): ${skillResult.skills.map(s => s.name).join(', ')}`);
     }
+
+    // Initialize user context file (creates template if not exists)
+    // If already authenticated, fetch user info to populate name
+    let userInfo: { name?: string } | undefined;
+    if (alreadyAuthenticated) {
+        const platformUser = await getPlatformUserInfo();
+        if (platformUser?.name) {
+            userInfo = { name: platformUser.name };
+        }
+    }
+    await initializeUserContext(userInfo);
 
     // Start automation system (cron scheduler, file watchers)
     await startAutomationSystem();

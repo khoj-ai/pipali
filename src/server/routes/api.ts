@@ -16,6 +16,7 @@ import { atifConversationService } from '../processor/conversation/atif/atif.ser
 import { runResearchToCompletion } from '../processor/research-runner';
 import { getActiveStatus } from '../sessions';
 import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill } from '../skills';
+import { loadUserContext, saveUserContext } from '../user-context';
 import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
 
@@ -350,6 +351,39 @@ api.put('/user/model', zValidator('json', selectModelSchema), async (c) => {
     }
 
     return c.json({ success: true, modelId });
+});
+
+// Get user context (bio, location, instructions)
+api.get('/user/context', async (c) => {
+    try {
+        const context = await loadUserContext();
+        return c.json(context);
+    } catch (err) {
+        log.error({ err }, 'Failed to load user context');
+        return c.json({ error: 'Failed to load user context' }, 500);
+    }
+});
+
+// Update user context
+const userContextSchema = z.object({
+    name: z.string().optional(),
+    location: z.string().optional(),
+    instructions: z.string().optional(),
+});
+
+api.put('/user/context', zValidator('json', userContextSchema), async (c) => {
+    try {
+        const body = c.req.valid('json');
+        await saveUserContext({
+            name: body.name,
+            location: body.location,
+            instructions: body.instructions,
+        });
+        return c.json({ success: true });
+    } catch (err) {
+        log.error({ err }, 'Failed to save user context');
+        return c.json({ error: 'Failed to save user context' }, 500);
+    }
 });
 
 // ATIF Export endpoint - Export a conversation in ATIF format

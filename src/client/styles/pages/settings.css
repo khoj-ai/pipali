@@ -1,0 +1,201 @@
+/*
+ * Pipali Styles - Settings Page
+ * Includes: settings layout, form fields, save button
+ */
+
+.settings-page {
+    padding: 48px 24px;
+    max-width: 700px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.settings-page ::selection {
+    background: var(--color-selection-bg);
+    color: var(--color-selection-text);
+}
+
+.settings-header {
+    margin-bottom: 32px;
+}
+
+.settings-header h2 {
+    font-size: 20px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0;
+}
+
+.settings-loading {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 48px;
+    color: var(--color-text-muted);
+    font-size: 14px;
+}
+
+.settings-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 12px;
+    background: var(--color-error-bg);
+    border: 1px solid var(--color-error-border);
+    border-radius: var(--radius-md);
+    color: var(--color-error-text);
+    font-size: 13px;
+    margin-bottom: 24px;
+}
+
+.settings-error svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+}
+
+/* Settings Section */
+.settings-section {
+    background: var(--color-bg-elevated);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+}
+
+.settings-section-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--color-text);
+    margin: 0 0 8px;
+}
+
+.settings-section-description {
+    font-size: 14px;
+    color: var(--color-text-secondary);
+    margin: 0 0 24px;
+    line-height: 1.5;
+}
+
+/* Form */
+.settings-form {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settings-field label {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text);
+}
+
+.settings-field-hint {
+    font-size: 13px;
+    color: var(--color-text-muted);
+    margin: 0 0 4px;
+    line-height: 1.4;
+}
+
+.settings-field input[type="text"] {
+    padding: 10px 12px;
+    font-size: 14px;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text);
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.settings-field input[type="text"]:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.settings-field input[type="text"]::placeholder {
+    color: var(--color-text-muted);
+}
+
+.settings-field textarea {
+    padding: 12px;
+    font-size: 14px;
+    font-family: inherit;
+    line-height: 1.6;
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text);
+    resize: vertical;
+    min-height: 150px;
+    transition: border-color var(--transition), box-shadow var(--transition);
+}
+
+.settings-field textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: 0 0 0 3px var(--color-accent-subtle);
+}
+
+.settings-field textarea::placeholder {
+    color: var(--color-text-muted);
+}
+
+/* Actions */
+.settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding-top: 8px;
+}
+
+.settings-save-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    background: var(--color-accent);
+    color: var(--color-bg);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.settings-save-btn:hover:not(:disabled) {
+    background: var(--color-accent-hover);
+}
+
+.settings-save-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.settings-save-btn.saved {
+    background: var(--color-success);
+}
+
+.settings-save-btn svg.spinning {
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(360deg); }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+    .settings-page {
+        padding: 24px 16px;
+    }
+
+    .settings-section {
+        padding: 16px;
+    }
+}

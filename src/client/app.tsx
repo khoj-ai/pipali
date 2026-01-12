@@ -33,11 +33,12 @@ import { HomePage } from "./components/home";
 import { SkillsPage } from "./components/skills";
 import { AutomationsPage } from "./components/automations";
 import { McpToolsPage } from "./components/mcp-tools";
+import { SettingsPage } from "./components/settings";
 import { LoginPage } from "./components/auth";
 import type { AutomationPendingConfirmation } from "./types/automations";
 
 // Page types
-type PageType = 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools';
+type PageType = 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools' | 'settings';
 
 // UUID generator that works in non-secure contexts (e.g., HTTP on non-localhost)
 function generateUUID(): string {
@@ -82,6 +83,7 @@ const App = () => {
         if (path === '/skills') return 'skills';
         if (path === '/automations') return 'automations';
         if (path === '/tools') return 'mcp-tools';
+        if (path === '/settings') return 'settings';
         return 'home';
     });
 
@@ -1012,6 +1014,32 @@ const App = () => {
         window.history.pushState({}, '', '/tools');
     };
 
+    const goToSettingsPage = () => {
+        // Save current conversation state if needed
+        if (conversationId) {
+            const currentState = conversationStates.get(conversationId);
+            if (currentState?.isProcessing) {
+                setConversationStates(prev => {
+                    const next = new Map(prev);
+                    const existing = next.get(conversationId);
+                    if (existing) {
+                        next.set(conversationId, { ...existing, messages });
+                    }
+                    return next;
+                });
+            }
+        }
+
+        setCurrentPage('settings');
+        setConversationId(undefined);
+        setMessages([]);
+        setIsProcessing(false);
+        setIsPaused(false);
+
+        // Update URL to /settings
+        window.history.pushState({}, '', '/settings');
+    };
+
     const selectConversation = (id: string) => {
         // Save current conversation state if it's processing
         if (conversationId) {
@@ -1418,6 +1446,7 @@ const App = () => {
                 onGoToSkills={goToSkillsPage}
                 onGoToAutomations={goToAutomationsPage}
                 onGoToMcpTools={goToMcpToolsPage}
+                onGoToSettings={goToSettingsPage}
                 onLogout={handleLogout}
                 onClose={() => setSidebarOpen(false)}
             />
@@ -1454,6 +1483,9 @@ const App = () => {
                 )}
                 {currentPage === 'mcp-tools' && (
                     <McpToolsPage />
+                )}
+                {currentPage === 'settings' && (
+                    <SettingsPage />
                 )}
                 {currentPage === 'chat' && (
                     <MessageList messages={messages} conversationId={conversationId} onDeleteMessage={deleteMessage} />
