@@ -136,7 +136,7 @@ export function InputArea({
                         ? "Research paused. Send a message or click play to resume."
                         : isProcessing
                             ? "Type to interrupt, or press Esc to pause"
-                            : "Enter to send, Cmd+Enter for background task"
+                            : `Enter to send, ${navigator.platform.indexOf('Mac') !== -1 ? 'Cmd' : 'Ctrl'}+Enter for background task`
                     }
                 </p>
             </div>
