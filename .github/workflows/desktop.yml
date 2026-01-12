@@ -22,11 +22,27 @@ on:
       - scripts/**
       - .github/workflows/desktop.yml
   workflow_dispatch:
+    inputs:
+      debug_build:
+        description: 'Build debug version (unoptimized, with symbols)'
+        required: false
+        default: false
+        type: boolean
+      platforms:
+        description: 'Platforms to build'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - macos
+          - windows
 
 jobs:
   build-macos:
-    name: 🍎 Build macOS arm64
+    name: 🍎 Build macOS arm64${{ inputs.debug_build && ' (Debug)' || '' }}
     runs-on: macos-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'macos' }}
     steps:
       - name: ⬇️ Checkout Code
         uses: actions/checkout@v4
@@ -53,31 +69,31 @@ jobs:
         run: cd src-tauri-frontend && bun install
 
       - name: 🔨 Build Desktop App
-        run: bun run tauri:build:darwin-arm64
+        run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
 
       - name: 📦 Package macOS App Bundle
         run: |
-          echo "=== Bundle directory ==="
-          ls -la src-tauri/target/release/bundle/ || true
+          BUILD_TYPE=${{ inputs.debug_build == true && 'debug' || 'release' }}
+          echo "=== Bundle directory (${BUILD_TYPE}) ==="
+          ls -la src-tauri/target/${BUILD_TYPE}/bundle/ || true
           echo "=== macOS app ==="
-          ls -la src-tauri/target/release/bundle/macos/ || true
+          ls -la src-tauri/target/${BUILD_TYPE}/bundle/macos/ || true
           echo "=== Create tar to preserve permissions and symlinks ==="
-          cd src-tauri/target/release/bundle/macos
+          cd src-tauri/target/${BUILD_TYPE}/bundle/macos
           tar -cvf Pipali-macos-arm64.tar Pipali.app
 
       - name: ⏫ Upload macOS App Bundle
         uses: actions/upload-artifact@v4
         with:
-          name: Pipali-macos-arm64
-          path: src-tauri/target/release/bundle/macos/Pipali-macos-arm64.tar
-          # compression-level: 0
+          name: Pipali-macos-arm64${{ inputs.debug_build && '-debug' || '' }}
+          path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/macos/Pipali-macos-arm64.tar
           if-no-files-found: error
 
       - name: ⏫ Upload macOS DMG (if built)
         uses: actions/upload-artifact@v4
         with:
-          name: pipali-macos-arm64.dmg
-          path: src-tauri/target/release/bundle/dmg/*.dmg
+          name: pipali-macos-arm64${{ inputs.debug_build && '-debug' || '' }}.dmg
+          path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/dmg/*.dmg
           if-no-files-found: ignore
 
   build-linux:
@@ -148,8 +164,9 @@ jobs:
           if-no-files-found: error
 
   build-windows:
-    name: 🪟 Build Windows x64
+    name: 🪟 Build Windows x64${{ inputs.debug_build && ' (Debug)' || '' }}
     runs-on: windows-latest
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'windows' }}
     steps:
       - name: ⬇️ Checkout Code
         uses: actions/checkout@v4
@@ -174,37 +191,38 @@ jobs:
         run: cd src-tauri-frontend && bun install
 
       - name: 🔨 Build Desktop App
-        run: bun run tauri:build:windows-x64
+        run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
 
       - name: 📁 List Build Artifacts
         shell: bash
         run: |
-          echo "=== Bundle directory ==="
-          ls -la src-tauri/target/release/bundle/ || true
+          BUILD_TYPE=${{ inputs.debug_build == true && 'debug' || 'release' }}
+          echo "=== Bundle directory (${BUILD_TYPE}) ==="
+          ls -la src-tauri/target/${BUILD_TYPE}/bundle/ || true
           echo "=== msi ==="
-          ls -la src-tauri/target/release/bundle/msi/ || true
+          ls -la src-tauri/target/${BUILD_TYPE}/bundle/msi/ || true
           echo "=== nsis ==="
-          ls -la src-tauri/target/release/bundle/nsis/ || true
+          ls -la src-tauri/target/${BUILD_TYPE}/bundle/nsis/ || true
 
       - name: ⏫ Upload Windows MSI
         uses: actions/upload-artifact@v4
         with:
-          name: pipali-windows-x64.msi
-          path: src-tauri/target/release/bundle/msi/*.msi
+          name: pipali-windows-x64${{ inputs.debug_build && '-debug' || '' }}.msi
+          path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/msi/*.msi
           if-no-files-found: error
 
       - name: ⏫ Upload Windows Installer (NSIS)
         uses: actions/upload-artifact@v4
         with:
-          name: pipali-windows-x64-setup.exe
-          path: src-tauri/target/release/bundle/nsis/*.exe
+          name: pipali-windows-x64${{ inputs.debug_build && '-debug' || '' }}-setup.exe
+          path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/nsis/*.exe
           if-no-files-found: error
 
   release:
     name: 📦 Create Release
     needs: [build-macos, build-windows]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
+    if: startsWith(github.ref, 'refs/tags/') && !inputs.debug_build
     permissions:
       contents: write
     steps:
