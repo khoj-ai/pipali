@@ -12,6 +12,7 @@ export interface PlatformUserInfo {
     id: string;
     email: string;
     name: string | null;
+    profilePictureUrl: string | null;
     isServerOwner: boolean;
 }
 

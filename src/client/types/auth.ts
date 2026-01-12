@@ -4,6 +4,7 @@ export interface PlatformUser {
     id: string;
     email: string;
     name?: string;
+    profilePictureUrl?: string | null;
     isServerOwner?: boolean;
 }
 

@@ -7,6 +7,34 @@ import { useTheme } from '../../hooks';
 
 const MAX_VISIBLE_CHATS = 5;
 
+/**
+ * Generate a Gravatar URL from an email address.
+ * Falls back to a 404 if no Gravatar exists (so we can detect and show initials).
+ */
+async function getGravatarUrl(email: string, size = 64): Promise<string> {
+    const trimmedEmail = email.trim().toLowerCase();
+    const encoder = new TextEncoder();
+    const data = encoder.encode(trimmedEmail);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    // d=404 returns a 404 if no Gravatar exists, allowing us to fall back to initials
+    return `https://www.gravatar.com/avatar/${hash}?s=${size}&d=404`;
+}
+
+/**
+ * Get user initial from name or email for avatar fallback.
+ */
+function getUserInitial(name?: string, email?: string): string {
+    if (name) {
+        return name.charAt(0).toUpperCase();
+    }
+    if (email) {
+        return email.charAt(0).toUpperCase();
+    }
+    return '?';
+}
+
 interface SidebarProps {
     isOpen: boolean;
     conversations: ConversationSummary[];
@@ -52,8 +80,26 @@ export function Sidebar({
     const [showUserMenu, setShowUserMenu] = useState(false);
     const [searchQuery, setSearchQuery] = useState('');
     const [selectedIndex, setSelectedIndex] = useState(0);
+    const [gravatarUrl, setGravatarUrl] = useState<string | null>(null);
+    const [gravatarFailed, setGravatarFailed] = useState(false);
     const listRef = useRef<HTMLDivElement>(null);
     const { theme, setTheme, isDark } = useTheme();
+
+    // Load Gravatar URL when user email is available but no profile picture
+    const userEmail = authStatus?.user?.email;
+    const hasProfilePicture = !!authStatus?.user?.profilePictureUrl;
+    useEffect(() => {
+        if (userEmail && !hasProfilePicture) {
+            setGravatarFailed(false);
+            getGravatarUrl(userEmail).then(setGravatarUrl);
+        } else {
+            setGravatarUrl(null);
+            setGravatarFailed(false);
+        }
+    }, [userEmail, hasProfilePicture]);
+
+    // Get user initial for avatar fallback
+    const userInitial = getUserInitial(authStatus?.user?.name, authStatus?.user?.email);
 
     // Close menus when clicking outside
     useEffect(() => {
@@ -365,8 +411,22 @@ export function Sidebar({
                                 <div className="user-avatar">
                                     {authStatus.anonMode ? (
                                         <Shield size={18} />
+                                    ) : authStatus.user?.profilePictureUrl ? (
+                                        <img
+                                            src={authStatus.user.profilePictureUrl}
+                                            alt=""
+                                            className="user-avatar-img"
+                                            referrerPolicy="no-referrer"
+                                        />
+                                    ) : gravatarUrl && !gravatarFailed ? (
+                                        <img
+                                            src={gravatarUrl}
+                                            alt=""
+                                            className="user-avatar-img"
+                                            onError={() => setGravatarFailed(true)}
+                                        />
                                     ) : (
-                                        <User size={18} />
+                                        <span className="user-avatar-initial">{userInitial}</span>
                                     )}
                                 </div>
                                 <div className="user-info">

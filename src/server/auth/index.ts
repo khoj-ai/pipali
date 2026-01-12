@@ -342,6 +342,7 @@ export async function getPlatformUserInfo(): Promise<PlatformUserInfo | null> {
             id: data.user.id,
             email: data.user.email,
             name: data.user.name,
+            profilePictureUrl: data.user.profilePictureUrl ?? null,
             isServerOwner: data.user.isServerOwner,
         };
     } catch (error) {

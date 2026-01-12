@@ -156,6 +156,21 @@
     border-radius: 50%;
     color: var(--color-text-secondary);
     flex-shrink: 0;
+    overflow: hidden;
+}
+
+.user-avatar-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.user-avatar-initial {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-text);
+    text-transform: uppercase;
+    user-select: none;
 }
 
 .user-info {
