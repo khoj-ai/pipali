@@ -219,6 +219,7 @@ test.describe('MCP Tools Page', () => {
 
         test.beforeEach(async ({ request }) => {
             // Create a fresh test server for each edit test
+            // Note: enabled must be false to prevent npm install attempts for non-existent packages
             const response = await request.post('/api/mcp/servers', {
                 data: {
                     name: testServerName,
@@ -226,7 +227,7 @@ test.describe('MCP Tools Page', () => {
                     transportType: 'stdio',
                     path: '@example/original-path',
                     requiresConfirmation: true,
-                    enabled: true,
+                    enabled: false,
                 },
             });
             const data = await response.json();
@@ -382,6 +383,7 @@ test.describe('MCP Tools Page', () => {
                     description: 'API created server',
                     transportType: 'stdio',
                     path: '@example/api-test',
+                    enabled: false, // Prevent npm install attempt for non-existent package
                 },
             });
 
@@ -400,6 +402,7 @@ test.describe('MCP Tools Page', () => {
                     description: 'Original',
                     transportType: 'stdio',
                     path: '@example/update-test',
+                    enabled: false, // Prevent npm install attempt for non-existent package
                 },
             });
             const createData = await createResponse.json();
@@ -427,6 +430,7 @@ test.describe('MCP Tools Page', () => {
                     description: 'To be deleted',
                     transportType: 'stdio',
                     path: '@example/delete-test',
+                    enabled: false, // Prevent npm install attempt for non-existent package
                 },
             });
             const createData = await createResponse.json();
@@ -448,6 +452,7 @@ test.describe('MCP Tools Page', () => {
                     description: 'Should fail',
                     transportType: 'stdio',
                     path: '@example/test',
+                    enabled: false, // Prevent npm install attempt for non-existent package
                 },
             });
 
@@ -463,6 +468,7 @@ test.describe('MCP Tools Page', () => {
                     name: serverName,
                     transportType: 'stdio',
                     path: '@example/first',
+                    enabled: false, // Prevent npm install attempt for non-existent package
                 },
             });
             expect(firstResponse.ok()).toBe(true);
@@ -475,6 +481,7 @@ test.describe('MCP Tools Page', () => {
                     name: serverName,
                     transportType: 'stdio',
                     path: '@example/second',
+                    enabled: false, // Prevent npm install attempt for non-existent package
                 },
             });
 

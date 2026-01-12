@@ -146,6 +146,7 @@ export class McpToolsPage {
 
     /**
      * Fill create form
+     * Note: enabled defaults to false in tests to prevent npm install attempts for non-existent packages
      */
     async fillCreateForm(options: {
         name: string;
@@ -154,6 +155,7 @@ export class McpToolsPage {
         path: string;
         apiKey?: string;
         requiresConfirmation?: boolean;
+        enabled?: boolean;
     }): Promise<void> {
         await this.serverNameInput.fill(options.name);
 
@@ -171,6 +173,15 @@ export class McpToolsPage {
 
         if (options.transportType === 'sse' && options.apiKey) {
             await this.serverApiKeyInput.fill(options.apiKey);
+        }
+
+        // Disable server by default in tests to prevent connection attempts
+        // The enabled checkbox is checked by default, so we need to uncheck it
+        if (options.enabled === false || options.enabled === undefined) {
+            const isChecked = await this.enabledCheckbox.isChecked();
+            if (isChecked) {
+                await this.enabledCheckbox.click();
+            }
         }
     }
 
@@ -353,6 +364,7 @@ export class McpToolsPage {
 
     /**
      * Create a server via API
+     * Note: enabled defaults to false in tests to prevent npm install attempts for non-existent packages
      */
     async createServerViaAPI(options: {
         name: string;
@@ -371,7 +383,7 @@ export class McpToolsPage {
                 path: options.path,
                 apiKey: options.apiKey,
                 requiresConfirmation: options.requiresConfirmation ?? true,
-                enabled: options.enabled ?? true,
+                enabled: options.enabled ?? false, // Default false in tests to prevent connection attempts
             },
         });
 
