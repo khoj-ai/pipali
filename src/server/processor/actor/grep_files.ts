@@ -10,6 +10,36 @@ import {
 } from '../confirmation';
 
 /**
+ * Binary and image file extensions to exclude from grep searches.
+ * These files are not text-searchable and would produce garbage output.
+ */
+const BINARY_EXTENSIONS = new Set([
+    // Images
+    '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.ico', '.webp', '.svg', '.tiff', '.tif',
+    '.psd', '.ai', '.eps', '.raw', '.cr2', '.nef', '.heic', '.heif', '.avif',
+    // Audio
+    '.mp3', '.wav', '.flac', '.aac', '.ogg', '.wma', '.m4a', '.aiff', '.opus',
+    // Video
+    '.mp4', '.avi', '.mov', '.mkv', '.wmv', '.flv', '.webm', '.m4v', '.mpeg', '.mpg', '.3gp',
+    // Archives
+    '.zip', '.tar', '.gz', '.bz2', '.xz', '.7z', '.rar', '.dmg', '.iso',
+    // Executables and libraries
+    '.exe', '.dll', '.so', '.dylib', '.bin', '.app', '.msi', '.deb', '.rpm',
+    // Compiled/bytecode
+    '.pyc', '.pyo', '.class', '.o', '.obj', '.wasm',
+    // Documents (binary formats)
+    '.pdf', '.doc', '.docx', '.xls', '.xlsx', '.ppt', '.pptx', '.odt', '.ods', '.odp',
+    // Fonts
+    '.ttf', '.otf', '.woff', '.woff2', '.eot',
+    // Database files
+    '.db', '.sqlite', '.sqlite3', '.mdb',
+    // Other binary formats
+    '.swf', '.fla', '.blend', '.fbx', '.glb', '.gltf',
+    // Lock files and caches (often large/binary-like)
+    '.lock', '.pack', '.idx',
+]);
+
+/**
  * Arguments for the grep_files tool.
  */
 export interface GrepFilesArgs {
@@ -51,6 +81,21 @@ export interface GrepResult {
 export interface GrepFilesOptions {
     /** Confirmation context for requesting user approval on sensitive paths */
     confirmationContext?: ConfirmationContext;
+}
+
+/**
+ * Check if a file should be excluded from grep based on its extension.
+ */
+function isBinaryFile(filePath: string): boolean {
+    const ext = path.extname(filePath).toLowerCase();
+    return BINARY_EXTENSIONS.has(ext);
+}
+
+/**
+ * Build ripgrep glob patterns to exclude binary file extensions.
+ */
+function buildBinaryExcludeGlobs(): string[] {
+    return Array.from(BINARY_EXTENSIONS).map(ext => `!*${ext}`);
 }
 
 /**
@@ -433,8 +478,11 @@ async function grepWithRipgrep(params: {
     const baseArgs = [...args, '--pcre2', params.pattern, path.resolve(params.searchPath)];
     const retryArgs = [...args, params.pattern, path.resolve(params.searchPath)];
 
-    // Apply globs (excludes)
-    const globExcludes = buildRipgrepGlobExcludes(excluded);
+    // Apply globs (directory excludes and binary file excludes)
+    const globExcludes = [
+        ...buildRipgrepGlobExcludes(excluded),
+        ...buildBinaryExcludeGlobs(),
+    ];
     for (const glob of globExcludes) {
         baseArgs.splice(baseArgs.length - 2, 0, `--glob=${glob}`);
         retryArgs.splice(retryArgs.length - 2, 0, `--glob=${glob}`);
@@ -608,6 +656,12 @@ async function grepWithFallbackWalker(params: {
         includeAppFolders: params.includeAppFolders,
         followSymlinks: params.followSymlinks,
     })) {
+        // Skip binary files by extension (fast check before reading)
+        if (isBinaryFile(filePath)) {
+            skippedBinary++;
+            continue;
+        }
+
         // Apply include filter if specified
         if (params.include) {
             const fileName = path.basename(filePath);
