@@ -89,6 +89,65 @@ export async function notifyConfirmationRequest(
 }
 
 /**
+ * Send a native OS notification when a task completes.
+ * Only sends if running in Tauri and window is not focused.
+ *
+ * @param userRequest - The original user request/query
+ * @param responseSnippet - A snippet of the agent's response
+ */
+export async function notifyTaskComplete(
+    userRequest?: string,
+    responseSnippet?: string
+): Promise<void> {
+    if (!isTauri()) {
+        return;
+    }
+
+    // Don't notify if window is focused - user can see the result
+    if (isWindowFocused()) {
+        return;
+    }
+
+    // Check permissions
+    if (notificationPermissionGranted === null) {
+        await initNotifications();
+    }
+
+    if (!notificationPermissionGranted) {
+        return;
+    }
+
+    try {
+        const { sendNotification } = await import('@tauri-apps/plugin-notification');
+
+        // Use user request as title (truncated), response snippet as body
+        const title = userRequest
+            ? truncate(userRequest, 50)
+            : 'Task Complete';
+
+        const body = responseSnippet
+            ? truncate(responseSnippet, 100)
+            : 'Your task has finished';
+
+        await sendNotification({ title, body });
+    } catch (err) {
+        console.warn('[notifications] Failed to send notification:', err);
+    }
+}
+
+/**
+ * Truncate text to a maximum length, adding ellipsis if needed.
+ */
+function truncate(text: string, maxLength: number): string {
+    // Normalize whitespace (collapse newlines and multiple spaces)
+    const normalized = text.replace(/\s+/g, ' ').trim();
+    if (normalized.length <= maxLength) {
+        return normalized;
+    }
+    return normalized.slice(0, maxLength - 1) + '…';
+}
+
+/**
  * Focus the app window.
  */
 export async function focusAppWindow(): Promise<void> {

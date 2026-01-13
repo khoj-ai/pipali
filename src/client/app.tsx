@@ -24,7 +24,7 @@ import { useFocusManagement, useModels, useSidecar } from "./hooks";
 // Utils
 import { formatToolCallsForSidebar } from "./utils/formatting";
 import { setApiBaseUrl, apiFetch } from "./utils/api";
-import { initNotifications, notifyConfirmationRequest, setupNotificationClickHandler } from "./utils/notifications";
+import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setupNotificationClickHandler } from "./utils/notifications";
 
 // Components
 import { Header, Sidebar, InputArea } from "./components/layout";
@@ -989,6 +989,14 @@ const App = () => {
                     const next = new Map(prev);
                     const existing = next.get(completedConvId);
                     const existingMessages = existing?.messages || [];
+
+                    // Notify user that task completed (if window not focused)
+                    // Get the user's original request from conversation state messages
+                    const userRequest = existingMessages
+                        .filter(m => m.role === 'user')
+                        .pop()?.content;
+                    notifyTaskComplete(userRequest, data.response);
+
                     next.set(completedConvId, {
                         isProcessing: false,
                         isPaused: false,
