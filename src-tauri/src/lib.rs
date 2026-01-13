@@ -9,6 +9,7 @@ use tauri_plugin_shell::{process::CommandChild, ShellExt};
 /// Sidecar state management
 pub struct SidecarState {
     pub child: Mutex<Option<CommandChild>>,
+    pub host: String,
     pub port: u16,
 }
 
@@ -16,7 +17,8 @@ impl Default for SidecarState {
     fn default() -> Self {
         Self {
             child: Mutex::new(None),
-            port: 6464,
+            host: std::env::var("PIPALI_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
+            port: std::env::var("PIPALI_PORT").unwrap_or_else(|_| "6464".to_string()).parse().unwrap_or(6464),
         }
     }
 }
@@ -31,6 +33,7 @@ fn get_app_data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 /// Start the sidecar process
 pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     let state: State<SidecarState> = app.state();
+    let host = state.host.clone();
     let port = state.port;
 
     // Check if already running
@@ -44,7 +47,7 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     std::fs::create_dir_all(&data_dir)
         .map_err(|e| format!("Failed to create app data dir: {}", e))?;
 
-    log::info!("[Sidecar] Starting on port {}...", port);
+    log::info!("[Sidecar] Starting on {}:{}...", host, port);
     log::info!("[Sidecar] Data directory: {:?}", data_dir);
 
     // Use NODE_USE_SYSTEM_CA=1 to ensure Bun uses the OS certificate store for SSL verification.
@@ -58,7 +61,7 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
             "--port",
             &port.to_string(),
             "--host",
-            "127.0.0.1",
+            &host,
         ])
         .env("NODE_USE_SYSTEM_CA", "1")
         .current_dir(data_dir);
@@ -107,8 +110,8 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
 }
 
 /// Wait for the sidecar to be ready by polling the health endpoint
-pub fn wait_for_sidecar_ready(port: u16) -> Result<(), String> {
-    let health_url = format!("http://127.0.0.1:{}/api/health", port);
+pub fn wait_for_sidecar_ready(host: &str, port: u16) -> Result<(), String> {
+    let health_url = format!("http://{}:{}/api/health", host, port);
     let max_attempts = 50; // 10 seconds total (50 * 200ms)
 
     // Create a ureq agent with a short timeout for health checks
@@ -218,6 +221,7 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             let state: State<SidecarState> = app.state();
+            let host = state.host.clone();
             let port = state.port;
 
             // Start sidecar during setup
@@ -227,7 +231,7 @@ pub fn run() {
             }
 
             // Wait for sidecar to be ready before showing the window
-            if let Err(e) = wait_for_sidecar_ready(port) {
+            if let Err(e) = wait_for_sidecar_ready(&host, port) {
                 log::error!("Sidecar not ready: {}", e);
                 // Don't fail - the UI will show connection error
             }
@@ -236,6 +240,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_sidecar_port,
+            commands::get_sidecar_host,
+            commands::get_sidecar_config,
             commands::restart_sidecar
         ])
         .build(tauri::generate_context!())

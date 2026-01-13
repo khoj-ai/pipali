@@ -1,12 +1,34 @@
 use std::time::Duration;
+use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::{start_sidecar, stop_sidecar, SidecarState};
+
+#[derive(Serialize)]
+pub struct SidecarConfig {
+    pub host: String,
+    pub port: u16,
+}
 
 /// Get the sidecar port (exposed to frontend)
 #[tauri::command]
 pub fn get_sidecar_port(state: State<'_, SidecarState>) -> u16 {
     state.port
+}
+
+/// Get the sidecar host (exposed to frontend)
+#[tauri::command]
+pub fn get_sidecar_host(state: State<'_, SidecarState>) -> String {
+    state.host.clone()
+}
+
+/// Get the sidecar config (host and port) - exposed to frontend
+#[tauri::command]
+pub fn get_sidecar_config(state: State<'_, SidecarState>) -> SidecarConfig {
+    SidecarConfig {
+        host: state.host.clone(),
+        port: state.port,
+    }
 }
 
 /// Restart the sidecar (exposed to frontend)

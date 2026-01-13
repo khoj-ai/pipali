@@ -23,7 +23,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self' tauri: asset: ipc: http://ipc.localhost; connect-src 'self' http://127.0.0.1:* ws://127.0.0.1:* tauri: asset: ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline' tauri: asset:; script-src 'self' 'unsafe-inline' tauri: asset:; img-src 'self' data: blob: tauri: asset: http://127.0.0.1:* https://*.googleusercontent.com https://www.gravatar.com; font-src 'self' data: tauri: asset:"
+      "csp": "default-src 'self' tauri: asset: ipc: http://ipc.localhost; connect-src 'self' http: ws: tauri: asset: ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline' tauri: asset:; script-src 'self' 'unsafe-inline' tauri: asset:; img-src 'self' data: blob: tauri: asset: http: https://*.googleusercontent.com https://www.gravatar.com; font-src 'self' data: tauri: asset:"
     }
   },
   "bundle": {
