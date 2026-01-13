@@ -1,6 +1,6 @@
 ---
 name: document-creator
-description: Create and edit professional Word (.docx) and Excel (.xlsx) documents. Use when users need to generate reports, memos, proposals, financial models, data exports, invoices, or modify existing Office documents. Supports formatted text, headings, tables, lists, images, formulas, charts, and tracked changes.
+description: Create and edit professional Word (.docx) and Excel (.xlsx) documents. Use to create reports, memos, proposals, financial models, invoices, or modify existing Office documents. Supports rich text, tables, lists, images, formulas, charts, and tracked changes.
 ---
 
 # Document Creator
@@ -33,7 +33,9 @@ Use `scripts/docx_create.ts` to create new Word documents from a JSON specificat
 
 ### First-Time Setup
 
-The Word creation script requires the `docx` npm package. Install once:
+1. Install Bun and UV on first run if not already available on machine.
+
+2. The Word creation script requires the `docx` npm package. Install once:
 
 ```bash
 cd ~/.pipali/skills/document-creator/scripts && bun install
@@ -304,10 +306,14 @@ cd ~/.pipali/skills/document-creator/scripts && bun install
 ```
 
 ### "bun not found"
-Install Bun: `curl -fsSL https://bun.sh/install | bash`
+Install Bun:
+- Unix: `curl -fsSL https://bun.sh/install | bash`
+- Windows: `irm https://bun.sh/install.ps1 | iex`
 
 ### "uvx not found"
-Install uv: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+Install uv:
+- Unix: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+- Windows: `irm https://astral.sh/uv/install.ps1 | iex"`
 
 ### LibreOffice not found (for xlsx_recalc.py)
 The recalc script is optional. Install LibreOffice for formula verification:
