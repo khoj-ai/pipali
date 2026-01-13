@@ -260,18 +260,34 @@ async function main() {
   }
 
   // Graceful shutdown handlers to prevent database corruption
+  let shutdownStarted = false;
   const shutdown = async (signal: string) => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
+
     log.info(`\nReceived ${signal}, shutting down gracefully...`);
-    server.stop();
-    await stopAutomationSystem();
-    await closeMcpClients();
-    await closeDatabase();
-    log.info('Shutdown complete.');
-    process.exit(0);
+
+    const forceExitTimer = setTimeout(() => {
+      log.error('Graceful shutdown timed out, forcing exit.');
+      process.exit(1);
+    }, 8_000);
+
+    try {
+      server.stop();
+      await stopAutomationSystem();
+      await closeMcpClients();
+      await closeDatabase();
+      log.info('Shutdown complete.');
+      process.exit(0);
+    } finally {
+      clearTimeout(forceExitTimer);
+    }
   };
 
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGHUP', () => void shutdown('SIGHUP'));
+  process.on('SIGQUIT', () => void shutdown('SIGQUIT'));
 }
 
 main();

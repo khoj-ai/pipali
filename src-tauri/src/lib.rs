@@ -1,6 +1,7 @@
 mod commands;
 
 use std::sync::Mutex;
+use std::time::Instant;
 use std::time::Duration;
 use tauri::{AppHandle, Manager, State};
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
@@ -143,6 +144,27 @@ pub fn stop_sidecar(app: &AppHandle) -> Result<(), String> {
 
     if let Some(child) = child_guard.take() {
         log::info!("[Sidecar] Stopping...");
+
+        let pid = child.pid();
+
+        #[cfg(unix)]
+        {
+            if let Err(e) = send_sigterm(pid) {
+                log::warn!("[Sidecar] Failed to send SIGTERM (pid={}): {}", pid, e);
+            }
+
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while Instant::now() < deadline {
+                if !is_process_alive(pid) {
+                    log::info!("[Sidecar] Stopped gracefully (pid={})", pid);
+                    return Ok(());
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+
+            log::warn!("[Sidecar] Graceful stop timed out, forcing kill (pid={})", pid);
+        }
+
         child
             .kill()
             .map_err(|e| format!("Failed to kill sidecar: {}", e))?;
@@ -150,6 +172,28 @@ pub fn stop_sidecar(app: &AppHandle) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+#[cfg(unix)]
+fn send_sigterm(pid: u32) -> Result<(), String> {
+    let status = std::process::Command::new("kill")
+        .args(["-TERM", &pid.to_string()])
+        .status()
+        .map_err(|e| e.to_string())?;
+
+    if status.success() {
+        Ok(())
+    } else {
+        Err(format!("kill exited with status {}", status))
+    }
+}
+
+#[cfg(unix)]
+fn is_process_alive(pid: u32) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", &pid.to_string()])
+        .status()
+        .is_ok_and(|s| s.success())
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -216,8 +260,11 @@ pub fn run() {
                     }
                 }
                 tauri::RunEvent::Exit => {
-                    // Final cleanup when app is exiting
-                    log::info!("[App] Exiting...");
+                    // Final cleanup when app is exiting (best-effort).
+                    log::info!("[App] Exiting, stopping sidecar...");
+                    if let Err(e) = stop_sidecar(app_handle) {
+                        log::error!("Error stopping sidecar on exit: {}", e);
+                    }
                 }
                 _ => {}
             }
