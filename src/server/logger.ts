@@ -71,6 +71,23 @@ function redactValue(value: unknown): unknown {
     if (Array.isArray(value)) {
         return value.map(redactValue);
     }
+    // Handle Error objects specially since their properties aren't enumerable
+    if (value instanceof Error) {
+        const serialized: Record<string, unknown> = {
+            type: value.constructor.name,
+            message: redactString(value.message),
+            stack: value.stack ? redactString(value.stack) : undefined,
+        };
+        // Include any additional enumerable properties (e.g., cause, code)
+        for (const [key, val] of Object.entries(value)) {
+            serialized[key] = redactValue(val);
+        }
+        // Handle error cause chain
+        if ('cause' in value && value.cause) {
+            serialized.cause = redactValue(value.cause);
+        }
+        return serialized;
+    }
     if (typeof value === 'object' && value !== null) {
         const result: Record<string, unknown> = {};
         for (const [key, val] of Object.entries(value)) {
