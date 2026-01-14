@@ -138,6 +138,49 @@
     margin: 6px 0;
 }
 
+/* Task list checkboxes (GitHub-style checkboxes from remarkGfm) */
+.message-content .contains-task-list {
+    list-style: none;
+    padding-left: 0;
+}
+
+.message-content .task-list-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.message-content .task-list-item > input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    margin: 3px 0 0 0;
+    border: 2px solid var(--color-text-secondary);
+    border-radius: 3px;
+    background: transparent;
+    cursor: default;
+    position: relative;
+}
+
+.message-content .task-list-item > input[type="checkbox"]:checked {
+    background: var(--color-success);
+    border-color: var(--color-success);
+}
+
+.message-content .task-list-item > input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 1px;
+    width: 4px;
+    height: 8px;
+    border: solid white;
+    border-width: 0 2px 2px 0;
+    transform: rotate(45deg);
+}
+
 .message-content a {
     color: var(--color-link);
     text-decoration: none;
