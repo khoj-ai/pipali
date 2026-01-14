@@ -1,10 +1,41 @@
 mod commands;
 
 use std::sync::Mutex;
-use std::time::Instant;
 use std::time::Duration;
-use tauri::{AppHandle, Manager, State};
+use std::time::Instant;
+use tauri::menu::{MenuBuilder, MenuItemBuilder};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
+
+/// Show the app in the dock and Cmd+Tab switcher (macOS)
+#[cfg(target_os = "macos")]
+fn show_in_dock(app: &AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Regular);
+}
+
+/// Hide the app from the dock and Cmd+Tab switcher (macOS)
+#[cfg(target_os = "macos")]
+fn hide_from_dock(app: &AppHandle) {
+    let _ = app.set_activation_policy(tauri::ActivationPolicy::Accessory);
+}
+
+#[cfg(not(target_os = "macos"))]
+fn show_in_dock(_app: &AppHandle) {}
+
+#[cfg(not(target_os = "macos"))]
+fn hide_from_dock(_app: &AppHandle) {}
+
+/// Show the main window and emit an event to focus the chat input
+fn show_window(app: &AppHandle) {
+    show_in_dock(app);
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 /// Sidecar state management
 pub struct SidecarState {
@@ -207,15 +238,20 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        log::info!("[App] Global shortcut triggered");
+                        show_window(app);
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             // When a second instance is launched, focus the existing window
             log::info!("[App] Second instance detected, focusing existing window");
-            if let Some(window) = app.get_webview_window("main") {
-                // Unminimize if minimized, then show and focus
-                let _ = window.unminimize();
-                let _ = window.show();
-                let _ = window.set_focus();
-            }
+            show_window(app);
         }))
         .manage(SidecarState::default())
         .setup(|app| {
@@ -236,6 +272,60 @@ pub fn run() {
                 // Don't fail - the UI will show connection error
             }
 
+            // Setup system tray menu
+            let show_item = MenuItemBuilder::with_id("show", "Show Pipali").build(app)?;
+            let quit_item = MenuItemBuilder::with_id("quit", "Quit").build(app)?;
+            let tray_menu = MenuBuilder::new(app)
+                .item(&show_item)
+                .separator()
+                .item(&quit_item)
+                .build()?;
+
+            // Get the tray icon created from tauri.conf.json and set its menu
+            if let Some(tray) = app.tray_by_id("main-tray") {
+                tray.set_menu(Some(tray_menu))?;
+
+                // Handle tray icon click - toggle window visibility
+                let app_handle = app.handle().clone();
+                tray.on_tray_icon_event(move |_tray, event| {
+                    if let TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up,
+                        ..
+                    } = event
+                    {
+                        if let Some(window) = app_handle.get_webview_window("main") {
+                            if window.is_visible().unwrap_or(false) {
+                                let _ = window.hide();
+                                hide_from_dock(&app_handle);
+                            } else {
+                                show_window(&app_handle);
+                            }
+                        }
+                    }
+                });
+
+                // Handle tray menu item clicks
+                let app_handle = app.handle().clone();
+                tray.on_menu_event(move |_tray, event| {
+                    match event.id().as_ref() {
+                        "show" => {
+                            show_window(&app_handle);
+                        }
+                        "quit" => {
+                            log::info!("[App] Quit requested from tray menu");
+                            app_handle.exit(0);
+                        }
+                        _ => {}
+                    }
+                });
+            }
+
+            // Register global shortcut: Alt+Space
+            let shortcut: Shortcut = "Alt+Space".parse().unwrap();
+            app.global_shortcut().register(shortcut)?;
+            log::info!("[App] Global shortcut Alt+Space registered");
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -250,14 +340,16 @@ pub fn run() {
             match event {
                 tauri::RunEvent::WindowEvent {
                     label,
-                    event: tauri::WindowEvent::CloseRequested { .. },
+                    event: tauri::WindowEvent::CloseRequested { api, .. },
                     ..
                 } => {
-                    // Window close button clicked - stop sidecar before window closes
-                    log::info!("[App] Window '{}' close requested, stopping sidecar...", label);
-                    if let Err(e) = stop_sidecar(app_handle) {
-                        log::error!("Error stopping sidecar on window close: {}", e);
+                    // Hide window to tray instead of closing
+                    api.prevent_close();
+                    if let Some(window) = app_handle.get_webview_window(&label) {
+                        let _ = window.hide();
                     }
+                    hide_from_dock(app_handle);
+                    log::info!("[App] Window '{}' hidden to tray", label);
                 }
                 tauri::RunEvent::ExitRequested { .. } => {
                     // Graceful shutdown on app exit (Cmd+Q, etc.)
