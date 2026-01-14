@@ -39,6 +39,18 @@ mock.module(dbSchemaModule, () => {
         McpServer: { $inferSelect: {} },
         Automation: { $inferSelect: {} },
         AutomationExecution: { $inferSelect: {} },
+        // Sandbox settings table with column references
+        SandboxSettings: {
+            id: 'id',
+            userId: 'userId',
+            enabled: 'enabled',
+            allowedWritePaths: 'allowedWritePaths',
+            deniedWritePaths: 'deniedWritePaths',
+            deniedReadPaths: 'deniedReadPaths',
+            allowedDomains: 'allowedDomains',
+            allowLocalBinding: 'allowLocalBinding',
+            $inferSelect: {},
+        },
         // Web search/scraper tables with column references for queries
         WebSearchProvider: {
             enabled: 'enabled',

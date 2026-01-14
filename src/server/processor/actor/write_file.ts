@@ -5,6 +5,7 @@ import {
     type ConfirmationContext,
     requestOperationConfirmation,
 } from '../confirmation';
+import { isPathWithinAllowedWrite } from '../../sandbox';
 
 /**
  * Arguments for the write_file tool.
@@ -81,8 +82,13 @@ export async function writeFile(
         const parentDir = path.dirname(absolutePath);
         await fs.mkdir(parentDir, { recursive: true });
 
-        // Request user confirmation if confirmation context is provided
-        if (options?.confirmationContext) {
+        // Check if path is within allowed write directories (skip confirmation if so)
+        const skipConfirmation = isPathWithinAllowedWrite(absolutePath);
+
+        // Request user confirmation if:
+        // 1. Path is NOT within allowed write directories, AND
+        // 2. Confirmation context is provided
+        if (!skipConfirmation && options?.confirmationContext) {
             const lineCount = content.split('\n').length;
             const byteSize = Buffer.byteLength(content, 'utf-8');
             const action = exists ? 'overwrite' : 'create';

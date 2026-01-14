@@ -5,11 +5,12 @@ import { PDFLoader } from '@langchain/community/document_loaders/fs/pdf';
 import { DocxLoader } from '@langchain/community/document_loaders/fs/docx';
 import { PPTXLoader } from '@langchain/community/document_loaders/fs/pptx';
 import * as XLSX from 'xlsx';
-import { isSensitivePath, getSensitivePathReason } from '../../security';
+import { getSensitivePathReason } from '../../security';
 import {
     type ConfirmationContext,
     requestOperationConfirmation,
 } from '../confirmation';
+import { isPathDeniedForRead } from '../../sandbox';
 
 /**
  * Arguments for the read_file tool.
@@ -196,9 +197,10 @@ export async function readFile(
             ? expandedPath
             : path.resolve(os.homedir(), expandedPath);
 
-        // Check if path is sensitive and request confirmation if needed
-        if (isSensitivePath(absolutePath) && options?.confirmationContext) {
-            const reason = getSensitivePathReason(absolutePath) || 'sensitive file';
+        // Check if path is in denied read paths (configurable, defaults to sensitive paths)
+        // and request confirmation if needed
+        if (isPathDeniedForRead(absolutePath) && options?.confirmationContext) {
+            const reason = getSensitivePathReason(absolutePath) || 'protected file';
             const confirmResult = await requestOperationConfirmation(
                 'read_sensitive_file',
                 absolutePath,
@@ -215,7 +217,7 @@ export async function readFile(
                     query,
                     file: filePath,
                     uri: filePath,
-                    compiled: `File read cancelled: ${confirmResult.denialReason || 'User denied access to sensitive file'}`,
+                    compiled: `File read cancelled: ${confirmResult.denialReason || 'User denied access to protected file'}`,
                 };
             }
         }

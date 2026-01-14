@@ -356,3 +356,23 @@ export const PlatformAuth = pgTable('platform_auth', {
     platformUrl: text('platform_url'),  // Which platform instance
     ...dbBaseModel,
 });
+
+// Sandbox Settings for Shell Command Execution
+// Configures OS-enforced sandboxing (Seatbelt on macOS, bubblewrap on Linux)
+export const SandboxSettings = pgTable('sandbox_settings', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }).unique(),
+    // Whether sandbox mode is enabled
+    enabled: boolean('enabled').default(true).notNull(),
+    // Paths where writes are allowed without confirmation
+    allowedWritePaths: jsonb('allowed_write_paths').$type<string[]>().default([]).notNull(),
+    // Paths that are always denied for writes (e.g., ~/.ssh)
+    deniedWritePaths: jsonb('denied_write_paths').$type<string[]>().default([]).notNull(),
+    // Paths that always require confirmation for reads (defaults from isSensitivePath)
+    deniedReadPaths: jsonb('denied_read_paths').$type<string[]>().default([]).notNull(),
+    // Network: domains allowed for sandboxed commands
+    allowedDomains: jsonb('allowed_domains').$type<string[]>().default(['*']).notNull(),
+    // Whether to allow local network binding in sandbox
+    allowLocalBinding: boolean('allow_local_binding').default(true).notNull(),
+    ...dbBaseModel,
+});

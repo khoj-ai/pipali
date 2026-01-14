@@ -17,6 +17,7 @@ import { startAutomationSystem, stopAutomationSystem } from "./automation";
 import { loadEnabledMcpServers, closeMcpClients } from "./processor/mcp";
 import { configureAuth, isAuthenticated, getPlatformUserInfo } from "./auth";
 import { createChildLogger } from './logger';
+import { initializeSandbox, shutdownSandbox } from './sandbox';
 
 const log = createChildLogger({ component: 'server' });
 
@@ -187,6 +188,9 @@ async function main() {
     }
     await initializeUserContext(userInfo);
 
+    // Initialize sandbox runtime (for secure shell command execution)
+    await initializeSandbox();
+
     // Start automation system (cron scheduler, file watchers)
     await startAutomationSystem();
 
@@ -276,6 +280,7 @@ async function main() {
       server.stop();
       await stopAutomationSystem();
       await closeMcpClients();
+      await shutdownSandbox();
       await closeDatabase();
       log.info('Shutdown complete.');
       process.exit(0);

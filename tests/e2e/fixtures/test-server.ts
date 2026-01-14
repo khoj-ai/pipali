@@ -63,6 +63,8 @@ export class TestServer {
             PIPALI_ANON_MODE: 'true',
             // Use isolated skills directory for testing
             PIPALI_SKILLS_DIR: this.skillsDir,
+            // Disable sandbox for e2e tests so confirmation dialogs work as expected
+            PIPALI_SANDBOX_DISABLED: 'true',
         };
 
         // Pass mock scenarios if provided

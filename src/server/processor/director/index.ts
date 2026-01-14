@@ -207,6 +207,13 @@ REQUIRED:
                         ? 'Whether the command is read-only (no side effects, e.g., Get-ChildItem, Get-Content), write-only (creates new state without reading, e.g., New-Item, Set-Content), or read-write (reads and modifies state, e.g., Move-Item, Remove-Item, Copy-Item).'
                         : 'Whether the command is read-only (no side effects, e.g., ls, cat, grep, find), write-only (creates new state without reading, e.g., mkdir, touch, echo > newfile), or read-write (reads and modifies state, e.g., sed -i, mv, rm, apt install).',
                 },
+                execution_mode: {
+                    type: 'string',
+                    enum: ['sandbox', 'direct'],
+                    description: process.platform === 'win32'
+                        ? 'Execution mode. Only "direct" is available on Windows (requires user confirmation).'
+                        : 'Execution mode: "sandbox" runs in OS-enforced sandbox (no confirmation needed, but restricted to allowed paths like /tmp/pipali and ~/.pipali). "direct" runs without sandbox (requires user confirmation, but has full access). Default: sandbox if available.',
+                },
                 cwd: {
                     type: 'string',
                     description: 'Optional working directory for command execution (absolute path or relative to home). Defaults to home directory.',

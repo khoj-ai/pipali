@@ -6,6 +6,7 @@ import {
     type ConfirmationContext,
     requestOperationConfirmation,
 } from '../confirmation';
+import { isPathWithinAllowedWrite } from '../../sandbox';
 
 /**
  * Arguments for the edit_file tool.
@@ -157,8 +158,13 @@ export async function editFile(
             newContent = content.slice(0, index) + new_string + content.slice(index + old_string.length);
         }
 
-        // Request user confirmation if confirmation context is provided
-        if (options?.confirmationContext) {
+        // Check if path is within allowed write directories (skip confirmation if so)
+        const skipConfirmation = isPathWithinAllowedWrite(resolvedPath);
+
+        // Request user confirmation if:
+        // 1. Path is NOT within allowed write directories, AND
+        // 2. Confirmation context is provided
+        if (!skipConfirmation && options?.confirmationContext) {
             const confirmResult = await requestOperationConfirmation(
                 'edit_file',
                 file_path,

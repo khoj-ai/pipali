@@ -4,6 +4,11 @@ import {
     type ConfirmationContext,
     requestOperationConfirmation,
 } from '../confirmation';
+import {
+    isSandboxActive,
+    wrapCommandWithSandbox,
+    annotateStderrWithSandboxFailures,
+} from '../../sandbox';
 
 /**
  * Operation type indicating whether command modifies state
@@ -12,6 +17,13 @@ import {
  * - read-write: Reads and modifies state (e.g., sed -i, mv, rm)
  */
 export type ShellOperationType = 'read-only' | 'write-only' | 'read-write';
+
+/**
+ * Execution mode for shell commands
+ * - sandbox: Run in OS-enforced sandbox (macOS/Linux only), skips user confirmation
+ * - direct: Run directly without sandbox, requires user confirmation
+ */
+export type ShellExecutionMode = 'sandbox' | 'direct';
 
 /**
  * Arguments for the shell_command tool.
@@ -23,6 +35,13 @@ export interface ShellCommandArgs {
     command: string;
     /** Whether the command is read-only (no side effects) or read-write (modifies state) */
     operation_type: ShellOperationType;
+    /**
+     * Execution mode for the command:
+     * - 'sandbox': Run in OS-enforced sandbox (skips confirmation, but restricted access)
+     * - 'direct': Run directly (requires user confirmation, but full access)
+     * Defaults to 'sandbox' if available, otherwise 'direct'.
+     */
+    execution_mode?: ShellExecutionMode;
     /** Optional working directory for command execution (defaults to home directory) */
     cwd?: string;
     /** Optional timeout in milliseconds (defaults to 30000ms / 30 seconds) */
@@ -126,11 +145,29 @@ export async function shellCommand(
         MAX_TIMEOUT_MS
     );
 
-    // Request user confirmation - this is a high-risk operation
-    // Confirmation is tracked per operation_type (read-only, write-only, read-write)
-    // If user approves a read-only command with "don't ask again", future read-only commands won't ask
-    // but write-only or read-write commands will still require confirmation
-    if (options?.confirmationContext) {
+    // Check if sandbox is available (enabled AND supported platform)
+    const sandboxAvailable = isSandboxActive();
+    const isWindows = process.platform === 'win32';
+
+    // Determine execution mode:
+    // - If explicitly set to 'direct', use direct mode (requires confirmation)
+    // - If explicitly set to 'sandbox' but sandbox not available, fall back to direct
+    // - Default to sandbox if available, otherwise direct
+    const requestedMode = args.execution_mode;
+    const useSandbox = requestedMode === 'sandbox'
+        ? sandboxAvailable  // Requested sandbox, use if available
+        : requestedMode === 'direct'
+            ? false  // Explicitly requested direct mode
+            : sandboxAvailable;  // Default: use sandbox if available
+
+    // Log if sandbox was requested but unavailable
+    if (requestedMode === 'sandbox' && !sandboxAvailable) {
+        console.log(`[Shell] Sandbox mode requested but unavailable, falling back to direct mode (requires confirmation)`);
+    }
+
+    // Request user confirmation if using direct mode (not sandboxed)
+    // When using sandbox, security is enforced by the OS - skip confirmation
+    if (!useSandbox && options?.confirmationContext) {
         const confirmResult = await requestOperationConfirmation(
             'execute_command',
             workingDir,
@@ -163,17 +200,33 @@ export async function shellCommand(
     }
 
     try {
-        console.log(`[Shell] Executing: ${command} in ${workingDir}`);
+        // Determine shell command based on platform and sandbox mode
+        let shellCmd: string[];
 
-        // Determine shell based on platform
-        const isWindows = process.platform === 'win32';
-        const shellCmd = isWindows
-            ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command]
-            : ['/bin/bash', '-c', command];
+        if (isWindows) {
+            // Windows: no sandbox support, use PowerShell directly
+            shellCmd = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command];
+            console.log(`[Shell] Executing (no sandbox): ${command} in ${workingDir}`);
+        } else if (useSandbox) {
+            // Unix with sandbox: wrap the command
+            const sandboxedCommand = await wrapCommandWithSandbox(command);
+            shellCmd = ['/bin/bash', '-c', sandboxedCommand];
+            console.log(`[Shell] Executing (sandboxed): ${command} in ${workingDir}`);
+        } else {
+            // Unix without sandbox
+            shellCmd = ['/bin/bash', '-c', command];
+            console.log(`[Shell] Executing (no sandbox): ${command} in ${workingDir}`);
+        }
+
+        // Set up environment - use /tmp/pipali as TMPDIR for sandboxed commands
+        const env = useSandbox
+            ? { ...process.env, TMPDIR: '/tmp/pipali' }
+            : process.env;
 
         const proc = Bun.spawn({
             cmd: shellCmd,
             cwd: workingDir,
+            env,
             stdout: 'pipe',
             stderr: 'pipe',
             timeout: effectiveTimeout,
@@ -181,7 +234,25 @@ export async function shellCommand(
 
         const exitCode = await proc.exited;
         const stdout = (await new Response(proc.stdout).text()).trim();
-        const stderr = (await new Response(proc.stderr).text()).trim();
+        let stderr = (await new Response(proc.stderr).text()).trim();
+        const originalStderr = stderr;
+
+        // Annotate stderr with sandbox violation information if running in sandbox mode
+        // This uses sandbox-runtime's built-in violation detection (reads macOS sandbox logs)
+        if (useSandbox && stderr) {
+            stderr = annotateStderrWithSandboxFailures(command, stderr);
+        }
+
+        // Detect sandbox violations:
+        // 1. Check if annotateStderrWithSandboxFailures added violation info (most reliable on macOS)
+        // 2. Fall back to pattern matching for common sandbox error messages
+        const annotationAdded = stderr !== originalStderr;
+        const hasViolationPatterns = exitCode !== 0 && (
+            originalStderr.includes('Operation not permitted') ||
+            originalStderr.includes('EPERM') ||
+            originalStderr.includes('Permission denied')
+        );
+        const isSandboxViolation = useSandbox && (annotationAdded || hasViolationPatterns);
 
         // Build output message
         let output = '';
@@ -204,7 +275,15 @@ export async function shellCommand(
             output += `\n\n[Exit code: ${exitCode}]`;
         }
 
-        console.log(`[Shell] Command completed with exit code ${exitCode}`);
+        // Add sandbox violation notice if detected
+        if (isSandboxViolation) {
+            output += `\n\n[Sandbox violation: The command attempted an operation outside the allowed sandbox paths. ` +
+                `Write operations are only allowed in /tmp/pipali and ~/.pipali. ` +
+                `Use execution_mode: "direct" if you need full filesystem access (requires user confirmation).]`;
+            console.error(`[Shell] Sandbox violation detected for command: ${command}`);
+        }
+
+        console.log(`[Shell] Command completed with exit code ${exitCode}${isSandboxViolation ? ' (sandbox violation)' : ''}`);
 
         return {
             query,

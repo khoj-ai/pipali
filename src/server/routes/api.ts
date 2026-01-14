@@ -19,6 +19,12 @@ import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, update
 import { loadUserContext, saveUserContext } from '../user-context';
 import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
+import {
+    getSandboxConfig,
+    updateSandboxConfig,
+    isSandboxEnabled,
+    isSandboxSupported,
+} from '../sandbox';
 
 const log = createChildLogger({ component: 'api' });
 
@@ -551,6 +557,50 @@ api.delete('/skills/:name', async (c) => {
 
     log.info(`✅ Deleted skill "${name}"`);
     return c.json({ success: true });
+});
+
+// Sandbox settings endpoints
+
+// Get sandbox status (enabled, supported, platform)
+api.get('/sandbox/status', async (c) => {
+    return c.json({
+        enabled: isSandboxEnabled(),
+        supported: isSandboxSupported(),
+        platform: process.platform,
+    });
+});
+
+// Get sandbox settings
+api.get('/user/sandbox', async (c) => {
+    try {
+        const config = getSandboxConfig();
+        return c.json(config);
+    } catch (err) {
+        log.error({ err }, 'Failed to load sandbox settings');
+        return c.json({ error: 'Failed to load sandbox settings' }, 500);
+    }
+});
+
+// Update sandbox settings
+const sandboxSettingsSchema = z.object({
+    enabled: z.boolean().optional(),
+    allowedWritePaths: z.array(z.string()).optional(),
+    deniedWritePaths: z.array(z.string()).optional(),
+    deniedReadPaths: z.array(z.string()).optional(),
+    allowedDomains: z.array(z.string()).optional(),
+    allowLocalBinding: z.boolean().optional(),
+});
+
+api.put('/user/sandbox', zValidator('json', sandboxSettingsSchema), async (c) => {
+    try {
+        const body = c.req.valid('json');
+        await updateSandboxConfig(body);
+        log.info('Sandbox settings updated');
+        return c.json({ success: true });
+    } catch (err) {
+        log.error({ err }, 'Failed to save sandbox settings');
+        return c.json({ error: 'Failed to save sandbox settings' }, 500);
+    }
 });
 
 // Mount the automations router
