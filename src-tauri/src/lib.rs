@@ -250,9 +250,18 @@ pub fn run() {
                 })
                 .build(),
         )
-        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+        .plugin(tauri_plugin_deep_link::init())
+        .plugin(tauri_plugin_single_instance::init(|app, argv, _cwd| {
             // When a second instance is launched, focus the existing window
             log::info!("[App] Second instance detected, focusing existing window");
+            // Check if the second instance was launched with a deep link URL
+            // The deep-link feature of single-instance plugin passes URLs in argv
+            for arg in argv.iter().skip(1) {
+                if arg.starts_with("pipali://") {
+                    log::info!("[App] Deep link from second instance: {}", arg);
+                    let _ = app.emit("deep-link", arg.clone());
+                }
+            }
             show_window(app);
         }))
         .manage(SidecarState::default())
@@ -327,6 +336,20 @@ pub fn run() {
             let shortcut: Shortcut = "Alt+Space".parse().unwrap();
             app.global_shortcut().register(shortcut)?;
             log::info!("[App] Global shortcut Alt+Space registered");
+
+            // Handle deep links when app is already running (macOS)
+            #[cfg(any(target_os = "macos", target_os = "ios"))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                let app_handle = app.handle().clone();
+                app.deep_link().on_open_url(move |event| {
+                    for url in event.urls() {
+                        log::info!("[App] Deep link received: {}", url);
+                        let _ = app_handle.emit("deep-link", url.to_string());
+                        show_window(&app_handle);
+                    }
+                });
+            }
 
             Ok(())
         })

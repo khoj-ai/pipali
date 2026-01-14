@@ -147,3 +147,28 @@ export async function openFile(filePath: string): Promise<boolean> {
         return false;
     }
 }
+
+/**
+ * Listen for deep link events from Tauri.
+ * Deep links are custom URL schemes (e.g., pipali://chat/conversationId) that
+ * can be used to navigate the app to specific locations.
+ *
+ * @param callback - Function to call when a deep link is received, with the URL string
+ * @returns Cleanup function to unsubscribe from the event
+ */
+export async function listenForDeepLinks(callback: (url: string) => void): Promise<() => void> {
+    if (!isTauri()) {
+        return () => {};
+    }
+
+    try {
+        const { listen } = await import('@tauri-apps/api/event');
+        const unlisten = await listen<string>('deep-link', (event) => {
+            callback(event.payload);
+        });
+        return unlisten;
+    } catch (err) {
+        console.warn('[tauri] Failed to setup deep link listener:', err);
+        return () => {};
+    }
+}

@@ -24,8 +24,8 @@ import { useFocusManagement, useModels, useSidecar } from "./hooks";
 // Utils
 import { formatToolCallsForSidebar } from "./utils/formatting";
 import { setApiBaseUrl, apiFetch } from "./utils/api";
-import { initNotifications, notifyConfirmationRequest, notifyTaskComplete } from "./utils/notifications";
-import { onWindowShown } from "./utils/tauri";
+import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupFocusNavigationListener } from "./utils/notifications";
+import { onWindowShown, listenForDeepLinks } from "./utils/tauri";
 
 // Components
 import { Header, Sidebar, InputArea } from "./components/layout";
@@ -112,6 +112,18 @@ const App = () => {
     );
     // Track if we have a pending query that needs to wait for history to load
     const pendingQueryAfterHistoryRef = useRef<string | null>(null);
+    // Track pending confirmations for window-shown navigation (avoids stale closure)
+    const pendingConfirmationsRef = useRef<Map<string, ConfirmationRequest[]>>(new Map());
+    const automationConfirmationsRef = useRef<AutomationPendingConfirmation[]>([]);
+
+    // Keep confirmation refs in sync with state (for window-shown handler)
+    useEffect(() => {
+        pendingConfirmationsRef.current = pendingConfirmations;
+    }, [pendingConfirmations]);
+
+    useEffect(() => {
+        automationConfirmationsRef.current = automationConfirmations;
+    }, [automationConfirmations]);
 
     // Hooks
     const { textareaRef, scheduleTextareaFocus } = useFocusManagement();
@@ -142,16 +154,77 @@ const App = () => {
         };
     }, []);
 
-    // Initialize native OS notifications
+    // Initialize native OS notifications and register click handler
     useEffect(() => {
         initNotifications();
-    }, []);
 
-    // Focus chat input when window is shown via shortcut or tray (Tauri desktop app only)
+        // Register click handler for web notifications (navigates to conversation)
+        // This handler is also used by the focus navigation listener for Tauri notifications
+        setNotificationClickHandler((convId) => {
+            setCurrentPage('chat');
+            setConversationId(convId);
+            conversationIdRef.current = convId;
+            scheduleTextareaFocus();
+        });
+
+        // Setup focus listener for Tauri notification click navigation workaround
+        // When user clicks a Tauri notification, the app gains focus and this listener
+        // will navigate to the pending conversation
+        setupFocusNavigationListener();
+
+        return () => {
+            setNotificationClickHandler(null);
+        };
+    }, [scheduleTextareaFocus]);
+
+    // Helper function to parse deep link URL and navigate to conversation
+    const handleDeepLink = useCallback((url: string) => {
+        // Parse pipali://chat/{conversationId} format
+        const match = url.match(/^pipali:\/\/chat\/([a-zA-Z0-9-]+)/);
+        if (match) {
+            const convId = match[1];
+            setCurrentPage('chat');
+            setConversationId(convId);
+            conversationIdRef.current = convId;
+            scheduleTextareaFocus();
+        }
+    }, [scheduleTextareaFocus]);
+
+    // Listen for deep link events from Tauri (external pipali:// URLs)
+    useEffect(() => {
+        let unlisten: (() => void) | undefined;
+
+        listenForDeepLinks(handleDeepLink).then((unlistenFn) => {
+            unlisten = unlistenFn;
+        });
+
+        return () => {
+            unlisten?.();
+        };
+    }, [handleDeepLink]);
+
+    // Focus chat input and navigate to pending confirmations when window is shown via shortcut/tray (Tauri)
     useEffect(() => {
         let unlisten: (() => void) | undefined;
 
         onWindowShown(() => {
+            // Check for pending confirmations and navigate accordingly
+            // Use refs to get current values (avoids stale closure issue)
+            const chatConfirmations = pendingConfirmationsRef.current;
+            const autoConfirmations = automationConfirmationsRef.current;
+
+            const firstChatConfirmation = Array.from(chatConfirmations.entries())[0];
+            if (firstChatConfirmation) {
+                const [convId] = firstChatConfirmation;
+                setCurrentPage('chat');
+                setConversationId(convId);
+                conversationIdRef.current = convId;
+            } else if (autoConfirmations.length > 0 && autoConfirmations[0]?.conversationId) {
+                // Navigate to the first automation's conversation
+                setCurrentPage('chat');
+                setConversationId(autoConfirmations[0].conversationId);
+                conversationIdRef.current = autoConfirmations[0].conversationId;
+            }
             scheduleTextareaFocus();
         }).then((unlistenFn) => {
             unlisten = unlistenFn;
@@ -289,7 +362,23 @@ const App = () => {
             const res = await apiFetch('/api/automations/confirmations/pending');
             if (res.ok) {
                 const data = await res.json();
-                setAutomationConfirmations(data.confirmations || []);
+                const newConfirmations: AutomationPendingConfirmation[] = data.confirmations || [];
+
+                // Notify for any new confirmations that weren't in the previous state
+                setAutomationConfirmations(prev => {
+                    const prevIds = new Set(prev.map(c => c.id));
+                    for (const confirmation of newConfirmations) {
+                        if (!prevIds.has(confirmation.id)) {
+                            // New confirmation - send OS notification with conversation ID for navigation
+                            notifyConfirmationRequest(
+                                confirmation.request,
+                                confirmation.automationName || 'Routine',
+                                confirmation.conversationId ?? undefined
+                            );
+                        }
+                    }
+                    return newConfirmations;
+                });
             }
         } catch (e) {
             console.error("Failed to fetch automation confirmations", e);
@@ -810,7 +899,7 @@ const App = () => {
 
                         // Trigger native OS notification if window not focused
                         const conv = conversations.find(c => c.id === msgConversationId);
-                        notifyConfirmationRequest(confirmationData, conv?.title);
+                        notifyConfirmationRequest(confirmationData, conv?.title, msgConversationId);
                     }
                     return next;
                 });
@@ -1019,7 +1108,7 @@ const App = () => {
                     const userRequest = existingMessages
                         .filter(m => m.role === 'user')
                         .pop()?.content;
-                    notifyTaskComplete(userRequest, data.response);
+                    notifyTaskComplete(userRequest, data.response, completedConvId);
 
                     next.set(completedConvId, {
                         isProcessing: false,
