@@ -178,6 +178,26 @@ const App = () => {
         conversationIdRef.current = conversationId;
     }, [conversationId]);
 
+    // Global keyboard shortcut: Cmd/Ctrl+N for new chat
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === 'n') {
+                e.preventDefault();
+                // Update ref immediately to prevent WebSocket messages from old conversation
+                conversationIdRef.current = undefined;
+                setCurrentPage('chat');
+                setConversationId(undefined);
+                setMessages([]);
+                setIsProcessing(false);
+                setIsPaused(false);
+                scheduleTextareaFocus();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [scheduleTextareaFocus]);
+
     // Focus textarea on various state changes
     useEffect(() => { scheduleTextareaFocus(); }, [conversationId]);
     useEffect(() => {
@@ -1542,7 +1562,7 @@ const App = () => {
         }
     };
 
-    // Send message as a new background task (Cmd+Enter)
+    // Send message as a new background task (Cmd/Ctrl+Enter)
     const sendAsBackgroundTask = () => {
         if (!input.trim() || !isConnected) return;
 
