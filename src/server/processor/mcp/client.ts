@@ -156,7 +156,7 @@ export class McpClient {
 
         // npm package (starts with @ or has no path separator in the first part)
         if (firstPart.startsWith('@') || !firstPart.includes('/')) {
-            return { command: 'npx', args: ['-y', firstPart, ...extraArgs] };
+            return { command: 'bunx', args: ['-y', firstPart, ...extraArgs] };
         }
 
         // Python script
