@@ -12,13 +12,70 @@
 
 import { $ } from "bun";
 import { PGlite } from "@electric-sql/pglite";
-import { readdir } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { getDatabaseDir } from "../src/server/paths";
 
 const DB_PATH = getDatabaseDir();
 const DRIZZLE_DIR = "./drizzle";
-const PG_RESETWAL = "/opt/homebrew/opt/libpq/bin/pg_resetwal";
+
+/**
+ * Get the pg_resetwal path that matches the database's PostgreSQL version.
+ * PGlite creates databases with a specific PostgreSQL version, and pg_resetwal
+ * must match that version exactly.
+ */
+async function getPgResetwalPath(): Promise<string> {
+    // Read the PostgreSQL version from the database's PG_VERSION file
+    const pgVersionFile = join(DB_PATH, "PG_VERSION");
+    let pgMajorVersion: string;
+
+    try {
+        const versionContent = await readFile(pgVersionFile, "utf-8");
+        pgMajorVersion = versionContent.trim();
+    } catch {
+        throw new Error(`Could not read PG_VERSION file at ${pgVersionFile}. Is the database initialized?`);
+    }
+
+    // Try common installation paths for pg_resetwal
+    const possiblePaths = [
+        // Homebrew Cellar (versioned) - macOS
+        `/opt/homebrew/Cellar/libpq/${pgMajorVersion}.*/bin/pg_resetwal`,
+        `/opt/homebrew/Cellar/postgresql@${pgMajorVersion}/*/bin/pg_resetwal`,
+        // Homebrew opt (symlinked) - might not match version
+        `/opt/homebrew/opt/libpq/bin/pg_resetwal`,
+        `/opt/homebrew/opt/postgresql@${pgMajorVersion}/bin/pg_resetwal`,
+        // Linux common paths
+        `/usr/lib/postgresql/${pgMajorVersion}/bin/pg_resetwal`,
+        `/usr/pgsql-${pgMajorVersion}/bin/pg_resetwal`,
+        // Generic PATH lookup
+        `pg_resetwal`,
+    ];
+
+    for (const pathPattern of possiblePaths) {
+        try {
+            // Use glob to expand wildcards
+            const result = await $`ls ${pathPattern} 2>/dev/null`.quiet();
+            if (result.exitCode === 0) {
+                const foundPath = result.stdout.toString().trim().split("\n")[0];
+                if (foundPath) {
+                    // Verify version matches
+                    const versionCheck = await $`${foundPath} --version`.quiet();
+                    const versionOutput = versionCheck.stdout.toString();
+                    if (versionOutput.includes(`(PostgreSQL) ${pgMajorVersion}`)) {
+                        return foundPath;
+                    }
+                }
+            }
+        } catch {
+            // Continue to next path
+        }
+    }
+
+    throw new Error(
+        `Could not find pg_resetwal for PostgreSQL ${pgMajorVersion}. ` +
+        `Please install it with: brew install postgresql@${pgMajorVersion}`
+    );
+}
 
 async function main() {
     console.log("🔧 Starting database recovery...\n");
@@ -30,7 +87,9 @@ async function main() {
 
     // Step 2: Reset WAL
     console.log("2️⃣  Resetting WAL (Write-Ahead Log)...");
-    const resetResult = await $`${PG_RESETWAL} -f ${DB_PATH}`.quiet();
+    const pgResetwalPath = await getPgResetwalPath();
+    console.log(`   Using: ${pgResetwalPath}`);
+    const resetResult = await $`${pgResetwalPath} -f ${DB_PATH}`.quiet();
     if (resetResult.exitCode !== 0) {
         console.error("   ❌ Failed to reset WAL:", resetResult.stderr.toString());
         process.exit(1);
