@@ -9,7 +9,7 @@
 import { db } from '../../db';
 import { WebScraper } from '../../db/schema';
 import { desc, eq } from 'drizzle-orm';
-import { getValidAccessToken } from '../../auth';
+import { platformFetch } from '../../http/platform-fetch';
 import { extractRelevantContent } from './webpage_extractor';
 import type { MetricsAccumulator } from '../director/types';
 import { isInternalUrl, getInternalUrlReason } from '../../security';
@@ -85,18 +85,14 @@ async function getEnabledWebScrapers(): Promise<(typeof WebScraper.$inferSelect)
 
 /**
  * Read webpage content using Pipali Platform API
+ * Uses platformFetch for automatic token refresh on 401 errors
  */
 async function readWithPlatform(
     url: string,
     query: string | undefined,
-    apiKey: string,
     apiBaseUrl: string
 ): Promise<string | null> {
     const endpoint = `${apiBaseUrl}/read-webpage`;
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-    };
 
     const payload: { url: string; query?: string } = { url };
     if (query) {
@@ -105,39 +101,23 @@ async function readWithPlatform(
 
     log.debug(`Read using Pipali Platform: ${url}`);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_REQUEST_TIMEOUT);
+    const result = await platformFetch<{ content?: string; title?: string; url: string }>(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        timeout: FETCH_REQUEST_TIMEOUT,
+    });
 
-    try {
-        const response = await fetch(endpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload),
-            signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Platform read-webpage failed: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-
-        // Platform returns { content: "...", title?: "...", url: "..." }
-        if (!data.content) {
-            return null;
-        }
-
-        return data.content;
-    } catch (error) {
-        clearTimeout(timeoutId);
-        if (error instanceof Error && error.name === 'AbortError') {
-            throw new Error('Webpage fetch timed out');
-        }
-        throw error;
+    // Platform returns { content: "...", title?: "...", url: "..." }
+    if (!result.data.content) {
+        return null;
     }
+
+    if (result.wasRetried) {
+        log.debug('Platform request succeeded after token refresh');
+    }
+
+    return result.data.content;
 }
 
 /**
@@ -380,17 +360,13 @@ export async function readWebpage(
                         scraper.apiBaseUrl || undefined
                     );
                 } else if (scraper.type === 'platform') {
-                    // Platform scraper - get a valid access token
+                    // Platform scraper - uses platformFetch for automatic token refresh
                     if (scraper.apiBaseUrl) {
-                        const validToken = await getValidAccessToken();
-                        if (validToken) {
-                            rawContent = await readWithPlatform(
-                                url,
-                                query,
-                                validToken,
-                                scraper.apiBaseUrl
-                            );
-                        }
+                        rawContent = await readWithPlatform(
+                            url,
+                            query,
+                            scraper.apiBaseUrl
+                        );
                     }
                 }
                 // 'direct' type scrapers are handled in the final fallback

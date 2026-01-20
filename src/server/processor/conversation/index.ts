@@ -4,7 +4,7 @@ import { type ToolDefinition, type ChatMessage, type ResponseWithThought } from 
 import { generateChatmlMessagesWithContext } from './utils';
 import { sendMessageToGpt } from './openai';
 import type { ATIFTrajectory } from './atif/atif.types';
-import { getValidAccessToken } from '../../auth';
+import { withTokenRefresh, PlatformAuthError } from '../../http/platform-fetch';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'llm' });
@@ -68,23 +68,37 @@ export async function sendMessageToModel(
     if (aiModelType === 'openai') {
         const startTime = Date.now();
 
-        // For Pipali provider, get a valid access token
-        let apiKey = chatModelWithApi.aiModelApi?.apiKey;
+        // For Pipali provider, use withTokenRefresh for automatic 401 retry
         if (aiModelApiName === 'Pipali') {
-            const validToken = await getValidAccessToken();
-            if (validToken) {
-                apiKey = validToken;
-            } else {
-                log.error({ model: modelName, provider: aiModelApiName }, 'Platform authentication expired');
-                throw new Error('Platform authentication expired. Please sign in again.');
+            try {
+                const response = await withTokenRefresh(async (token) => {
+                    return sendMessageToGpt(
+                        messages,
+                        chatModelWithApi.chatModel.name,
+                        token,
+                        chatModelWithApi.aiModelApi?.apiBaseUrl,
+                        tools,
+                        toolChoice,
+                        pricing,
+                    );
+                });
+                log.info({ model: modelName, durationMs: Date.now() - startTime }, 'Response received');
+                return response;
+            } catch (error) {
+                if (error instanceof PlatformAuthError) {
+                    log.error({ model: modelName, provider: aiModelApiName }, 'Platform authentication expired');
+                }
+                log.error({ err: error, model: modelName, provider: aiModelApiName }, 'LLM request failed');
+                throw error;
             }
         }
 
+        // For non-Pipali providers, use the stored API key directly
         try {
             const response = await sendMessageToGpt(
                 messages,
                 chatModelWithApi.chatModel.name,
-                apiKey,
+                chatModelWithApi.aiModelApi?.apiKey,
                 chatModelWithApi.aiModelApi?.apiBaseUrl,
                 tools,
                 toolChoice,

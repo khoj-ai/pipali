@@ -8,7 +8,7 @@
 import { db } from '../../db';
 import { WebSearchProvider } from '../../db/schema';
 import { desc, eq } from 'drizzle-orm';
-import { getValidAccessToken } from '../../auth';
+import { platformFetch } from '../../http/platform-fetch';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'search_web' });
@@ -213,19 +213,15 @@ async function searchWithSerper(
 
 /**
  * Search using Pipali Platform API
+ * Uses platformFetch for automatic token refresh on 401 errors
  */
 async function searchWithPlatform(
     query: string,
     maxResults: number,
     countryCode: string,
-    apiKey: string,
     apiBaseUrl: string
 ): Promise<ExtendedSearchResult> {
     const searchEndpoint = `${apiBaseUrl}/web-search`;
-    const headers = {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-    };
 
     const payload = {
         query,
@@ -235,53 +231,46 @@ async function searchWithPlatform(
 
     log.debug(`Search using Pipali Platform for: "${query.slice(0, 100)}${query.length > 100 ? '...' : ''}"`);
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), SEARCH_REQUEST_TIMEOUT);
-
-    try {
-        const response = await fetch(searchEndpoint, {
-            method: 'POST',
-            headers,
-            body: JSON.stringify(payload),
-            signal: controller.signal,
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Platform search failed: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-
-        // Platform returns { results: [...], answerBox?, knowledgeGraph?, peopleAlsoAsk? }
-        const organic: SearchResult[] = (data.results || []).map((item: any) => ({
-            title: item.title || '',
-            link: item.link || '',
-            snippet: item.snippet || '',
-        }));
-
-        const result: ExtendedSearchResult = { organic };
-
-        if (data.answerBox) {
-            result.answerBox = data.answerBox;
-        }
-        if (data.knowledgeGraph) {
-            result.knowledgeGraph = data.knowledgeGraph;
-        }
-        if (data.peopleAlsoAsk) {
-            result.peopleAlsoAsk = data.peopleAlsoAsk;
-        }
-
-        return result;
-    } catch (error) {
-        clearTimeout(timeoutId);
-        if (error instanceof Error && error.name === 'AbortError') {
-            throw new Error('Search request timed out');
-        }
-        throw error;
+    interface PlatformSearchResponse {
+        results?: Array<{ title?: string; link?: string; snippet?: string }>;
+        answerBox?: ExtendedSearchResult['answerBox'];
+        knowledgeGraph?: ExtendedSearchResult['knowledgeGraph'];
+        peopleAlsoAsk?: ExtendedSearchResult['peopleAlsoAsk'];
     }
+
+    const fetchResult = await platformFetch<PlatformSearchResponse>(searchEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        timeout: SEARCH_REQUEST_TIMEOUT,
+    });
+
+    const data = fetchResult.data;
+
+    if (fetchResult.wasRetried) {
+        log.debug('Platform search succeeded after token refresh');
+    }
+
+    // Platform returns { results: [...], answerBox?, knowledgeGraph?, peopleAlsoAsk? }
+    const organic: SearchResult[] = (data.results || []).map((item) => ({
+        title: item.title || '',
+        link: item.link || '',
+        snippet: item.snippet || '',
+    }));
+
+    const result: ExtendedSearchResult = { organic };
+
+    if (data.answerBox) {
+        result.answerBox = data.answerBox;
+    }
+    if (data.knowledgeGraph) {
+        result.knowledgeGraph = data.knowledgeGraph;
+    }
+    if (data.peopleAlsoAsk) {
+        result.peopleAlsoAsk = data.peopleAlsoAsk;
+    }
+
+    return result;
 }
 
 /**
@@ -408,18 +397,14 @@ export async function webSearch(args: WebSearchArgs): Promise<WebSearchResult> {
                         provider.apiBaseUrl || undefined
                     );
                 } else if (provider.type === 'platform') {
-                    // Platform provider - get a valid access token
+                    // Platform provider - uses platformFetch for automatic token refresh
                     if (provider.apiBaseUrl) {
-                        const validToken = await getValidAccessToken();
-                        if (validToken) {
-                            extendedResult = await searchWithPlatform(
-                                query,
-                                effectiveMaxResults,
-                                country_code,
-                                validToken,
-                                provider.apiBaseUrl
-                            );
-                        }
+                        extendedResult = await searchWithPlatform(
+                            query,
+                            effectiveMaxResults,
+                            country_code,
+                            provider.apiBaseUrl
+                        );
                     }
                 }
 
