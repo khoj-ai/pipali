@@ -1,4 +1,4 @@
-const maxIterations = parseInt(process.env.PIPALI_RESEARCH_ITERATIONS || '15', 10);
+const maxIterations = parseInt(process.env.PIPALI_RESEARCH_ITERATIONS || '100', 10);
 
 function getDefaultUser() {
     if (process.env.PIPALI_ADMIN_EMAIL && process.env.PIPALI_ADMIN_PASSWORD) {

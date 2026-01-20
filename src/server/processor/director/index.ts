@@ -70,6 +70,7 @@ function getTimeOfDay(date: Date): string {
 interface ResearchConfig {
     chatHistory: ATIFTrajectory;
     maxIterations: number;
+    currentIteration?: number;
     currentDate?: string;
     dayOfWeek?: string;
     location?: string;
@@ -387,9 +388,9 @@ async function getAllTools(): Promise<ToolDefinition[]> {
 async function pickNextTool(
     config: ResearchConfig
 ): Promise<ResearchIteration> {
-    const { currentDate, dayOfWeek, location, username, personality } = config;
+    const { currentDate, dayOfWeek, location, username, personality, currentIteration = 0, maxIterations } = config;
     const lastUserIndex = config.chatHistory.steps.findLastIndex(s => s.source === 'user') || 0;
-    const isLast = config.chatHistory.steps.length - lastUserIndex == config.maxIterations - 1;
+    const isLast = currentIteration >= maxIterations - 1;
     const previousIterations = config.chatHistory.steps.slice(lastUserIndex + 1);
 
     // Get all tools (built-in + MCP)
@@ -642,7 +643,7 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             throw new ResearchPausedError();
         }
 
-        const iteration = await pickNextTool(config);
+        const iteration = await pickNextTool({ ...config, currentIteration: i });
 
         // Stop research if no tool calls
         if (iteration.toolCalls.length === 0) {

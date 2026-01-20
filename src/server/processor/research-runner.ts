@@ -158,8 +158,6 @@ export async function* runResearchWithConversation(
         abortSignal,
         confirmationContext,
     })) {
-        iterationCount++;
-
         // On first iteration (new conversation), persist system prompt and user message to DB
         // System prompt is persisted first to maintain correct ordering: system → user → agent
         if (iteration.systemPrompt && !systemPromptPersisted) {
@@ -204,6 +202,9 @@ export async function* runResearchWithConversation(
             yield iteration;
             continue;
         }
+
+        // Count iterations (after tool execution completes)
+        iterationCount++;
 
         // Check for text tool (final response)
         const textTool = iteration.toolCalls.find(tc => tc.function_name === 'text');
