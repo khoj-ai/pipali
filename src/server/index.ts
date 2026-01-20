@@ -18,6 +18,7 @@ import { loadEnabledMcpServers, closeMcpClients } from "./processor/mcp";
 import { configureAuth, isAuthenticated, getPlatformUserInfo } from "./auth";
 import { createChildLogger } from './logger';
 import { initializeSandbox, shutdownSandbox } from './sandbox';
+import { initPlatformTransport, shutdownPlatformTransport } from './telemetry/platform-transport';
 
 const log = createChildLogger({ component: 'server' });
 
@@ -191,6 +192,9 @@ async function main() {
     // Initialize sandbox runtime (for secure shell command execution)
     await initializeSandbox();
 
+    // Initialize platform transport (sends error logs to platform for diagnostics)
+    initPlatformTransport();
+
     // Start automation system (cron scheduler, file watchers)
     await startAutomationSystem();
 
@@ -205,6 +209,9 @@ async function main() {
         await Bun.build({
             entrypoints: ["src/client/app.tsx"],
             outdir: "src/client/dist",
+            loader: {
+                ".css": "css",
+            },
         });
         log.info("Frontend built.");
     } else {
@@ -281,6 +288,7 @@ async function main() {
       await stopAutomationSystem();
       await closeMcpClients();
       await shutdownSandbox();
+      await shutdownPlatformTransport();
       await closeDatabase();
       log.info('Shutdown complete.');
       process.exit(0);

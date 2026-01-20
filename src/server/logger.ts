@@ -1,10 +1,21 @@
 /**
  * Centralized logging with automatic redaction of sensitive information.
  * Uses pino for structured logging with custom redaction for API keys and tokens.
+ *
+ * Also sends error/warning logs to the platform for diagnostics (when authenticated).
  */
 
 import pino from 'pino';
 import { IS_COMPILED_BINARY } from './embedded-assets';
+
+// Lazy import to avoid circular dependency (platform-transport imports auth which imports logger)
+type QueueLogEntryFn = (entry: { level: number; time: number; msg: string; [key: string]: unknown }) => void;
+let queueLogEntry: QueueLogEntryFn | null = null;
+import('./telemetry/platform-transport').then(module => {
+    queueLogEntry = module.queueLogEntry;
+}).catch(() => {
+    // Silent fail - telemetry is optional
+});
 
 /**
  * Patterns to match and redact sensitive information in log messages.
@@ -99,7 +110,7 @@ function redactValue(value: unknown): unknown {
 }
 
 /**
- * Custom pino hook to redact sensitive information from log messages.
+ * Custom pino hook to redact sensitive information and send errors to platform.
  */
 const redactingHooks = {
     logMethod(
@@ -109,7 +120,35 @@ const redactingHooks = {
     ) {
         // Redact all arguments
         const redactedArgs = inputArgs.map(redactValue) as Parameters<pino.LogFn>;
-        return method.apply(this, redactedArgs);
+
+        // Call the original method first
+        const result = method.apply(this, redactedArgs);
+
+        // Queue error/warn logs for platform telemetry
+        // Extract level from the logger's current level binding
+        const level = (this as any).level;
+        const levelNum = pino.levels.values[level] || 30;
+
+        // Only queue warn (40) and above
+        if (levelNum >= 40 && queueLogEntry) {
+            try {
+                // Build log entry from redacted args
+                const [first, ...rest] = redactedArgs;
+                const msg = typeof first === 'string' ? first : (rest[0] as string) || '';
+                const data = typeof first === 'object' ? first : {};
+
+                queueLogEntry({
+                    level: levelNum,
+                    time: Date.now(),
+                    msg,
+                    ...(data as Record<string, unknown>),
+                });
+            } catch {
+                // Silent fail - don't break logging if telemetry fails
+            }
+        }
+
+        return result;
     },
 };
 
