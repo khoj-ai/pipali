@@ -7,6 +7,17 @@
             "request": "launch",
             "cwd": "${workspaceFolder}",
             "program": "${workspaceFolder}/src/server/index.ts",
+            "args": [
+                // "--anon"
+            ],
+            "env": {
+                // "PIPALI_HOST": "localhost",
+                // "PIPALI_PORT": "6464",
+                // "PIPALI_PLATFORM_URL": "http://localhost:5173",
+                "OPENAI_API_KEY": "",
+                "GEMINI_API_KEY": "",
+                "ANTHROPIC_API_KEY": ""
+            }
         }
     ]
 }
