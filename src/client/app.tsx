@@ -510,7 +510,7 @@ const App = () => {
                         toolResultsMap = new Map(
                             msg.observation.results
                             .filter((res: any) => res.source_call_id && res.content)
-                            .map((res: any) => [res.source_call_id, res.content])
+                            .map((res: any) => [res.source_call_id, typeof res.content === 'string' ? res.content : JSON.stringify(res.content)])
                         );
                     }
 
@@ -806,7 +806,7 @@ const App = () => {
                                 const toolResultsMap = new Map(
                                     (msg.observation?.results || [])
                                         .filter((r: any) => r.source_call_id && r.content)
-                                        .map((r: any) => [r.source_call_id, r.content])
+                                        .map((r: any) => [r.source_call_id, typeof r.content === 'string' ? r.content : JSON.stringify(r.content)])
                                 );
                                 if (msg.tool_calls?.length > 0) {
                                     if (hasMessage) thoughts.push({ type: 'thought', content: msg.message, id: generateUUID() });

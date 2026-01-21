@@ -606,6 +606,28 @@
     word-break: break-word;
 }
 
+/* Read file image view (for multimodal content) */
+.read-file-meta {
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--color-text-muted);
+    border-bottom: 1px solid var(--color-border);
+}
+
+.read-file-image {
+    padding: 8px;
+    display: flex;
+    justify-content: left;
+    background: var(--color-bg-muted);
+}
+
+.read-file-image img {
+    max-width: 100%;
+    max-height: 180px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+}
+
 
 /* Web search results view */
 .thought-web-search {
