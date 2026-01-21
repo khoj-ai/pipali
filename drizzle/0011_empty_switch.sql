@@ -1,0 +1,1 @@
+ALTER TABLE "automation" DROP COLUMN "max_iterations";

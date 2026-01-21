@@ -259,7 +259,6 @@ export const Automation = pgTable('automation', {
     conversationId: uuid('conversation_id').references(() => Conversation.id, { onDelete: 'set null' }),
 
     // Execution limits
-    maxIterations: integer('max_iterations').default(15).notNull(),
     maxExecutionsPerDay: integer('max_executions_per_day'),
     maxExecutionsPerHour: integer('max_executions_per_hour'),
 

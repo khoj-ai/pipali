@@ -16,6 +16,7 @@ import { createEmptyPreferences } from '../../processor/confirmation';
 import type { ConfirmationRequest, ConfirmationResponse } from '../../processor/confirmation/confirmation.types';
 import { createStandardConfirmationOptions } from '../../processor/confirmation/confirmation.types';
 import { createChildLogger } from '../../logger';
+import { maxIterations } from '../../utils';
 
 const log = createChildLogger({ component: 'automation' });
 
@@ -408,7 +409,7 @@ async function runExecution(
         const result = await runResearchToCompletion({
             conversationId,
             user,
-            maxIterations: automation.maxIterations,
+            maxIterations: maxIterations,
             abortSignal: abortController.signal,
             confirmationContext,
         });
