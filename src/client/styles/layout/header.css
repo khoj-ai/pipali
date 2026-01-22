@@ -176,6 +176,13 @@
     color: var(--color-text-muted);
 }
 
+.model-dropdown-empty {
+    padding: 16px 12px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+    text-align: center;
+}
+
 .status {
     display: flex;
     align-items: center;

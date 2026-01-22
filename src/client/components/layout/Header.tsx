@@ -83,23 +83,29 @@ export function Header({
 
                         {showModelDropdown && (
                             <div className="model-dropdown">
-                                {models.map(model => (
-                                    <button
-                                        key={model.id}
-                                        className={`model-option ${selectedModel?.id === model.id ? 'selected' : ''}`}
-                                        onClick={() => onSelectModel(model)}
-                                    >
-                                        <div className="model-option-info">
-                                            <span className="model-option-name">
-                                                {model.friendlyName || model.name}
-                                            </span>
-                                            <span className="model-option-provider">
-                                                {model.providerName}
-                                            </span>
-                                        </div>
-                                        {selectedModel?.id === model.id && <Check size={16} />}
-                                    </button>
-                                ))}
+                                {models.length === 0 ? (
+                                    <div className="model-dropdown-empty">
+                                        No models available
+                                    </div>
+                                ) : (
+                                    models.map(model => (
+                                        <button
+                                            key={model.id}
+                                            className={`model-option ${selectedModel?.id === model.id ? 'selected' : ''}`}
+                                            onClick={() => onSelectModel(model)}
+                                        >
+                                            <div className="model-option-info">
+                                                <span className="model-option-name">
+                                                    {model.friendlyName || model.name}
+                                                </span>
+                                                <span className="model-option-provider">
+                                                    {model.providerName}
+                                                </span>
+                                            </div>
+                                            {selectedModel?.id === model.id && <Check size={16} />}
+                                        </button>
+                                    ))
+                                )}
                             </div>
                         )}
                     </div>

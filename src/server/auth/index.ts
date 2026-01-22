@@ -398,7 +398,7 @@ export async function syncPlatformModels(): Promise<void> {
         }
 
         const data = await response.json();
-        const platformModels = data.data as Array<{
+        const platformModels = (data.data || []) as Array<{
             id: string;
             owned_by: string;
             name?: string | null;
@@ -406,11 +406,6 @@ export async function syncPlatformModels(): Promise<void> {
             vision_enabled?: boolean;
             use_responses_api?: boolean;
         }>;
-
-        if (!platformModels || platformModels.length === 0) {
-            log.info('No models available from platform');
-            return;
-        }
 
         // Check if Pipali provider already exists
         const [existingProvider] = await db
