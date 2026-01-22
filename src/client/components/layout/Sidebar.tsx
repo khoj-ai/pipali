@@ -2,8 +2,9 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Loader2, MessageSquare, AlertCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Hammer, Settings, User, LogOut, Shield, Sun, Moon, Monitor } from 'lucide-react';
-import type { ConversationSummary, ConversationState, ConfirmationRequest, AuthStatus } from '../../types';
+import type { ConversationSummary, ConversationState, ConfirmationRequest, AuthStatus, BillingAlert } from '../../types';
 import { useTheme } from '../../hooks';
+import { BillingAlertBanner } from '../billing';
 
 const MAX_VISIBLE_CHATS = 5;
 
@@ -44,6 +45,8 @@ interface SidebarProps {
     exportingConversationId: string | null;
     currentPage?: 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools' | 'settings';
     authStatus?: AuthStatus | null;
+    billingAlerts?: BillingAlert[];
+    platformUrl?: string;
     onNewChat: () => void;
     onSelectConversation: (id: string) => void;
     onDeleteConversation: (id: string, e: React.MouseEvent) => void;
@@ -54,6 +57,7 @@ interface SidebarProps {
     onGoToSettings?: () => void;
     onLogout?: () => void;
     onClose?: () => void;
+    onDismissAllBillingAlerts?: () => void;
 }
 
 export function Sidebar({
@@ -65,6 +69,8 @@ export function Sidebar({
     exportingConversationId,
     currentPage,
     authStatus,
+    billingAlerts,
+    platformUrl,
     onNewChat,
     onSelectConversation,
     onDeleteConversation,
@@ -75,6 +81,7 @@ export function Sidebar({
     onGoToSettings,
     onLogout,
     onClose,
+    onDismissAllBillingAlerts,
 }: SidebarProps) {
     const [openConversationMenuId, setOpenConversationMenuId] = useState<string | null>(null);
     const [openMenuContext, setOpenMenuContext] = useState<'sidebar' | 'modal' | null>(null);
@@ -407,6 +414,17 @@ export function Sidebar({
                         <div className="no-conversations">No conversations yet</div>
                     )}
                 </div>
+
+                {/* Billing Alert Banner */}
+                {billingAlerts && billingAlerts.length > 0 && platformUrl && onDismissAllBillingAlerts && (
+                    <div className="sidebar-billing-section">
+                        <BillingAlertBanner
+                            alerts={billingAlerts}
+                            platformUrl={platformUrl}
+                            onDismissAll={onDismissAllBillingAlerts}
+                        />
+                    </div>
+                )}
 
                 {/* User Profile Section */}
                 {authStatus && (authStatus.authenticated || authStatus.anonMode) && (

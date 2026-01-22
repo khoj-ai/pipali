@@ -12,6 +12,7 @@
 
 import { refreshAccessToken, getValidAccessToken } from '../auth';
 import { createChildLogger } from '../logger';
+import { PlatformBillingError } from './billing-errors';
 
 const log = createChildLogger({ component: 'platform-fetch' });
 
@@ -147,6 +148,16 @@ export async function platformFetch<T = unknown>(
             // Handle non-OK responses
             const errorText = await response.text();
 
+            // Check for 402 billing error - don't retry, throw immediately
+            if (response.status === 402) {
+                const billingError = PlatformBillingError.fromResponse(response.status, errorText);
+                if (billingError) {
+                    throw billingError;
+                }
+                // Fallback if not parseable as billing error format
+                throw new Error(`Platform billing error: ${errorText}`);
+            }
+
             // Check if this is a token/auth error we can retry
             if (isTokenError(response.status, errorText) && attempt < maxRetries) {
                 log.info({ url, status: response.status, attempt }, 'Got auth error, attempting token refresh');
@@ -166,7 +177,7 @@ export async function platformFetch<T = unknown>(
             // Non-auth error or max retries exceeded
             throw new Error(`Platform API error: ${response.status} - ${errorText}`);
         } catch (error) {
-            if (error instanceof PlatformAuthError) {
+            if (error instanceof PlatformAuthError || error instanceof PlatformBillingError) {
                 throw error;
             }
             if (error instanceof Error && error.name === 'AbortError') {
@@ -227,13 +238,59 @@ export async function withTokenRefresh<T>(
         try {
             return await fn(currentToken);
         } catch (error) {
-            // Check if this looks like an auth error we should retry
+            // Rethrow billing errors immediately - don't retry
+            if (error instanceof PlatformBillingError) {
+                throw error;
+            }
+
+            // Extract error information from SDK errors
             const errorMessage = error instanceof Error ? error.message : String(error);
+            const errorStatus = (error as any)?.status;
+            const errorBody = (error as any)?.error;
+
+            // Check for billing errors (402 status or billing-related error body)
+            const bodyType = typeof errorBody === 'object' ? errorBody?.type : undefined;
+            const bodyCode = typeof errorBody === 'object' ? errorBody?.code : undefined;
+            const bodyMessage = typeof errorBody === 'object' ? errorBody?.message : undefined;
+
+            const isBillingError =
+                errorStatus === 402 ||
+                errorMessage.includes('402') ||
+                bodyType === 'billing_error' ||
+                bodyCode === 'insufficient_credits' ||
+                bodyCode === 'spend_limit_reached' ||
+                errorMessage.toLowerCase().includes('insufficient_credits') ||
+                errorMessage.toLowerCase().includes('spend_limit_reached') ||
+                errorMessage.toLowerCase().includes('billing_error') ||
+                (bodyMessage && (
+                    bodyMessage.toLowerCase().includes('insufficient credits') ||
+                    bodyMessage.toLowerCase().includes('spend limit')
+                ));
+
+            if (isBillingError) {
+                // Determine the billing error code
+                const billingCode = bodyCode === 'spend_limit_reached' ? 'spend_limit_reached'
+                    : bodyCode === 'insufficient_credits' ? 'insufficient_credits'
+                    : errorMessage.toLowerCase().includes('spend limit') ? 'spend_limit_reached'
+                    : 'insufficient_credits';
+
+                throw new PlatformBillingError({
+                    code: billingCode,
+                    message: bodyMessage || (billingCode === 'insufficient_credits'
+                        ? 'Insufficient credits. Please add credits to continue.'
+                        : 'Spend limit reached. Please increase your limit or wait for the next billing period.'),
+                    credits_balance_cents: errorBody?.credits_balance_cents,
+                    current_period_spent_cents: errorBody?.current_period_spent_cents,
+                    spend_hard_limit_cents: errorBody?.spend_hard_limit_cents,
+                });
+            }
+
             const isAuthError =
+                errorStatus === 401 ||
                 errorMessage.includes('401') ||
                 errorMessage.toLowerCase().includes('unauthorized') ||
-                errorMessage.toLowerCase().includes('invalid') && errorMessage.toLowerCase().includes('token') ||
-                errorMessage.toLowerCase().includes('expired') && errorMessage.toLowerCase().includes('token');
+                (errorMessage.toLowerCase().includes('invalid') && errorMessage.toLowerCase().includes('token')) ||
+                (errorMessage.toLowerCase().includes('expired') && errorMessage.toLowerCase().includes('token'));
 
             if (isAuthError && attempt < maxRetries) {
                 log.info({ attempt, error: errorMessage }, 'Got auth error in withTokenRefresh, attempting refresh');

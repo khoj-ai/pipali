@@ -11,17 +11,35 @@ import { ThoughtsSection } from '../thoughts/ThoughtsSection';
 import { StreamingIndicator } from './StreamingIndicator';
 import { ExternalLink } from '../ExternalLink';
 import { safeMarkdownUrlTransform } from '../../utils/markdown';
+import { BillingMessage } from '../billing';
 
 interface MessageItemProps {
     message: Message;
+    platformUrl?: string;
     onDelete?: (messageId: string, role: 'user' | 'assistant') => void;
 }
 
-export function MessageItem({ message, onDelete }: MessageItemProps) {
+export function MessageItem({ message, platformUrl, onDelete }: MessageItemProps) {
     const isUser = message.role === 'user';
     const [isHovered, setIsHovered] = useState(false);
 
     const canDelete = onDelete && !message.isStreaming;
+
+    // Render billing message if present
+    if (message.billingInfo && platformUrl) {
+        return (
+            <div className="message assistant-message">
+                <div className="message-header">
+                    <div className="message-label">Pipali</div>
+                </div>
+                <BillingMessage
+                    code={message.billingInfo.code}
+                    message={message.billingInfo.message}
+                    platformUrl={platformUrl}
+                />
+            </div>
+        );
+    }
 
     return (
         <div

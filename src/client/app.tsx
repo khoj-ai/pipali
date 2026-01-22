@@ -15,6 +15,8 @@ import type {
     ConversationState,
     ActiveTask,
     AuthStatus,
+    BillingAlert,
+    BillingError,
 } from "./types";
 import type { PendingConfirmation } from "./types/confirmation";
 
@@ -38,6 +40,7 @@ import { McpToolsPage } from "./components/mcp-tools";
 import { SettingsPage } from "./components/settings";
 import { LoginPage } from "./components/auth";
 import { FindInPage } from "./components/FindInPage";
+import { getRandomBillingMessage } from "./components/billing";
 import type { AutomationPendingConfirmation } from "./types/automations";
 
 // Page types
@@ -65,6 +68,16 @@ const App = () => {
     useEffect(() => {
         setApiBaseUrl(baseUrl);
     }, [baseUrl]);
+
+    // Fetch platform URL on mount
+    useEffect(() => {
+        apiFetch('/api/auth/platform-url')
+            .then(res => res.ok ? res.json() : null)
+            .then(data => {
+                if (data?.url) setPlatformUrl(data.url);
+            })
+            .catch(() => { /* Use default platform URL */ });
+    }, []);
 
     // Core state
     const [messages, setMessages] = useState<Message[]>([]);
@@ -98,6 +111,9 @@ const App = () => {
     const [conversationStates, setConversationStates] = useState<Map<string, ConversationState>>(new Map());
     // Find in page state
     const [showFindInPage, setShowFindInPage] = useState(false);
+    // Billing alerts state
+    const [billingAlerts, setBillingAlerts] = useState<BillingAlert[]>([]);
+    const [platformUrl, setPlatformUrl] = useState<string>('https://platform.pipali.ai');
 
     // Refs
     const wsRef = useRef<WebSocket | null>(null);
@@ -674,6 +690,60 @@ const App = () => {
     const handleWebSocketMessage = (message: WebSocketMessage) => {
         const msgConversationId = message.conversationId;
 
+        if (message.type === 'billing_error') {
+            const billingError = message.error as BillingError;
+            console.warn("Billing error:", billingError);
+
+            // Find conversation title for the alert
+            const conversationTitle = conversations.find(c => c.id === msgConversationId)?.title;
+
+            // Create billing alert
+            const alert: BillingAlert = {
+                id: generateUUID(),
+                code: billingError.code,
+                message: billingError.message,
+                conversationId: msgConversationId,
+                conversationTitle,
+                source: 'chat', // TODO: detect automation source
+                timestamp: new Date(),
+                details: {
+                    credits_balance_cents: billingError.credits_balance_cents,
+                    current_period_spent_cents: billingError.current_period_spent_cents,
+                    spend_hard_limit_cents: billingError.spend_hard_limit_cents,
+                },
+            };
+
+            setBillingAlerts(prev => [alert, ...prev]);
+
+            // Clear processing state for this conversation
+            if (msgConversationId) {
+                setConversationStates(prev => {
+                    const next = new Map(prev);
+                    next.delete(msgConversationId);
+                    return next;
+                });
+            }
+
+            // Show friendly message in current conversation's chat thread
+            if (!msgConversationId || msgConversationId === conversationIdRef.current) {
+                setIsProcessing(false);
+                setIsPaused(false);
+                const billingMsgId = generateUUID();
+                const friendlyMessage = getRandomBillingMessage(billingError.code);
+                setMessages(prev => [...prev, {
+                    id: billingMsgId,
+                    stableId: billingMsgId,
+                    role: 'assistant',
+                    content: '', // Content rendered via billingInfo
+                    billingInfo: {
+                        code: billingError.code,
+                        message: friendlyMessage,
+                    },
+                }]);
+            }
+            return;
+        }
+
         if (message.type === 'error') {
             console.error("Server error:", message.error);
             if (msgConversationId) {
@@ -1082,16 +1152,22 @@ const App = () => {
             // Use stepId from server for proper deletion support
             const messageId = data.stepId !== undefined ? String(data.stepId) : generateUUID();
 
+            // Clear billing alerts - successful response means credits are available
+            setBillingAlerts([]);
+
             const finalizeMessages = (msgs: Message[]): Message[] => {
-                const lastMsg = msgs[msgs.length - 1];
+                // Filter out billing messages since credits are now available
+                const filteredMsgs = msgs.filter(msg => !msg.billingInfo);
+
+                const lastMsg = filteredMsgs[filteredMsgs.length - 1];
                 if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-                    return msgs.map(msg =>
+                    return filteredMsgs.map(msg =>
                         msg.id === lastMsg.id
                             ? { ...msg, id: messageId, content: data.response, isStreaming: false }
                             : msg
                     );
                 }
-                return [...msgs, {
+                return [...filteredMsgs, {
                     id: messageId,
                     stableId: messageId,
                     role: 'assistant' as const,
@@ -1730,6 +1806,8 @@ const App = () => {
                 exportingConversationId={exportingConversationId}
                 currentPage={currentPage}
                 authStatus={authStatus}
+                billingAlerts={billingAlerts}
+                platformUrl={platformUrl}
                 onNewChat={startNewConversation}
                 onSelectConversation={selectConversation}
                 onDeleteConversation={deleteConversation}
@@ -1740,6 +1818,7 @@ const App = () => {
                 onGoToSettings={goToSettingsPage}
                 onLogout={handleLogout}
                 onClose={() => setSidebarOpen(false)}
+                onDismissAllBillingAlerts={() => setBillingAlerts([])}
             />
 
             <div className="app-container">
@@ -1779,7 +1858,7 @@ const App = () => {
                     <SettingsPage />
                 )}
                 {currentPage === 'chat' && (
-                    <MessageList messages={messages} conversationId={conversationId} onDeleteMessage={deleteMessage} />
+                    <MessageList messages={messages} conversationId={conversationId} platformUrl={platformUrl} onDeleteMessage={deleteMessage} />
                 )}
 
                 <InputArea
@@ -1808,6 +1887,7 @@ const App = () => {
                 onNavigateToConversation={selectConversation}
                 onNavigateToAutomations={goToAutomationsPage}
             />
+
 
             <FindInPage
                 isOpen={showFindInPage}

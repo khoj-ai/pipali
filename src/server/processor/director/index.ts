@@ -16,6 +16,7 @@ import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, executeMcpTool, isMcpTool } from '../mcp';
+import { PlatformBillingError } from '../../http/billing-errors';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'director' });
@@ -527,6 +528,10 @@ async function pickNextTool(
             systemPrompt: isFirstIteration ? systemPrompt : undefined,
         };
     } catch (error) {
+        // Re-throw billing errors so they can be handled by the caller (ws.ts)
+        if (error instanceof PlatformBillingError) {
+            throw error;
+        }
         log.error({ err: error }, 'Failed to pick next tool');
         return {
             toolCalls: [],

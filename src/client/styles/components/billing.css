@@ -1,0 +1,201 @@
+/*
+ * Pipali Styles - Billing Alerts
+ * Includes: billing alert banner (sidebar), billing messages (chat)
+ */
+
+/* ========================================
+   Billing Alert Banner (Sidebar)
+   ======================================== */
+
+.sidebar-billing-section {
+    padding: 8px 12px;
+    border-top: 1px solid var(--color-border-subtle);
+}
+
+.billing-alert-banner {
+    background: var(--color-warning-bg);
+    border: 1px solid var(--color-warning-border);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.billing-alert-banner--limit {
+    background: var(--color-error-bg);
+    border-color: var(--color-error-border);
+}
+
+.billing-alert-content {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 10px 12px;
+}
+
+.billing-alert-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.billing-alert-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-warning);
+    flex-shrink: 0;
+}
+
+.billing-alert-banner--limit .billing-alert-icon {
+    color: var(--color-error);
+}
+
+.billing-alert-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-warning-text);
+    flex: 1;
+}
+
+.billing-alert-banner--limit .billing-alert-title {
+    color: var(--color-error-text);
+}
+
+.billing-alert-dismiss {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--color-text-muted);
+    cursor: pointer;
+    transition: all var(--transition);
+    margin-left: auto;
+}
+
+.billing-alert-dismiss:hover {
+    background: rgba(0, 0, 0, 0.1);
+    color: var(--color-text);
+}
+
+.billing-alert-message {
+    margin: 0;
+    font-size: 12px;
+    color: var(--color-text-secondary);
+    line-height: 1.4;
+}
+
+.billing-alert-count {
+    font-size: 11px;
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+.billing-alert-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 6px 10px;
+    margin-top: 4px;
+    font-size: 12px;
+    font-weight: 500;
+    text-decoration: none;
+    background: var(--color-warning);
+    color: white;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition);
+    align-self: flex-start;
+}
+
+.billing-alert-action:hover {
+    background: var(--color-warning-text);
+}
+
+.billing-alert-banner--limit .billing-alert-action {
+    background: var(--color-error);
+}
+
+.billing-alert-banner--limit .billing-alert-action:hover {
+    background: var(--color-error-text);
+}
+
+/* ========================================
+   Billing Message (Chat Thread)
+   ======================================== */
+
+.billing-message {
+    background: var(--color-warning-bg);
+    border: 1px solid var(--color-warning-border);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-top: 8px;
+}
+
+.billing-message--limit {
+    background: var(--color-error-bg);
+    border-color: var(--color-error-border);
+}
+
+.billing-message-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.billing-message-icon {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--color-warning);
+}
+
+.billing-message--limit .billing-message-icon {
+    color: var(--color-error);
+}
+
+.billing-message-title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-warning-text);
+}
+
+.billing-message--limit .billing-message-title {
+    color: var(--color-error-text);
+}
+
+.billing-message-text {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: var(--color-text);
+    line-height: 1.5;
+}
+
+.billing-message-action {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+    background: var(--color-warning);
+    color: white;
+    border-radius: var(--radius-sm);
+    transition: all var(--transition);
+}
+
+.billing-message-action:hover {
+    background: var(--color-warning-text);
+}
+
+.billing-message--limit .billing-message-action {
+    background: var(--color-error);
+}
+
+.billing-message--limit .billing-message-action:hover {
+    background: var(--color-error-text);
+}

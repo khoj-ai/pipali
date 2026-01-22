@@ -8,6 +8,7 @@ import {
     runResearchWithConversation,
     ResearchPausedError,
 } from "../processor/research-runner";
+import { PlatformBillingError } from "../http/billing-errors";
 import {
     type ConfirmationRequest,
     type ConfirmationResponse,
@@ -228,6 +229,22 @@ async function runResearch(
             setSessionPaused(conversationId);
             return;
         }
+
+        // Handle billing errors with structured message
+        if (error instanceof PlatformBillingError) {
+            log.warn({ code: error.code, details: error.details }, 'Billing error during research');
+            sendToClient(ws, {
+                type: 'billing_error',
+                error: error.details,
+            }, conversationId);
+
+            // Clean up session
+            const sessions = getConnectionSessions(ws);
+            sessions.delete(conversationId);
+            setSessionInactive(conversationId);
+            return;
+        }
+
         log.error({ err: error }, 'Research error');
         sendToClient(ws, { type: 'error', error: error instanceof Error ? error.message : String(error) }, conversationId);
 

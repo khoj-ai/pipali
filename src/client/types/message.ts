@@ -7,6 +7,10 @@ export type Message = {
     content: string;
     thoughts?: Thought[];
     isStreaming?: boolean;
+    billingInfo?: {
+        code: 'insufficient_credits' | 'spend_limit_reached';
+        message: string;
+    };
 };
 
 export type Thought = {

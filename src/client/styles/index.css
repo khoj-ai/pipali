@@ -27,6 +27,7 @@
 @import './components/thoughts.css';
 @import './components/confirmations.css';
 @import './components/find-in-page.css';
+@import './components/billing.css';
 
 /* Pages */
 @import './pages/home.css';
