@@ -221,7 +221,8 @@ export async function shellCommand(
             log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
         }
 
-        // Set up environment - use /tmp/pipali as TMPDIR for sandboxed commands
+        // Note: For sandboxed commands, TMPDIR is set by sandbox-runtime via CLAUDE_TMPDIR.
+        // This env override is redundant for sandbox mode but kept for consistency.
         const env = useSandbox
             ? { ...process.env, TMPDIR: '/tmp/pipali' }
             : process.env;

@@ -87,6 +87,10 @@ export async function initializeSandbox(): Promise<void> {
             return;
         }
 
+        // Set CLAUDE_TMPDIR so sandbox-runtime uses /tmp/pipali instead of /tmp/claude
+        // This must be set before SandboxManager.initialize() as it reads from process.env
+        process.env.CLAUDE_TMPDIR = '/tmp/pipali';
+
         // Build runtime configuration
         const runtimeConfig = buildRuntimeConfig(currentConfig);
 
