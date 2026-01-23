@@ -36,6 +36,8 @@ export interface ResearchRunnerOptions {
     maxIterations?: number;
     /** Abort signal for pause support */
     abortSignal?: AbortSignal;
+    /** Optional system prompt override (persisted at run start by caller) */
+    systemPrompt?: string;
     /** Confirmation context for dangerous operations */
     confirmationContext?: ConfirmationContext;
     /** Callback when tool calls are about to start (before execution) */
@@ -95,6 +97,7 @@ export async function* runResearchWithConversation(
         userMessage,
         maxIterations = defaultMaxIterations,
         abortSignal,
+        systemPrompt,
         confirmationContext,
         onToolCallStart,
         onIteration,
@@ -155,6 +158,7 @@ export async function* runResearchWithConversation(
         location: userContext.location,
         personality: userContext.instructions,
         user,
+        systemPrompt,
         abortSignal,
         confirmationContext,
     })) {

@@ -114,7 +114,7 @@ test.describe('Home Page Task Gallery', () => {
         expect(countText).toContain('tasks');
     });
 
-    test('should show paused status when task is paused', async ({ page }) => {
+    test('should show stopped status when task is stopped', async ({ page }) => {
         // Start a background task (use pausable for slow execution)
         await homePage.sendBackgroundMessage(PAUSABLE_QUERY);
         await homePage.waitForTaskCount(1);
@@ -122,11 +122,10 @@ test.describe('Home Page Task Gallery', () => {
         // Click task to go to conversation
         await homePage.clickTaskCard(0);
 
-        // Now on chat page - pause the task
+        // Now on chat page - stop the task
         const chatPage = new ChatPage(page);
         await chatPage.waitForProcessing();
-        await chatPage.pauseTask();
-        await chatPage.playButton.waitFor({ state: 'visible' });
+        await chatPage.stopTask();
 
         // Go back to home by clicking logo (preserves React state)
         await chatPage.goHome();
@@ -134,9 +133,9 @@ test.describe('Home Page Task Gallery', () => {
         // The task should still be in the gallery
         const taskCount = await homePage.getTaskCardCount();
         expect(taskCount).toBeGreaterThanOrEqual(1);
-        // The task should show paused
+        // The task should show stopped
         const status = await homePage.getTaskStatus(0);
-        expect(status).toBe('paused');
+        expect(status).toBe('stopped');
     });
 
     test('should show task gallery header with correct count', async ({ page }) => {

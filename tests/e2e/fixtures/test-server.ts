@@ -91,7 +91,12 @@ export class TestServer {
         });
 
         // Wait for server to be ready
-        await this.waitForReady();
+        try {
+            await this.waitForReady();
+        } catch (error) {
+            await this.stop();
+            throw error;
+        }
         console.log(`[TestServer] Ready on ${this.host}:${this.port}`);
     }
 
@@ -101,7 +106,7 @@ export class TestServer {
 
         for (let i = 0; i < maxAttempts; i++) {
             try {
-                const response = await fetch(`http://${this.host}:${this.port}/api/models`);
+                const response = await fetch(`http://${this.host}:${this.port}/api/health`);
                 if (response.ok) {
                     return;
                 }

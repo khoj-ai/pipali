@@ -276,7 +276,7 @@ describe('generateChatmlMessagesWithContext', () => {
                     ],
                     observation: {
                         results: [
-                            { source_call_id: 'call_1', content: { key: 'value', nested: { data: 123 } } }
+                            { source_call_id: 'call_1', content: { key: 'value', nested: { data: 123 } } as any }
                         ]
                     }
                 }

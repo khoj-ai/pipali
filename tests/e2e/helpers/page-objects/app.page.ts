@@ -9,6 +9,8 @@ import { Selectors } from '../selectors';
 
 export class AppPage {
     readonly page: Page;
+    private readonly consoleBuffer: string[] = [];
+    private readonly pageErrorBuffer: string[] = [];
 
     // Main layout
     readonly mainContent: Locator;
@@ -17,12 +19,23 @@ export class AppPage {
     // Input controls
     readonly inputTextarea: Locator;
     readonly sendButton: Locator;
-    readonly pauseButton: Locator;
-    readonly playButton: Locator;
+    readonly stopButton: Locator;
     readonly inputHint: Locator;
 
     constructor(page: Page) {
         this.page = page;
+
+        this.page.on('console', (msg) => {
+            const entry = `[console.${msg.type()}] ${msg.text()}`;
+            this.consoleBuffer.push(entry);
+            if (this.consoleBuffer.length > 50) this.consoleBuffer.shift();
+        });
+
+        this.page.on('pageerror', (err) => {
+            const entry = `[pageerror] ${err.message}`;
+            this.pageErrorBuffer.push(entry);
+            if (this.pageErrorBuffer.length > 20) this.pageErrorBuffer.shift();
+        });
 
         // Layout
         this.mainContent = page.locator(Selectors.mainContent);
@@ -31,8 +44,7 @@ export class AppPage {
         // Input controls
         this.inputTextarea = page.locator(Selectors.inputTextarea);
         this.sendButton = page.locator(Selectors.sendButton);
-        this.pauseButton = page.locator(Selectors.pauseButton);
-        this.playButton = page.locator(Selectors.playButton);
+        this.stopButton = page.locator(Selectors.stopButton);
         this.inputHint = page.locator(Selectors.inputHint);
     }
 
@@ -40,7 +52,7 @@ export class AppPage {
      * Navigate to the home page
      */
     async goto(): Promise<void> {
-        await this.page.goto('/');
+        await this.page.goto('/', { waitUntil: 'domcontentloaded' });
         await this.waitForConnection();
     }
 
@@ -48,7 +60,7 @@ export class AppPage {
      * Navigate to a specific conversation
      */
     async gotoConversation(conversationId: string): Promise<void> {
-        await this.page.goto(`/?conversationId=${conversationId}`);
+        await this.page.goto(`/?conversationId=${conversationId}`, { waitUntil: 'domcontentloaded' });
         await this.waitForConnection();
     }
 
@@ -56,16 +68,38 @@ export class AppPage {
      * Wait for WebSocket connection to be established
      */
     async waitForConnection(): Promise<void> {
-        // Wait for textarea to be enabled (indicates WebSocket connected)
-        await this.inputTextarea.waitFor({ state: 'visible', timeout: 10000 });
-        await this.page.waitForFunction(
-            (selector) => {
-                const textarea = document.querySelector(selector) as HTMLTextAreaElement;
-                return textarea && !textarea.disabled;
-            },
-            Selectors.inputTextarea,
-            { timeout: 10000 }
-        );
+        const timeoutMs = 30000;
+        const loginPage = this.page.locator('.login-page');
+
+        // Ensure the HTML document is there before we wait for app DOM.
+        await this.page.waitForLoadState('domcontentloaded', { timeout: timeoutMs });
+
+        await this.page.waitForSelector('.app-wrapper, .login-page', { timeout: timeoutMs });
+
+        const startedAt = Date.now();
+        while (Date.now() - startedAt < timeoutMs) {
+            if (await loginPage.isVisible()) {
+                throw new Error('App showed login page (expected anonymous mode for E2E tests).');
+            }
+
+            if (await this.inputTextarea.isVisible()) {
+                const enabled = await this.page.evaluate((selector) => {
+                    const textarea = document.querySelector(selector);
+                    return textarea instanceof HTMLTextAreaElement && !textarea.disabled;
+                }, Selectors.inputTextarea);
+                if (enabled) return;
+            }
+
+            await this.page.waitForTimeout(100);
+        }
+
+        const debug = [
+            `url=${this.page.url()}`,
+            ...this.pageErrorBuffer.slice(-5),
+            ...this.consoleBuffer.slice(-10),
+        ].join('\n');
+
+        throw new Error(`Timed out waiting for WebSocket connection after ${timeoutMs}ms\n${debug}`);
     }
 
     /**
@@ -87,10 +121,10 @@ export class AppPage {
     }
 
     /**
-     * Pause the current task
+     * Stop the current task
      * Waits for UI to stabilize before clicking to ensure React event handlers are attached
      */
-    async pauseTask(): Promise<void> {
+    async stopTask(): Promise<void> {
         // Wait for at least one tool call to appear (UI stabilization)
         try {
             await this.page.waitForSelector('.thought-item', { timeout: 5000 });
@@ -100,56 +134,48 @@ export class AppPage {
         await this.page.waitForTimeout(300); // Extra stabilization
 
         // Wait for button and click
-        await this.pauseButton.waitFor({ state: 'visible' });
-        await this.pauseButton.click();
+        await this.stopButton.waitFor({ state: 'visible' });
+        await this.stopButton.click();
     }
 
     /**
-     * Resume the current task
-     */
-    async resumeTask(): Promise<void> {
-        await this.playButton.click();
-    }
-
-    /**
-     * Press Escape to pause
+     * Press Escape to stop
      */
     async pressEscape(): Promise<void> {
         await this.page.keyboard.press('Escape');
     }
 
     /**
-     * Check if currently processing (pause button visible)
+     * Check if currently processing (stop button visible)
      */
     async isProcessing(): Promise<boolean> {
-        return await this.pauseButton.isVisible();
+        return await this.stopButton.isVisible();
     }
 
     /**
-     * Check if currently paused (play button visible)
+     * Check if currently stopped (input hint)
      */
-    async isPaused(): Promise<boolean> {
-        return await this.playButton.isVisible();
+    async isStopped(): Promise<boolean> {
+        const hint = (await this.inputHint.textContent()) || '';
+        return hint.toLowerCase().includes('stopped');
     }
 
     /**
      * Wait for processing to start
      */
     async waitForProcessing(): Promise<void> {
-        await this.pauseButton.waitFor({ state: 'visible', timeout: 10000 });
+        await this.stopButton.waitFor({ state: 'visible', timeout: 10000 });
     }
 
     /**
-     * Wait for processing to complete (no pause or play button)
+     * Wait for processing to complete (no stop button)
      */
     async waitForIdle(): Promise<void> {
         await this.page.waitForFunction(
-            ([pauseSel, playSel]: [string, string]) => {
-                return (
-                    !document.querySelector(pauseSel) && !document.querySelector(playSel)
-                );
+            (stopSel: string) => {
+                return !document.querySelector(stopSel);
             },
-            [Selectors.pauseButton, Selectors.playButton] as [string, string],
+            Selectors.stopButton,
             { timeout: 60000 }
         );
     }

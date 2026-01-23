@@ -53,12 +53,12 @@ export class HomePage extends AppPage {
     }
 
     /**
-     * Get the status of a task card (running or paused)
+     * Get the status of a task card (running or stopped)
      */
-    async getTaskStatus(index: number): Promise<'running' | 'paused'> {
+    async getTaskStatus(index: number): Promise<'running' | 'stopped'> {
         const card = this.getTaskCard(index);
-        const isPaused = await card.locator(Selectors.taskStatusIconPaused).isVisible();
-        return isPaused ? 'paused' : 'running';
+        const isStopped = await card.locator(Selectors.taskStatusIconStopped).isVisible();
+        return isStopped ? 'stopped' : 'running';
     }
 
     /**
@@ -167,11 +167,11 @@ export class HomePage extends AppPage {
      */
     async waitForTaskStatus(
         index: number,
-        status: 'running' | 'paused'
+        status: 'running' | 'stopped'
     ): Promise<void> {
         const expectedSelector =
-            status === 'paused'
-                ? Selectors.taskStatusIconPaused
+            status === 'stopped'
+                ? Selectors.taskStatusIconStopped
                 : Selectors.taskStatusIconSpinning;
 
         await this.page.waitForFunction(

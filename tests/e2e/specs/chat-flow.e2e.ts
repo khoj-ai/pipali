@@ -52,13 +52,13 @@ test.describe('Chat Flow - Complete User Journey', () => {
         expect(messageCount.user).toBe(1);
 
         // ============================================
-        // 3. Verify processing state (pause button, sidebar active marker)
+        // 3. Verify processing state (stop button, sidebar active marker)
         // ============================================
         await chatPage.waitForProcessing();
         expect(await chatPage.isProcessing()).toBe(true);
 
-        // Pause button should be visible
-        await expect(chatPage.pauseButton).toBeVisible();
+        // Stop button should be visible
+        await expect(chatPage.stopButton).toBeVisible();
 
         // Sidebar should show active task marker
         await chatPage.waitForActiveTaskInSidebar();
@@ -125,42 +125,38 @@ test.describe('Chat Flow - Complete User Journey', () => {
         expect(messageCount.user).toBe(1);
 
         // ============================================
-        // 9. Pause - verify state on home page
+        // 9. Stop - verify state on home page
         // ============================================
         // Wait for processing if needed
         if (await chatPage.isProcessing()) {
-            await chatPage.pauseTask();
-            await chatPage.playButton.waitFor({ state: 'visible' });
+            await chatPage.stopTask();
         }
 
-        // Verify paused state
-        expect(await chatPage.isPaused()).toBe(true);
+        // Verify stopped state
+        expect(await chatPage.isStopped()).toBe(true);
 
-        // Input hint should indicate paused
+        // Input hint should indicate stopped
         const hint = await chatPage.inputHint.textContent();
-        expect(hint?.toLowerCase()).toContain('paused');
+        expect(hint?.toLowerCase()).toContain('stopped');
 
-        // Check home page shows paused status
+        // Check home page shows stopped status
         await chatPage.goHome();
 
-        // Wait for task to show paused status
-        await homePage.waitForTaskStatus(0, 'paused');
+        // Wait for task to show stopped status
+        await homePage.waitForTaskStatus(0, 'stopped');
 
-        // Task should show paused status
-        const pausedStatus = await homePage.getTaskStatus(0);
-        expect(pausedStatus).toBe('paused');
+        // Task should show stopped status
+        const stoppedStatus = await homePage.getTaskStatus(0);
+        expect(stoppedStatus).toBe('stopped');
 
         // ============================================
-        // 10. Resume - wait for completion
+        // 10. Send follow-up - wait for completion
         // ============================================
         // Go back to chat
         await homePage.clickTaskCard(0);
         await chatPage.waitForConnection();
 
-        // Resume if paused
-        if (await chatPage.isPaused()) {
-            await chatPage.resumeTask();
-        }
+        await chatPage.sendMessage('continue');
 
         // Wait for task to complete
         await chatPage.waitForAssistantResponse();
@@ -170,7 +166,8 @@ test.describe('Chat Flow - Complete User Journey', () => {
         // ============================================
         // Should have assistant response
         messageCount = await chatPage.getMessageCount();
-        expect(messageCount.assistant).toBe(1);
+        // The stopped run keeps its assistant message (with thoughts), and the follow-up starts a new run.
+        expect(messageCount.assistant).toBe(2);
 
         // Final response should be visible
         const response = await chatPage.getLastAssistantMessage();

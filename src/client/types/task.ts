@@ -4,6 +4,6 @@ export type ActiveTask = {
     conversationId: string;
     title: string;           // Latest user query
     reasoning?: string;      // Latest step/thought
-    isPaused: boolean;
+    isStopped: boolean;
     stepCount?: number;      // Number of tool calls/steps taken
 };

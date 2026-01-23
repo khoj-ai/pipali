@@ -19,8 +19,7 @@ export const Selectors = {
 
     // Action Buttons
     sendButton: '.action-button.send',
-    pauseButton: '.action-button.pause',
-    playButton: '.action-button.play',
+    stopButton: '.action-button.stop',
 
     // Messages
     messages: '.messages',
@@ -47,11 +46,11 @@ export const Selectors = {
     taskCount: '.task-count',
     taskCards: '.task-cards',
     taskCard: '.task-card',
-    taskCardPaused: '.task-card.paused',
+    taskCardStopped: '.task-card.stopped',
     taskCardHeader: '.task-card-header',
     taskStatusIcon: '.task-status-icon',
     taskStatusIconSpinning: '.task-status-icon.spinning',
-    taskStatusIconPaused: '.task-status-icon.paused',
+    taskStatusIconStopped: '.task-status-icon.stopped',
     taskStatusText: '.task-status-text',
     taskStepCount: '.task-step-count',
     taskCardTitle: '.task-card-title',

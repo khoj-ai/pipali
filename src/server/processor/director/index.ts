@@ -78,12 +78,42 @@ interface ResearchConfig {
     username?: string;
     personality?: string;
     user?: typeof User.$inferSelect;
+    /** Optional system prompt override (persisted at run start) */
+    systemPrompt?: string;
     // For pause support
     abortSignal?: AbortSignal;
     // For user confirmation on dangerous operations
     confirmationContext?: ConfirmationContext;
     // Step count when iteration threshold was first reached, for stable warning injection
     thresholdStepCount?: number;
+}
+
+export async function buildSystemPrompt(args: {
+    currentDate?: string;
+    dayOfWeek?: string;
+    location?: string;
+    username?: string;
+    personality?: string;
+    now?: Date;
+}): Promise<string> {
+    const now = args.now ?? new Date();
+
+    const personalityContext = args.personality
+        ? await prompts.personalityContext.format({ personality: args.personality })
+        : '';
+
+    const skillsContext = formatSkillsForPrompt(getLoadedSkills());
+
+    return prompts.planFunctionExecution.format({
+        personality_context: personalityContext,
+        skills_context: skillsContext,
+        current_date: args.currentDate ?? now.toLocaleDateString('en-CA'),
+        current_time: getTimeOfDay(now),
+        day_of_week: args.dayOfWeek ?? now.toLocaleDateString('en-US', { weekday: 'long' }),
+        location: args.location ?? 'Unknown',
+        username: args.username ?? 'User',
+        os_info: `${process.platform} ${process.arch}`,
+    });
 }
 
 // Built-in tool definitions for the research agent
@@ -394,17 +424,14 @@ async function pickNextTool(
     // Build skills context
     const skillsContext = formatSkillsForPrompt(getLoadedSkills());
 
-    // Build system prompt using ChatPromptTemplate
     const now = new Date();
-    const systemPrompt = await prompts.planFunctionExecution.format({
-        personality_context: await personalityContext,
-        skills_context: skillsContext,
-        current_date: currentDate ?? now.toLocaleDateString('en-CA'), // YYYY-MM-DD in local time
-        current_time: getTimeOfDay(now),
-        day_of_week: dayOfWeek ?? now.toLocaleDateString('en-US', { weekday: 'long' }),
-        location: location ?? 'Unknown',
-        username: username ?? 'User',
-        os_info: `${process.platform} ${process.arch}`,
+    const systemPrompt = config.systemPrompt ?? await buildSystemPrompt({
+        currentDate,
+        dayOfWeek,
+        location,
+        username,
+        personality,
+        now,
     });
 
     // Check if this is the first agent iteration
@@ -634,20 +661,41 @@ async function executeTool(
 
 /**
  * Execute multiple tool calls in parallel and return their results.
- * If any tool throws ResearchPausedError, it will propagate immediately.
+ * Uses Promise.allSettled to ensure all tools complete (or fail gracefully).
+ * This allows partial results to be returned even if some tools are interrupted.
  */
 async function executeToolsInParallel(
     toolCalls: ATIFToolCall[],
-    context?: ToolExecutionContext
+    context?: ToolExecutionContext,
+    abortSignal?: AbortSignal
 ): Promise<ATIFObservationResult[]> {
-    const results: ATIFObservationResult[] = await Promise.all(
-        toolCalls.map(async (toolCall) => {
-            // executeTool will throw ResearchPausedError if paused, which propagates through Promise.all
-            const result = await executeTool(toolCall, context);
-            return { source_call_id: toolCall.tool_call_id, content: truncateToolOutput(result) };
-        })
-    );
-    return results;
+    const interruptResult = (toolCall: ATIFToolCall): ATIFObservationResult => ({
+        source_call_id: toolCall.tool_call_id,
+        content: '[interrupted]',
+    });
+
+    const toolPromises = toolCalls.map((toolCall) => {
+        const toolPromise: Promise<ATIFObservationResult> = (async () => {
+            try {
+                const result = await executeTool(toolCall, context);
+                return { source_call_id: toolCall.tool_call_id, content: truncateToolOutput(result) };
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                return { source_call_id: toolCall.tool_call_id, content: `[error: ${errorMessage}]` };
+            }
+        })();
+
+        if (!abortSignal) return toolPromise;
+        if (abortSignal.aborted) return Promise.resolve(interruptResult(toolCall));
+
+        const abortPromise: Promise<ATIFObservationResult> = new Promise((resolve) => {
+            abortSignal.addEventListener('abort', () => resolve(interruptResult(toolCall)), { once: true });
+        });
+
+        return Promise.race([toolPromise, abortPromise]);
+    });
+
+    return await Promise.all(toolPromises);
 }
 
 // Custom error for pause signal
@@ -682,6 +730,11 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         // Stop research if no tool calls
         if (iteration.toolCalls.length === 0) {
             yield iteration;
+            // Check if paused after yielding final response
+            // This prevents sending 'complete' if interrupt arrived during model generation
+            if (config.abortSignal?.aborted) {
+                throw new ResearchPausedError();
+            }
             break;
         }
 
@@ -693,13 +746,20 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             continue;
         }
 
-        // Check if paused before executing tools
-        if (config.abortSignal?.aborted) {
-            throw new ResearchPausedError();
-        }
-
         // Yield tool calls before execution so UI can show current step
         yield { ...iteration, isToolCallStart: true };
+
+        // Check if paused before executing tools - but after yielding tool_call_start
+        // If paused here, yield results with [interrupted] markers so UI can clear pending state
+        if (config.abortSignal?.aborted) {
+            const interruptedResults: ATIFObservationResult[] = iteration.toolCalls.map(tc => ({
+                source_call_id: tc.tool_call_id,
+                content: '[interrupted]',
+            }));
+            iteration.toolResults = interruptedResults;
+            yield iteration;
+            throw new ResearchPausedError();
+        }
 
         // Create metrics accumulator to capture LLM usage from tool executions
         const metricsAccumulator: MetricsAccumulator = {
@@ -714,7 +774,7 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             confirmation: config.confirmationContext,
             metricsAccumulator,
         };
-        iteration.toolResults = await executeToolsInParallel(iteration.toolCalls, executionContext);
+        iteration.toolResults = await executeToolsInParallel(iteration.toolCalls, executionContext, config.abortSignal);
 
         // Merge tool execution metrics with director's LLM metrics
         if (metricsAccumulator.prompt_tokens > 0 || metricsAccumulator.completion_tokens > 0) {
@@ -734,5 +794,10 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         }
 
         yield iteration;
+
+        // Check if paused after completing current step (graceful pause)
+        if (config.abortSignal?.aborted) {
+            throw new ResearchPausedError();
+        }
     }
 }

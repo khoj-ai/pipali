@@ -9,6 +9,7 @@ export function getToolResultStatus(toolResult: string | undefined, toolName: st
     if (!toolResult) return 'neutral';
 
     const lowerResult = toolResult.toLowerCase();
+    if (lowerResult.includes('[interrupted]')) return 'error';
 
     // Tool-specific success indicators
     if (toolName === 'edit_file' || toolName === 'write_file') {

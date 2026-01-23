@@ -15,7 +15,7 @@ export type ConversationSummary = {
 // Per-conversation state for tracking active tasks
 export type ConversationState = {
     isProcessing: boolean;
-    isPaused: boolean;
+    isStopped: boolean;
     latestReasoning?: string;
     // Store messages for this conversation to preserve streaming updates when switching
     messages: Message[];

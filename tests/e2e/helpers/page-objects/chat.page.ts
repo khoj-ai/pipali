@@ -91,18 +91,22 @@ export class ChatPage extends AppPage {
      * Wait for an assistant response to complete
      */
     async waitForAssistantResponse(): Promise<void> {
-        // Wait for at least one assistant message with content
+        // Wait for the last message in the thread to be an assistant message with content.
+        // This avoids returning early in multi-turn chats where an earlier assistant response already exists.
         await this.page.waitForFunction(
-            (selectors: { assistant: string; content: string }) => {
-                const messages = document.querySelectorAll(selectors.assistant);
+            (selectors: { message: string; assistant: string; content: string }) => {
+                const messages = document.querySelectorAll(selectors.message);
                 if (messages.length === 0) return false;
 
                 const lastMessage = messages[messages.length - 1];
-                if (!lastMessage) return false;
+                if (!lastMessage || !(lastMessage instanceof HTMLElement)) return false;
+                if (!lastMessage.matches(selectors.assistant)) return false;
+
                 const content = lastMessage.querySelector(selectors.content);
-                return content && content.textContent && content.textContent.trim().length > 0;
+                return !!(content && content.textContent && content.textContent.trim().length > 0);
             },
             {
+                message: Selectors.message,
                 assistant: Selectors.assistantMessage,
                 content: Selectors.messageContent,
             },

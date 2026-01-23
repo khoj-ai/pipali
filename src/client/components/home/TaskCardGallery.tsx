@@ -15,7 +15,7 @@ export function TaskCardGallery({ tasks, onSelectTask }: TaskCardGalleryProps) {
             <div className="task-gallery-header">
                 <h2>Active Tasks</h2>
                 <span className="task-count">
-                    {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'} running
+                    {tasks.length} {tasks.length === 1 ? 'task' : 'tasks'}
                 </span>
             </div>
             <div className="task-cards">

@@ -51,16 +51,17 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
         const formattedArgs = formatToolArgs(toolName, thought.toolArgs);
         const richArgs = formatToolArgsRich(toolName, thought.toolArgs);
         const friendlyToolName = getFriendlyToolName(toolName);
+        const isInterrupted = thought.toolResult?.trim() === '[interrupted]';
 
         // Check if this is a specific tool operation with special rendering
         const isEditOp = toolName === 'edit_file' && thought.toolArgs?.old_string && thought.toolArgs?.new_string;
         const isWriteOp = toolName === 'write_file' && thought.toolArgs?.content;
-        const isGrepOp = toolName === 'grep_files' && thought.toolResult;
-        const isListOp = toolName === 'list_files' && thought.toolResult;
+        const isGrepOp = toolName === 'grep_files' && thought.toolResult && !isInterrupted;
+        const isListOp = toolName === 'list_files' && thought.toolResult && !isInterrupted;
         const isShellOp = toolName === 'shell_command' && thought.toolArgs?.command;
-        const isReadOp = toolName === 'view_file' && thought.toolResult;
-        const isWebSearchOp = toolName === 'search_web' && thought.toolResult;
-        const isWebpageOp = toolName === 'read_webpage' && thought.toolResult;
+        const isReadOp = toolName === 'view_file' && thought.toolResult && !isInterrupted;
+        const isWebSearchOp = toolName === 'search_web' && thought.toolResult && !isInterrupted;
+        const isWebpageOp = toolName === 'read_webpage' && thought.toolResult && !isInterrupted;
 
         // Determine success/error status for step indicator (pending takes precedence)
         const stepStatus = thought.isPending ? 'pending' : getToolResultStatus(thought.toolResult, toolName);
@@ -141,8 +142,15 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false }: ThoughtI
                             url={thought.toolArgs?.url}
                         />
                     )}
+                    {/* Always show interrupted tool output in a generic view */}
+                    {isInterrupted && thought.toolResult && (
+                        <ToolResultView
+                            result={thought.toolResult}
+                            toolName={friendlyToolName}
+                        />
+                    )}
                     {/* Show regular result for other tools */}
-                    {!isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isShellOp && !isReadOp && !isWebSearchOp && !isWebpageOp && thought.toolResult && (
+                    {!isInterrupted && !isEditOp && !isWriteOp && !isGrepOp && !isListOp && !isShellOp && !isReadOp && !isWebSearchOp && !isWebpageOp && thought.toolResult && (
                         <ToolResultView
                             result={thought.toolResult}
                             toolName={friendlyToolName}

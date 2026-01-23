@@ -112,7 +112,7 @@
     outline-offset: 2px;
 }
 
-.task-card.paused {
+.task-card.stopped {
     border-left: 3px solid var(--color-warning);
 }
 
@@ -126,7 +126,7 @@
     color: var(--color-success);
 }
 
-.task-status-icon.paused {
+.task-status-icon.stopped {
     color: var(--color-warning);
 }
 

@@ -93,22 +93,12 @@
     cursor: not-allowed;
 }
 
-.action-button.pause {
+.action-button.stop {
     background: var(--color-warning);
     color: white;
 }
 
-.action-button.pause:hover {
-    opacity: 0.9;
-    transform: translateY(-1px);
-}
-
-.action-button.play {
-    background: var(--color-success);
-    color: white;
-}
-
-.action-button.play:hover {
+.action-button.stop:hover {
     opacity: 0.9;
     transform: translateY(-1px);
 }

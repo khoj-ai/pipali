@@ -1,7 +1,7 @@
-// Message input area with send/pause/play controls
+// Message input area with send/stop controls
 
 import React, { useEffect } from 'react';
-import { ArrowUp, Pause, Play } from 'lucide-react';
+import { ArrowUp, Square } from 'lucide-react';
 import type { ConfirmationRequest } from '../../types';
 import { ConfirmationDialog } from '../confirmation/ConfirmationDialog';
 
@@ -12,10 +12,9 @@ interface InputAreaProps {
     onKeyDown: (e: React.KeyboardEvent) => void;
     isConnected: boolean;
     isProcessing: boolean;
-    isPaused: boolean;
+    isStopped: boolean;
     conversationId?: string;
-    onPause: () => void;
-    onResume: () => void;
+    onStop: () => void;
     pendingConfirmation?: ConfirmationRequest;
     onConfirmationRespond: (optionId: string, guidance?: string) => void;
     textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -29,10 +28,9 @@ export function InputArea({
     onKeyDown,
     isConnected,
     isProcessing,
-    isPaused,
+    isStopped,
     conversationId,
-    onPause,
-    onResume,
+    onStop,
     pendingConfirmation,
     onConfirmationRespond,
     textareaRef,
@@ -72,57 +70,40 @@ export function InputArea({
                             // Pass through to parent handler for other cases
                             onKeyDown(e);
                         }}
-                        placeholder={isPaused ? "Type to resume with a message, or click play..." : isProcessing ? "Type to interrupt with a message..." : "Ask anything..."}
+                        placeholder={
+                            isStopped
+                                ? "Stopped. Type a new message..."
+                                : isProcessing
+                                    ? "Type to interrupt with a message..."
+                                    : "Ask anything..."
+                        }
                         rows={1}
                         disabled={!isConnected}
                         autoFocus
                     />
                     <div className="input-buttons">
-                        {/* Single action button: Send / Pause / Play */}
-                        {isProcessing && !isPaused ? (
-                            // When processing: show send if there's input, otherwise pause
+                        {/* Single action button: Send / Stop */}
+                        {isProcessing ? (
                             input.trim() ? (
                                 <button
                                     type="submit"
                                     disabled={!isConnected}
                                     className="action-button send"
-                                    title="Send message (interrupts current task)"
+                                    title="Send message (soft interrupt)"
                                 >
                                     <ArrowUp size={18} />
                                 </button>
                             ) : (
                                 <button
                                     type="button"
-                                    onClick={onPause}
-                                    className="action-button pause"
-                                    title="Pause research (Esc)"
+                                    onClick={onStop}
+                                    className="action-button stop"
+                                    title="Stop (Esc)"
                                 >
-                                    <Pause size={18} />
-                                </button>
-                            )
-                        ) : isPaused ? (
-                            // When paused: show send if there's input, otherwise play
-                            input.trim() ? (
-                                <button
-                                    type="submit"
-                                    disabled={!isConnected}
-                                    className="action-button send"
-                                    title="Resume with message"
-                                >
-                                    <ArrowUp size={18} />
-                                </button>
-                            ) : (
-                                <button
-                                    type="button"
-                                    onClick={onResume}
-                                    className="action-button play"
-                                    title="Resume research"
-                                >
-                                    <Play size={18} />
+                                    <Square size={18} />
                                 </button>
                             )
                         ) : (
-                            // Send button when idle
                             <button
                                 type="submit"
                                 disabled={!input.trim() || !isConnected}
@@ -134,10 +115,10 @@ export function InputArea({
                     </div>
                 </form>
                 <p className="input-hint">
-                    {isPaused
-                        ? "Research paused. Send a message or click play to resume."
+                    {isStopped
+                        ? "Stopped. Send a new message to start a new run."
                         : isProcessing
-                            ? "Type to interrupt, or press Esc to pause"
+                            ? "Type to interrupt, or press Esc to stop"
                             : `Enter to send, ${navigator.platform.indexOf('Mac') !== -1 ? 'Cmd' : 'Ctrl'}+Enter to ${conversationId ? 'fork conversation' : 'run for background task'}`
                     }
                 </p>

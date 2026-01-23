@@ -9,7 +9,6 @@ import "katex/dist/katex.min.css";
 import type {
     Message,
     Thought,
-    WebSocketMessage,
     ConfirmationRequest,
     ConversationSummary,
     ConversationState,
@@ -17,6 +16,7 @@ import type {
     AuthStatus,
     BillingAlert,
     BillingError,
+    ServerMessage,
 } from "./types";
 import type { PendingConfirmation } from "./types/confirmation";
 
@@ -45,6 +45,8 @@ import type { AutomationPendingConfirmation } from "./types/automations";
 
 // Page types
 type PageType = 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools' | 'settings';
+
+type ChatPendingConfirmation = { runId: string; request: ConfirmationRequest };
 
 // UUID generator that works in non-secure contexts (e.g., HTTP on non-localhost)
 function generateUUID(): string {
@@ -84,7 +86,8 @@ const App = () => {
     const [input, setInput] = useState("");
     const [isConnected, setIsConnected] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
-    const [isPaused, setIsPaused] = useState(false);
+    const [isStopped, setIsStopped] = useState(false);
+    const [activeRunId, setActiveRunId] = useState<string | undefined>(undefined);
     const [conversationId, setConversationId] = useState<string | undefined>(undefined);
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [sidebarOpen, setSidebarOpen] = useState(true);
@@ -104,7 +107,7 @@ const App = () => {
     });
 
     // Multiple pending confirmations - queue per conversation (supports parallel tool calls)
-    const [pendingConfirmations, setPendingConfirmations] = useState<Map<string, ConfirmationRequest[]>>(new Map());
+    const [pendingConfirmations, setPendingConfirmations] = useState<Map<string, ChatPendingConfirmation[]>>(new Map());
     // Pending confirmations from automations
     const [automationConfirmations, setAutomationConfirmations] = useState<AutomationPendingConfirmation[]>([]);
     // Per-conversation state for tracking active tasks across all conversations
@@ -120,16 +123,21 @@ const App = () => {
     const prevConversationIdRef = useRef<string | undefined>(undefined);
     // Track current conversationId for WebSocket handler (avoids stale closure)
     const conversationIdRef = useRef<string | undefined>(undefined);
+    const activeRunIdRef = useRef<string | undefined>(undefined);
     // Track pending background task message (sent before conversation_created is received)
-    const pendingBackgroundMessageRef = useRef<string | null>(null);
+    const pendingBackgroundMessageRef = useRef<{ message: string; clientMessageId: string; runId: string } | null>(null);
     // Track initial query from URL param (sent once when WebSocket connects or after history loads)
     const initialQueryRef = useRef<string | null>(
         new URLSearchParams(window.location.search).get('q')
     );
     // Track if we have a pending query that needs to wait for history to load
     const pendingQueryAfterHistoryRef = useRef<string | null>(null);
+    // Track which conversation history has loaded (for query-param continuation races)
+    const historyLoadedConversationIdRef = useRef<string | null>(null);
+    const awaitingConversationIdRef = useRef(false);
+    const pendingNewConversationMessagesRef = useRef<Array<{ clientMessageId: string; runId: string; message: string }>>([]);
     // Track pending confirmations for window-shown navigation (avoids stale closure)
-    const pendingConfirmationsRef = useRef<Map<string, ConfirmationRequest[]>>(new Map());
+    const pendingConfirmationsRef = useRef(pendingConfirmations);
     const automationConfirmationsRef = useRef<AutomationPendingConfirmation[]>([]);
 
     // Keep confirmation refs in sync with state (for window-shown handler)
@@ -140,6 +148,10 @@ const App = () => {
     useEffect(() => {
         automationConfirmationsRef.current = automationConfirmations;
     }, [automationConfirmations]);
+
+    useEffect(() => {
+        activeRunIdRef.current = activeRunId;
+    }, [activeRunId]);
 
     // Hooks
     const { textareaRef, scheduleTextareaFocus } = useFocusManagement();
@@ -267,7 +279,8 @@ const App = () => {
                 setConversationId(undefined);
                 setMessages([]);
                 setIsProcessing(false);
-                setIsPaused(false);
+                setIsStopped(false);
+                setActiveRunId(undefined);
                 scheduleTextareaFocus();
             }
         };
@@ -331,20 +344,73 @@ const App = () => {
         });
     }, [conversationId]);
 
-    // Global Escape key listener for pausing research
+    const stopResearch = useCallback(() => {
+        if (!isConnected || !isProcessing || !conversationId) return;
+
+        const runId = activeRunIdRef.current;
+
+        const markToolCallsInterrupted = (msgs: Message[]): Message[] => {
+            return msgs.map(m => {
+                if (m.role !== 'assistant' || !m.thoughts) return m;
+                if (runId && m.stableId !== runId) return m;
+
+                const hadPending = m.thoughts.some(t => t.type === 'tool_call' && t.isPending);
+                if (!runId && !hadPending) return m;
+
+                const updatedThoughts = m.thoughts.map(t => {
+                    if (t.type === 'tool_call' && t.isPending) return { ...t, isPending: false, toolResult: '[interrupted]' };
+                    return t;
+                });
+
+                return { ...m, thoughts: updatedThoughts, isStreaming: false };
+            });
+        };
+
+        setIsProcessing(false);
+        setIsStopped(true);
+        setActiveRunId(undefined);
+
+        // Clear any pending confirmations for this conversation.
+        setPendingConfirmations(prev => {
+            if (!prev.has(conversationId)) return prev;
+            const next = new Map(prev);
+            next.delete(conversationId);
+            return next;
+        });
+
+        setMessages(prev => markToolCallsInterrupted(prev));
+
+        setConversationStates(prev => {
+            const next = new Map(prev);
+            const existing = next.get(conversationId);
+            if (existing) {
+                next.set(conversationId, {
+                    ...existing,
+                    isProcessing: false,
+                    isStopped: true,
+                    messages: markToolCallsInterrupted(existing.messages),
+                });
+            }
+            return next;
+        });
+
+        wsRef.current?.send(JSON.stringify({ type: 'stop', conversationId, runId }));
+    }, [isConnected, isProcessing, conversationId]);
+
+    // Global Escape key listener for stopping research
     useEffect(() => {
         const handleGlobalKeyDown = (e: KeyboardEvent) => {
-            if (e.key === 'Escape' && isProcessing && !isPaused && isConnected && conversationId) {
+            if (e.key === 'Escape' && isProcessing && isConnected && conversationId) {
                 e.preventDefault();
                 e.stopPropagation();
-                wsRef.current?.send(JSON.stringify({ type: 'pause', conversationId }));
+                stopResearch();
                 textareaRef.current?.focus();
             }
         };
 
         window.addEventListener('keydown', handleGlobalKeyDown);
         return () => window.removeEventListener('keydown', handleGlobalKeyDown);
-    }, [isProcessing, isPaused, isConnected, conversationId]);
+    }, [isProcessing, isConnected, conversationId, stopResearch]);
 
     // Global Cmd/Ctrl+F listener for find in page
     useEffect(() => {
@@ -463,6 +529,7 @@ const App = () => {
 
     const fetchHistory = async (id: string) => {
         try {
+            historyLoadedConversationIdRef.current = null;
             const res = await apiFetch(`/api/chat/${id}/history`);
             if (!res.ok) return;
             const data = await res.json();
@@ -564,20 +631,21 @@ const App = () => {
 
             finalizeCurrentAgent();
             setMessages(historyMessages);
+            historyLoadedConversationIdRef.current = id;
 
             // Check if there's a pending query to send after history loaded
             const pendingQuery = pendingQueryAfterHistoryRef.current;
             if (pendingQuery && wsRef.current?.readyState === WebSocket.OPEN) {
                 pendingQueryAfterHistoryRef.current = null;
 
-                // Add the new message to the loaded history
-                const userMsgId = generateUUID();
-                const assistantMsgId = generateUUID();
-                const userMsg: Message = { id: userMsgId, stableId: userMsgId, role: 'user', content: pendingQuery };
-                const assistantMsg: Message = { id: assistantMsgId, stableId: assistantMsgId, role: 'assistant', content: '', thoughts: [], isStreaming: true };
-                setMessages(prev => [...prev, userMsg, assistantMsg]);
+                const clientMessageId = generateUUID();
+                const runId = generateUUID();
+                const userMsg: Message = { id: clientMessageId, stableId: clientMessageId, role: 'user', content: pendingQuery };
+                setMessages(prev => [...prev, userMsg]);
                 setIsProcessing(true);
-                wsRef.current.send(JSON.stringify({ message: pendingQuery, conversationId: id }));
+                setIsStopped(false);
+                setActiveRunId(undefined);
+                wsRef.current.send(JSON.stringify({ type: 'message', message: pendingQuery, conversationId: id, clientMessageId, runId }));
             }
         } catch (e) {
             console.error("Failed to fetch history", e);
@@ -633,6 +701,22 @@ const App = () => {
         const wsUrl = `${wsBaseUrl}/ws/chat`;
         const ws = new WebSocket(wsUrl);
 
+        const sendPendingQueryForConversation = (conversationId: string) => {
+            const pendingQuery = pendingQueryAfterHistoryRef.current;
+            if (!pendingQuery) return;
+            if (ws.readyState !== WebSocket.OPEN) return;
+
+            pendingQueryAfterHistoryRef.current = null;
+            const clientMessageId = generateUUID();
+            const runId = generateUUID();
+            const userMsg: Message = { id: clientMessageId, stableId: clientMessageId, role: 'user', content: pendingQuery };
+            setMessages(prev => [...prev, userMsg]);
+            setIsProcessing(true);
+            setIsStopped(false);
+            setActiveRunId(undefined);
+            ws.send(JSON.stringify({ type: 'message', message: pendingQuery, conversationId, clientMessageId, runId }));
+        };
+
         ws.onopen = () => {
             console.log("Connected to WebSocket");
             setIsConnected(true);
@@ -655,16 +739,23 @@ const App = () => {
                     // Store the query to be sent after history loads
                     pendingQueryAfterHistoryRef.current = initialQuery;
                     setCurrentPage('chat');
+
+                    // If history already loaded before the WebSocket connected, send immediately.
+                    if (historyLoadedConversationIdRef.current === urlConversationId) {
+                        sendPendingQueryForConversation(urlConversationId);
+                    }
                 } else {
                     // No conversationId, start fresh conversation immediately
-                    const userMsgId = generateUUID();
-                    const assistantMsgId = generateUUID();
-                    const userMsg: Message = { id: userMsgId, stableId: userMsgId, role: 'user', content: initialQuery };
-                    const assistantMsg: Message = { id: assistantMsgId, stableId: assistantMsgId, role: 'assistant', content: '', thoughts: [], isStreaming: true };
-                    setMessages([userMsg, assistantMsg]);
+                    const clientMessageId = generateUUID();
+                    const runId = generateUUID();
+                    const userMsg: Message = { id: clientMessageId, stableId: clientMessageId, role: 'user', content: initialQuery };
+                    setMessages([userMsg]);
                     setIsProcessing(true);
+                    setIsStopped(false);
+                    setActiveRunId(undefined);
                     setCurrentPage('chat');
-                    ws.send(JSON.stringify({ message: initialQuery }));
+                    awaitingConversationIdRef.current = true;
+                    ws.send(JSON.stringify({ type: 'message', message: initialQuery, clientMessageId, runId }));
                 }
             }
         };
@@ -677,7 +768,7 @@ const App = () => {
 
         ws.onmessage = (event) => {
             try {
-                const message: WebSocketMessage = JSON.parse(event.data);
+                const message: ServerMessage = JSON.parse(event.data);
                 handleWebSocketMessage(message);
             } catch (e) {
                 console.error("Failed to parse message:", e);
@@ -687,8 +778,8 @@ const App = () => {
         wsRef.current = ws;
     };
 
-    const handleWebSocketMessage = (message: WebSocketMessage) => {
-        const msgConversationId = message.conversationId;
+    const handleWebSocketMessage = (message: ServerMessage) => {
+        const msgConversationId = 'conversationId' in message ? message.conversationId : undefined;
 
         if (message.type === 'billing_error') {
             const billingError = message.error as BillingError;
@@ -727,7 +818,8 @@ const App = () => {
             // Show friendly message in current conversation's chat thread
             if (!msgConversationId || msgConversationId === conversationIdRef.current) {
                 setIsProcessing(false);
-                setIsPaused(false);
+                setIsStopped(false);
+                setActiveRunId(undefined);
                 const billingMsgId = generateUUID();
                 const friendlyMessage = getRandomBillingMessage(billingError.code);
                 setMessages(prev => [...prev, {
@@ -744,82 +836,7 @@ const App = () => {
             return;
         }
 
-        if (message.type === 'error') {
-            console.error("Server error:", message.error);
-            if (msgConversationId) {
-                setConversationStates(prev => {
-                    const next = new Map(prev);
-                    next.delete(msgConversationId);
-                    return next;
-                });
-            }
-            if (!msgConversationId || msgConversationId === conversationIdRef.current) {
-                setIsProcessing(false);
-                setIsPaused(false);
-                const errorMsgId = generateUUID();
-                setMessages(prev => [...prev, {
-                    id: errorMsgId,
-                    stableId: errorMsgId,
-                    role: 'assistant',
-                    content: `Error: ${message.error}`,
-                }]);
-            }
-            return;
-        }
-
-        if (message.type === 'research') {
-            if (msgConversationId) {
-                setConversationStates(prev => {
-                    const next = new Map(prev);
-                    const existing = next.get(msgConversationId);
-                    let msgs = existing?.messages || [];
-                    const lastMsg = msgs[msgs.length - 1];
-                    if (!lastMsg || !lastMsg.isStreaming) {
-                        const researchMsgId = generateUUID();
-                        msgs = [...msgs, {
-                            id: researchMsgId,
-                            stableId: researchMsgId,
-                            role: 'assistant' as const,
-                            content: '',
-                            isStreaming: true,
-                            thoughts: [],
-                        }];
-                    }
-                    next.set(msgConversationId, {
-                        isProcessing: true,
-                        isPaused: false, // Research is active, clear paused state
-                        latestReasoning: existing?.latestReasoning,
-                        messages: msgs,
-                    });
-                    return next;
-                });
-            }
-            if (!msgConversationId || msgConversationId === conversationIdRef.current) {
-                setIsProcessing(true);
-                setIsPaused(false); // Research is active, clear paused state
-            }
-            return;
-        }
-
-        if (message.type === 'pause') {
-            if (msgConversationId) {
-                setConversationStates(prev => {
-                    const next = new Map(prev);
-                    const existing = next.get(msgConversationId);
-                    next.set(msgConversationId, {
-                        isProcessing: true,
-                        isPaused: true,
-                        latestReasoning: existing?.latestReasoning,
-                        messages: existing?.messages || [],
-                    });
-                    return next;
-                });
-            }
-            if (!msgConversationId || msgConversationId === conversationIdRef.current) {
-                setIsPaused(true);
-            }
-            return;
-        }
+        // All run/step lifecycle events are handled below.
 
         if (message.type === 'conversation_created') {
             const newConvId = message.conversationId;
@@ -833,7 +850,20 @@ const App = () => {
                 // Update ref immediately so subsequent WebSocket messages are processed correctly
                 // (avoids race condition where messages arrive before useEffect updates the ref)
                 conversationIdRef.current = newConvId;
+                awaitingConversationIdRef.current = false;
                 setConversationId(newConvId);
+
+                const queued = pendingNewConversationMessagesRef.current;
+                pendingNewConversationMessagesRef.current = [];
+                for (const qm of queued) {
+                    wsRef.current?.send(JSON.stringify({
+                        type: 'message',
+                        message: qm.message,
+                        conversationId: newConvId,
+                        clientMessageId: qm.clientMessageId,
+                        runId: qm.runId,
+                    }));
+                }
             }
 
             if (newConvId) {
@@ -896,19 +926,20 @@ const App = () => {
                         finalizeAgent();
                     }
 
-                    // Add the new user message + streaming assistant
-                    const userMsgId = generateUUID();
-                    const assistantMsgId = generateUUID();
                     const initialMessages: Message[] = [
                         ...historyMessages,
-                        { id: userMsgId, stableId: userMsgId, role: 'user' as const, content: pendingMsg },
-                        { id: assistantMsgId, stableId: assistantMsgId, role: 'assistant' as const, content: '', thoughts: [], isStreaming: true },
+                        {
+                            id: pendingMsg.clientMessageId,
+                            stableId: pendingMsg.clientMessageId,
+                            role: 'user' as const,
+                            content: pendingMsg.message,
+                        },
                     ];
                     setConversationStates(prevStates => {
                         const next = new Map(prevStates);
                         next.set(newConvId, {
                             isProcessing: true,
-                            isPaused: false,
+                            isStopped: false,
                             latestReasoning: undefined,
                             messages: initialMessages,
                         });
@@ -923,7 +954,7 @@ const App = () => {
                             const next = new Map(prevStates);
                             next.set(newConvId, {
                                 isProcessing: true,
-                                isPaused: false,
+                                isStopped: false,
                                 latestReasoning: undefined,
                                 messages: currentMessages,
                             });
@@ -937,87 +968,111 @@ const App = () => {
             return;
         }
 
-        // Handle user message persisted - update user message ID for deletion support
-        if (message.type === 'user_message_persisted') {
-            const { data } = message;
-            const stepId = String(data.stepId);
-            const targetConvId = msgConversationId || conversationIdRef.current;
+        if (message.type === 'user_step_saved') {
+            const stepId = String(message.stepId);
+            const targetConvId = message.conversationId;
 
-            // Update the most recent user message ID
             const updateUserMessageId = (msgs: Message[]): Message[] => {
-                // Find the last user message and update its ID
-                const lastUserMsgIndex = msgs.findLastIndex(m => m.role === 'user');
-                if (lastUserMsgIndex >= 0) {
-                    return msgs.map((msg, idx) =>
-                        idx === lastUserMsgIndex ? { ...msg, id: stepId } : msg
-                    );
-                }
-                return msgs;
+                return msgs.map(msg => {
+                    if (msg.role === 'user' && msg.id === message.clientMessageId) {
+                        return { ...msg, id: stepId };
+                    }
+                    return msg;
+                });
             };
 
             if (targetConvId === conversationIdRef.current) {
                 setMessages(prev => updateUserMessageId(prev));
             }
 
-            if (targetConvId) {
-                setConversationStates(prev => {
-                    const next = new Map(prev);
-                    const existing = next.get(targetConvId);
-                    if (existing) {
-                        next.set(targetConvId, {
-                            ...existing,
-                            messages: updateUserMessageId(existing.messages),
-                        });
-                    }
-                    return next;
-                });
-            }
+            setConversationStates(prev => {
+                const next = new Map(prev);
+                const existing = next.get(targetConvId);
+                if (existing) {
+                    next.set(targetConvId, {
+                        ...existing,
+                        messages: updateUserMessageId(existing.messages),
+                    });
+                }
+                return next;
+            });
             return;
         }
 
         if (message.type === 'confirmation_request') {
             const confirmationData = message.data as ConfirmationRequest;
-            if (msgConversationId) {
-                setPendingConfirmations(prev => {
-                    const next = new Map(prev);
-                    const existing = next.get(msgConversationId) || [];
-                    // Add to queue (avoid duplicates by checking requestId)
-                    if (!existing.some(c => c.requestId === confirmationData.requestId)) {
-                        next.set(msgConversationId, [...existing, confirmationData]);
+            const convId = message.conversationId;
+            setPendingConfirmations(prev => {
+                const next = new Map(prev);
+                const existing = next.get(convId) || [];
+                if (!existing.some(c => c.request.requestId === confirmationData.requestId)) {
+                    next.set(convId, [...existing, { runId: message.runId, request: confirmationData }]);
 
-                        // Trigger native OS notification if window not focused
-                        const conv = conversations.find(c => c.id === msgConversationId);
-                        notifyConfirmationRequest(confirmationData, conv?.title, msgConversationId);
-                    }
-                    return next;
-                });
-            }
+                    const conv = conversations.find(c => c.id === convId);
+                    notifyConfirmationRequest(confirmationData, conv?.title, convId);
+                }
+                return next;
+            });
             return;
         }
 
-        // Handle tool call start - add pending tool calls before execution
-        if (message.type === 'tool_call_start') {
+        if (message.type === 'run_started') {
+            const convId = message.conversationId;
+            const runId = message.runId;
+
+            const ensureAssistantForRun = (msgs: Message[]): Message[] => {
+                if (msgs.some(m => m.role === 'assistant' && m.stableId === runId)) return msgs;
+
+                const assistant: Message = {
+                    id: runId,
+                    stableId: runId,
+                    role: 'assistant',
+                    content: '',
+                    thoughts: [],
+                    isStreaming: true,
+                };
+
+                const idx = msgs.findIndex(m => m.role === 'user' && (m.id === message.clientMessageId || m.stableId === message.clientMessageId));
+                if (idx === -1) return [...msgs, assistant];
+                return [...msgs.slice(0, idx + 1), assistant, ...msgs.slice(idx + 1)];
+            };
+
+            if (convId === conversationIdRef.current) {
+                setIsProcessing(true);
+                setIsStopped(false);
+                setActiveRunId(runId);
+                setMessages(prev => ensureAssistantForRun(prev));
+            }
+
+            setConversationStates(prev => {
+                const next = new Map(prev);
+                const existing = next.get(convId);
+                const existingMessages = existing?.messages || [];
+                next.set(convId, {
+                    isProcessing: true,
+                    isStopped: false,
+                    latestReasoning: existing?.latestReasoning,
+                    messages: ensureAssistantForRun(existingMessages),
+                });
+                return next;
+            });
+
+            return;
+        }
+
+        if (message.type === 'step_start') {
+            const convId = message.conversationId;
+            const runId = message.runId;
             const { data } = message;
 
             const createPendingThoughts = (): Thought[] => {
                 const newThoughts: Thought[] = [];
-                // Add thought/message if present
                 if (data.message && data.toolCalls?.length > 0) {
-                    newThoughts.push({
-                        id: generateUUID(),
-                        type: 'thought',
-                        content: data.message,
-                    });
+                    newThoughts.push({ id: generateUUID(), type: 'thought', content: data.message });
                 } else if (data.thought) {
-                    newThoughts.push({
-                        id: generateUUID(),
-                        type: 'thought',
-                        content: data.thought,
-                        isInternalThought: true,
-                    });
+                    newThoughts.push({ id: generateUUID(), type: 'thought', content: data.thought, isInternalThought: true });
                 }
 
-                // Add tool calls as pending (no results yet)
                 for (const toolCall of data.toolCalls || []) {
                     newThoughts.push({
                         id: toolCall.tool_call_id || generateUUID(),
@@ -1028,201 +1083,220 @@ const App = () => {
                         isPending: true,
                     });
                 }
-
                 return newThoughts;
             };
 
             const updateMessagesWithPendingThoughts = (msgs: Message[]): Message[] => {
-                const lastMsg = msgs[msgs.length - 1];
-                if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-                    const newThoughts = createPendingThoughts();
-                    return msgs.map(msg =>
-                        msg.id === lastMsg.id
-                            ? { ...msg, thoughts: [...(msg.thoughts || []), ...newThoughts] }
-                            : msg
-                    );
+                const assistantIdx = msgs.findIndex(m => m.role === 'assistant' && m.stableId === runId);
+                if (assistantIdx === -1) {
+                    const assistant: Message = { id: runId, stableId: runId, role: 'assistant', content: '', thoughts: [], isStreaming: true };
+                    return updateMessagesWithPendingThoughts([...msgs, assistant]);
                 }
-                return msgs;
+
+                const assistant = msgs[assistantIdx];
+                if (!assistant) return msgs;
+                const newThoughts = createPendingThoughts();
+                const updatedAssistant: Message = { ...assistant, thoughts: [...(assistant.thoughts || []), ...newThoughts] };
+                return msgs.map((m, idx) => (idx === assistantIdx ? updatedAssistant : m));
             };
 
-            const currentConvId = conversationIdRef.current;
-            // Update the current view if:
-            // 1. Message conversation matches current conversation, OR
-            // 2. No message conversation ID and we have a current conversation (legacy)
-            const isCurrentConversation =
-                !msgConversationId || // Legacy case
-                msgConversationId === currentConvId; // Matches current
-
-            if (isCurrentConversation) {
+            if (convId === conversationIdRef.current) {
                 setMessages(prev => updateMessagesWithPendingThoughts(prev));
             }
 
-            const targetConvId = msgConversationId || currentConvId;
-            if (targetConvId) {
-                setConversationStates(prev => {
-                    const next = new Map(prev);
-                    const existing = next.get(targetConvId);
-                    const existingMessages = existing?.messages || [];
+            setConversationStates(prev => {
+                const next = new Map(prev);
+                const existing = next.get(convId);
+                const existingMessages = existing?.messages || [];
 
-                    let newReasoning: string | undefined;
-                    if (data.message && data.toolCalls?.length > 0) {
-                        newReasoning = data.message;
-                    } else if (data.thought) {
-                        newReasoning = data.thought;
-                    } else if (data.toolCalls?.length > 0) {
-                        newReasoning = formatToolCallsForSidebar(data.toolCalls);
-                    }
+                let newReasoning: string | undefined;
+                if (data.message && data.toolCalls?.length > 0) {
+                    newReasoning = data.message;
+                } else if (data.thought) {
+                    newReasoning = data.thought;
+                } else if (data.toolCalls?.length > 0) {
+                    newReasoning = formatToolCallsForSidebar(data.toolCalls);
+                }
 
-                    next.set(targetConvId, {
-                        isProcessing: true,
-                        isPaused: existing?.isPaused ?? false, // Preserve paused state
-                        latestReasoning: newReasoning || existing?.latestReasoning,
-                        messages: updateMessagesWithPendingThoughts(existingMessages),
-                    });
-                    return next;
+                next.set(convId, {
+                    isProcessing: true,
+                    isStopped: false,
+                    latestReasoning: newReasoning || existing?.latestReasoning,
+                    messages: updateMessagesWithPendingThoughts(existingMessages),
                 });
-            }
+                return next;
+            });
+
             return;
         }
 
-        // Handle iteration with results - update pending tool calls with results
-        if (message.type === 'iteration') {
+        if (message.type === 'step_end') {
+            const convId = message.conversationId;
+            const runId = message.runId;
             const { data } = message;
 
             const updateMessagesWithResults = (msgs: Message[]): Message[] => {
-                const lastMsg = msgs[msgs.length - 1];
-                if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-                    // Update existing pending tool calls with results
-                    const updatedThoughts = (lastMsg.thoughts || []).map(thought => {
-                        if (thought.type === 'tool_call' && thought.isPending) {
-                            const toolResult = data.toolResults?.find(
-                                (tr: any) => tr.source_call_id === thought.id
-                            )?.content;
-                            if (toolResult !== undefined) {
-                                const matchingToolContent = typeof toolResult !== 'string' ? JSON.stringify(toolResult) : toolResult;
-                                return { ...thought, toolResult: matchingToolContent, isPending: false };
-                            }
+                const assistantIdx = msgs.findIndex(m => m.role === 'assistant' && m.stableId === runId);
+                if (assistantIdx === -1) return msgs;
+                const assistant = msgs[assistantIdx];
+                if (!assistant) return msgs;
+                const updatedThoughts = (assistant.thoughts || []).map(thought => {
+                    if (thought.type === 'tool_call' && thought.isPending) {
+                        const toolResult = data.toolResults?.find(tr => tr.source_call_id === thought.id)?.content;
+                        if (toolResult !== undefined) {
+                            const matchingToolContent = typeof toolResult !== 'string' ? JSON.stringify(toolResult) : toolResult;
+                            return { ...thought, toolResult: matchingToolContent, isPending: false };
                         }
-                        return thought;
-                    });
-                    // Update message ID to stepId (from DB) for proper deletion support
-                    const newId = data.stepId !== undefined ? String(data.stepId) : lastMsg.id;
-                    return msgs.map(msg =>
-                        msg.id === lastMsg.id
-                            ? { ...msg, id: newId, thoughts: updatedThoughts }
-                            : msg
-                    );
-                }
-                return msgs;
+                    }
+                    return thought;
+                });
+                const updatedAssistant: Message = { ...assistant, thoughts: updatedThoughts };
+                return msgs.map((m, idx) => (idx === assistantIdx ? updatedAssistant : m));
             };
 
-            const currentConvId = conversationIdRef.current;
-            // Update the current view if:
-            // 1. Message conversation matches current conversation, OR
-            // 2. No message conversation ID and we have a current conversation (legacy)
-            const isCurrentConversation =
-                !msgConversationId || // Legacy case
-                msgConversationId === currentConvId; // Matches current
-
-            if (isCurrentConversation) {
+            if (convId === conversationIdRef.current) {
                 setMessages(prev => updateMessagesWithResults(prev));
             }
 
-            const targetConvId = msgConversationId || currentConvId;
-            if (targetConvId) {
-                setConversationStates(prev => {
-                    const next = new Map(prev);
-                    const existing = next.get(targetConvId);
-                    const existingMessages = existing?.messages || [];
+            setConversationStates(prev => {
+                const next = new Map(prev);
+                const existing = next.get(convId);
+                if (!existing) return next;
 
-                    next.set(targetConvId, {
-                        isProcessing: true,
-                        isPaused: false,
-                        latestReasoning: existing?.latestReasoning,
-                        messages: updateMessagesWithResults(existingMessages),
-                    });
-                    return next;
+                let newReasoning: string | undefined;
+                if (data.message && data.toolCalls?.length > 0) {
+                    newReasoning = data.message;
+                } else if (data.thought) {
+                    newReasoning = data.thought;
+                } else if (data.toolCalls?.length > 0) {
+                    newReasoning = formatToolCallsForSidebar(data.toolCalls);
+                }
+
+                next.set(convId, {
+                    ...existing,
+                    latestReasoning: newReasoning || existing.latestReasoning,
+                    messages: updateMessagesWithResults(existing.messages),
                 });
-            }
+                return next;
+            });
+            return;
         }
 
-        if (message.type === 'complete') {
-            const { data } = message;
-            const completedConvId = msgConversationId || data.conversationId;
-            // Use stepId from server for proper deletion support
-            const messageId = data.stepId !== undefined ? String(data.stepId) : generateUUID();
+        if (message.type === 'run_stopped') {
+            const convId = message.conversationId;
+            const runId = message.runId;
 
-            // Clear billing alerts - successful response means credits are available
+            const markToolCallsInterrupted = (msgs: Message[]): Message[] => {
+                return msgs.map(m => {
+                    if (m.role !== 'assistant' || m.stableId !== runId || !m.thoughts) return m;
+                    const updatedThoughts = m.thoughts.map(t => {
+                        if (t.type === 'tool_call' && t.isPending) return { ...t, isPending: false, toolResult: '[interrupted]' };
+                        return t;
+                    });
+                    return { ...m, thoughts: updatedThoughts, isStreaming: false };
+                });
+            };
+
+            // A stopped run cannot still be awaiting confirmation; clear any pending confirmations tied to this run.
+            setPendingConfirmations(prev => {
+                const existing = prev.get(convId);
+                if (!existing || existing.length === 0) return prev;
+
+                const remaining = existing.filter(c => c.runId !== runId);
+                if (remaining.length === existing.length) return prev;
+
+                const next = new Map(prev);
+                if (remaining.length === 0) next.delete(convId);
+                else next.set(convId, remaining);
+                return next;
+            });
+
+            if (convId === conversationIdRef.current) {
+                setIsProcessing(false);
+                setActiveRunId(undefined);
+                setIsStopped(message.reason === 'user_stop');
+                setMessages(prev => markToolCallsInterrupted(prev));
+            }
+
+            setConversationStates(prev => {
+                const next = new Map(prev);
+                const existing = next.get(convId);
+                if (!existing) return next;
+                next.set(convId, {
+                    ...existing,
+                    isProcessing: false,
+                    isStopped: message.reason === 'user_stop',
+                    messages: markToolCallsInterrupted(existing.messages),
+                });
+                return next;
+            });
+
+            if (message.reason === 'error' && message.error && convId === conversationIdRef.current) {
+                const errMsgId = generateUUID();
+                setMessages(prev => [
+                    ...prev,
+                    { id: errMsgId, stableId: errMsgId, role: 'assistant', content: `Error: ${message.error}` },
+                ]);
+            }
+
+            return;
+        }
+
+        if (message.type === 'run_complete') {
+            const convId = message.conversationId;
+            const runId = message.runId;
+            const response = message.data.response;
+            const messageId = String(message.data.stepId);
+
             setBillingAlerts([]);
 
             const finalizeMessages = (msgs: Message[]): Message[] => {
-                // Filter out billing messages since credits are now available
                 const filteredMsgs = msgs.filter(msg => !msg.billingInfo);
-
-                const lastMsg = filteredMsgs[filteredMsgs.length - 1];
-                if (lastMsg && lastMsg.role === 'assistant' && lastMsg.isStreaming) {
-                    return filteredMsgs.map(msg =>
-                        msg.id === lastMsg.id
-                            ? { ...msg, id: messageId, content: data.response, isStreaming: false }
-                            : msg
-                    );
+                const assistantIdx = filteredMsgs.findIndex(m => m.role === 'assistant' && m.stableId === runId);
+                if (assistantIdx === -1) {
+                    return [
+                        ...filteredMsgs,
+                        { id: messageId, stableId: runId, role: 'assistant', content: response, isStreaming: false },
+                    ];
                 }
-                return [...filteredMsgs, {
-                    id: messageId,
-                    stableId: messageId,
-                    role: 'assistant' as const,
-                    content: data.response,
-                    isStreaming: false,
-                }];
+                return filteredMsgs.map((m, idx) => {
+                    if (idx !== assistantIdx) return m;
+                    return { ...m, id: messageId, content: response, isStreaming: false };
+                });
             };
 
-            const currentConvId = conversationIdRef.current;
-            // Update the current view if this message is for the current conversation.
-            // When user clicks "New Chat" or goes home, we set conversationIdRef.current to undefined.
-            // For normal new conversations, conversation_created updates the ref immediately,
-            // so by the time complete arrives, both IDs should match.
-            const isCurrentConversation =
-                (!completedConvId && !currentConvId) || // Both undefined (legacy - no conversation tracking)
-                completedConvId === currentConvId; // Matches current conversation
-
-            if (isCurrentConversation) {
-                setConversationId(data.conversationId);
+            if (convId === conversationIdRef.current) {
                 setIsProcessing(false);
-                setIsPaused(false);
+                setIsStopped(false);
+                setActiveRunId(undefined);
                 setMessages(prev => finalizeMessages(prev));
             }
 
-            if (completedConvId) {
-                setConversationStates(prev => {
-                    const next = new Map(prev);
-                    const existing = next.get(completedConvId);
-                    const existingMessages = existing?.messages || [];
+            setConversationStates(prev => {
+                const next = new Map(prev);
+                const existing = next.get(convId);
+                const existingMessages = existing?.messages || [];
 
-                    // Notify user that task completed (if window not focused)
-                    // Get the user's original request from conversation state messages
-                    const userRequest = existingMessages
-                        .filter(m => m.role === 'user')
-                        .pop()?.content;
-                    notifyTaskComplete(userRequest, data.response, completedConvId);
+                const userRequest = existingMessages.filter(m => m.role === 'user').pop()?.content;
+                notifyTaskComplete(userRequest, response, convId);
 
-                    next.set(completedConvId, {
-                        isProcessing: false,
-                        isPaused: false,
-                        latestReasoning: existing?.latestReasoning,
-                        messages: finalizeMessages(existingMessages),
-                    });
-                    return next;
+                next.set(convId, {
+                    isProcessing: false,
+                    isStopped: false,
+                    latestReasoning: existing?.latestReasoning,
+                    messages: finalizeMessages(existingMessages),
                 });
+                return next;
+            });
 
-                // Clear confirmation queue for completed conversation
-                setPendingConfirmations(prev => {
-                    const next = new Map(prev);
-                    next.delete(completedConvId);
-                    return next;
-                });
-            }
+            setPendingConfirmations(prev => {
+                const next = new Map(prev);
+                next.delete(convId);
+                return next;
+            });
 
             fetchConversations();
+            return;
         }
     };
 
@@ -1233,7 +1307,7 @@ const App = () => {
         const activeTasks: ActiveTask[] = [];
 
         conversationStates.forEach((state, convId) => {
-            if (state.isProcessing) {
+            if (state.isProcessing || state.isStopped) {
                 const conv = conversations.find(c => c.id === convId);
                 // Get latest user message from conversation messages or title
                 const latestUserMessage = state.messages
@@ -1248,7 +1322,7 @@ const App = () => {
                     conversationId: convId,
                     title: latestUserMessage,
                     reasoning: state.latestReasoning,
-                    isPaused: state.isPaused,
+                    isStopped: state.isStopped,
                     stepCount,
                 });
             }
@@ -1281,7 +1355,8 @@ const App = () => {
         setConversationId(undefined);
         setMessages([]);
         setIsProcessing(false);
-        setIsPaused(false);
+        setIsStopped(false);
+        setActiveRunId(undefined);
 
         // Update URL to root
         window.history.pushState({}, '', '/');
@@ -1307,7 +1382,8 @@ const App = () => {
         setConversationId(undefined);
         setMessages([]);
         setIsProcessing(false);
-        setIsPaused(false);
+        setIsStopped(false);
+        setActiveRunId(undefined);
 
         // Update URL to /skills
         window.history.pushState({}, '', '/skills');
@@ -1333,7 +1409,8 @@ const App = () => {
         setConversationId(undefined);
         setMessages([]);
         setIsProcessing(false);
-        setIsPaused(false);
+        setIsStopped(false);
+        setActiveRunId(undefined);
 
         // Update URL to /automations
         window.history.pushState({}, '', '/automations');
@@ -1359,7 +1436,8 @@ const App = () => {
         setConversationId(undefined);
         setMessages([]);
         setIsProcessing(false);
-        setIsPaused(false);
+        setIsStopped(false);
+        setActiveRunId(undefined);
 
         // Update URL to /tools
         window.history.pushState({}, '', '/tools');
@@ -1385,7 +1463,8 @@ const App = () => {
         setConversationId(undefined);
         setMessages([]);
         setIsProcessing(false);
-        setIsPaused(false);
+        setIsStopped(false);
+        setActiveRunId(undefined);
 
         // Update URL to /settings
         window.history.pushState({}, '', '/settings');
@@ -1411,7 +1490,8 @@ const App = () => {
         setConversationId(id);
         const convState = conversationStates.get(id);
         setIsProcessing(convState?.isProcessing ?? false);
-        setIsPaused(convState?.isPaused ?? false);
+        setIsStopped(convState?.isStopped ?? false);
+        setActiveRunId(undefined);
 
         if (convState?.messages && convState.messages.length > 0) {
             setMessages(convState.messages);
@@ -1427,7 +1507,8 @@ const App = () => {
         setConversationId(undefined);
         setMessages([]); // Clear messages for fresh new chat
         setIsProcessing(false);
-        setIsPaused(false);
+        setIsStopped(false);
+        setActiveRunId(undefined);
     };
 
     const deleteConversation = async (id: string, e: React.MouseEvent) => {
@@ -1478,46 +1559,17 @@ const App = () => {
 
     // ===== Message Sending =====
 
-    const pauseResearch = () => {
-        if (!isConnected || !isProcessing || isPaused || !conversationId) return;
-        // Optimistically update UI immediately for better responsiveness
-        setIsPaused(true);
-        setConversationStates(prev => {
-            const next = new Map(prev);
-            const existing = next.get(conversationId);
-            if (existing) {
-                next.set(conversationId, { ...existing, isPaused: true });
-            }
-            return next;
-        });
-        wsRef.current?.send(JSON.stringify({ type: 'pause', conversationId }));
-    };
-
-    const resumeResearch = (withMessage?: string) => {
-        if (!isConnected || !isPaused || !conversationId) return;
-        // Optimistically update UI immediately for better responsiveness
-        setIsPaused(false);
-        setConversationStates(prev => {
-            const next = new Map(prev);
-            const existing = next.get(conversationId);
-            if (existing) {
-                next.set(conversationId, { ...existing, isPaused: false });
-            }
-            return next;
-        });
-        wsRef.current?.send(JSON.stringify({ type: 'resume', message: withMessage, conversationId }));
-    };
-
-    const sendConfirmationResponse = (convId: string, optionId: string, guidance?: string) => {
+    const sendConfirmationResponse = (convId: string, requestId: string, optionId: string, guidance?: string) => {
         const queue = pendingConfirmations.get(convId);
-        const pendingConfirmation = queue?.[0]; // Get first in queue
+        const pendingConfirmation = queue?.find(c => c.request.requestId === requestId);
         if (!pendingConfirmation || !isConnected) return;
 
         const response = {
             type: 'confirmation_response',
             conversationId: convId,
+            runId: pendingConfirmation.runId,
             data: {
-                requestId: pendingConfirmation.requestId,
+                requestId,
                 selectedOptionId: optionId,
                 guidance,
                 timestamp: new Date().toISOString(),
@@ -1530,7 +1582,7 @@ const App = () => {
         setPendingConfirmations(prev => {
             const next = new Map(prev);
             const existingQueue = next.get(convId) || [];
-            const remainingQueue = existingQueue.slice(1); // Remove first item
+            const remainingQueue = existingQueue.filter(c => c.request.requestId !== requestId);
             if (remainingQueue.length > 0) {
                 next.set(convId, remainingQueue);
             } else {
@@ -1541,9 +1593,10 @@ const App = () => {
     };
 
     const sendCurrentConfirmationResponse = (optionId: string, guidance?: string) => {
-        if (conversationId) {
-            sendConfirmationResponse(conversationId, optionId, guidance);
-        }
+        if (!conversationId) return;
+        const pending = pendingConfirmations.get(conversationId)?.[0];
+        if (!pending) return;
+        sendConfirmationResponse(conversationId, pending.request.requestId, optionId, guidance);
     };
 
     // Transform chat confirmation to standard format
@@ -1575,18 +1628,26 @@ const App = () => {
         for (const [convId, queue] of pendingConfirmations.entries()) {
             const conv = conversations.find(c => c.id === convId);
             const convTitle = conv?.title || 'Background Task';
-            for (const request of queue) {
-                chatConfirmations.push(toChatConfirmation(convId, request, convTitle));
+            for (const item of queue) {
+                chatConfirmations.push(toChatConfirmation(convId, item.request, convTitle));
             }
         }
         const automationConfirmationsList = automationConfirmations.map(toAutomationConfirmation);
         return [...chatConfirmations, ...automationConfirmationsList];
     }, [pendingConfirmations, automationConfirmations, conversations, toChatConfirmation, toAutomationConfirmation]);
 
+    const sidebarPendingConfirmations = useMemo((): Map<string, ConfirmationRequest[]> => {
+        const next = new Map<string, ConfirmationRequest[]>();
+        for (const [convId, queue] of pendingConfirmations.entries()) {
+            next.set(convId, queue.map(item => item.request));
+        }
+        return next;
+    }, [pendingConfirmations]);
+
     // Confirmation response handler
     const handleConfirmationResponse = (confirmation: PendingConfirmation, optionId: string, guidance?: string) => {
         if (confirmation.source.type === 'chat') {
-            sendConfirmationResponse(confirmation.source.conversationId, optionId, guidance);
+            sendConfirmationResponse(confirmation.source.conversationId, confirmation.request.requestId, optionId, guidance);
         } else {
             respondToAutomationConfirmation(confirmation.source.confirmationId, optionId, guidance);
         }
@@ -1599,7 +1660,7 @@ const App = () => {
             setPendingConfirmations(prev => {
                 const next = new Map(prev);
                 const existingQueue = next.get(source.conversationId) || [];
-                const remainingQueue = existingQueue.filter(c => c.requestId !== confirmation.request.requestId);
+                const remainingQueue = existingQueue.filter(c => c.request.requestId !== confirmation.request.requestId);
                 if (remainingQueue.length > 0) {
                     next.set(source.conversationId, remainingQueue);
                 } else {
@@ -1616,7 +1677,9 @@ const App = () => {
         e?.preventDefault();
         if (!input.trim() || !isConnected) return;
 
-        // Clear confirmation queue for current conversation when user sends a new message
+        const messageText = input.trim();
+        setInput("");
+
         if (conversationId) {
             setPendingConfirmations(prev => {
                 const next = new Map(prev);
@@ -1625,112 +1688,42 @@ const App = () => {
             });
         }
 
-        // If paused, resume with the message
-        if (isPaused) {
-            const resumeMsg = input.trim();
-            setInput("");
+        const clientMessageId = generateUUID();
+        const runId = generateUUID();
+        const userMsg: Message = { id: clientMessageId, stableId: clientMessageId, role: 'user', content: messageText };
 
-            const userMsgId = generateUUID();
-            const assistantMsgId = generateUUID();
-            const userMsg: Message = { id: userMsgId, stableId: userMsgId, role: 'user', content: resumeMsg };
-            const assistantMsg: Message = { id: assistantMsgId, stableId: assistantMsgId, role: 'assistant', content: '', thoughts: [], isStreaming: true };
-
-            const calcNewMessages = (prev: Message[]) => {
-                const updated = prev.map(msg => msg.isStreaming ? { ...msg, isStreaming: false } : msg);
-                return [...updated, userMsg, assistantMsg];
-            };
-
-            setMessages(prev => {
-                const newMsgs = calcNewMessages(prev);
-                if (conversationId) {
-                    setConversationStates(prevStates => {
-                        const next = new Map(prevStates);
-                        const existing = next.get(conversationId);
-                        next.set(conversationId, {
-                            isProcessing: true,
-                            isPaused: false,
-                            latestReasoning: existing?.latestReasoning,
-                            messages: newMsgs,
-                        });
-                        return next;
-                    });
-                }
-                return newMsgs;
-            });
-
-            resumeResearch(resumeMsg);
-            scheduleTextareaFocus();
-            return;
-        }
-
-        // If processing, pause and resume with the message
-        if (isProcessing && conversationId) {
-            const interruptMsg = input.trim();
-            setInput("");
-
-            wsRef.current?.send(JSON.stringify({ type: 'pause', conversationId }));
-
-            const userMsgId = generateUUID();
-            const assistantMsgId = generateUUID();
-            const userMsg: Message = { id: userMsgId, stableId: userMsgId, role: 'user', content: interruptMsg };
-            const assistantMsg: Message = { id: assistantMsgId, stableId: assistantMsgId, role: 'assistant', content: '', thoughts: [], isStreaming: true };
-
-            const calcNewMessages = (prev: Message[]) => {
-                const updated = prev.map(msg => msg.isStreaming ? { ...msg, isStreaming: false } : msg);
-                return [...updated, userMsg, assistantMsg];
-            };
-
-            setMessages(prev => {
-                const newMsgs = calcNewMessages(prev);
-                setConversationStates(prevStates => {
-                    const next = new Map(prevStates);
-                    const existing = next.get(conversationId);
-                    next.set(conversationId, {
-                        isProcessing: true,
-                        isPaused: false,
-                        latestReasoning: existing?.latestReasoning,
-                        messages: newMsgs,
-                    });
-                    return next;
-                });
-                return newMsgs;
-            });
-
-            setTimeout(() => {
-                wsRef.current?.send(JSON.stringify({ type: 'resume', message: interruptMsg, conversationId }));
-            }, 100);
-
-            scheduleTextareaFocus();
-            return;
-        }
-
-        // Normal send
-        const userMsgId = generateUUID();
-        const assistantMsgId = generateUUID();
-        const userMsg: Message = { id: userMsgId, stableId: userMsgId, role: 'user', content: input };
-        const assistantMsg: Message = { id: assistantMsgId, stableId: assistantMsgId, role: 'assistant', content: '', thoughts: [], isStreaming: true };
-
-        const newMessages = [...messages, userMsg, assistantMsg];
-        setMessages(newMessages);
         setIsProcessing(true);
-        // Switch to conversation view when sending from home page
+        setIsStopped(false);
         setCurrentPage('chat');
 
+        setMessages(prev => [...prev, userMsg]);
+
         if (conversationId) {
-            setConversationStates(prev => {
-                const next = new Map(prev);
+            setConversationStates(prevStates => {
+                const next = new Map(prevStates);
+                const existing = next.get(conversationId);
+                const existingMessages = existing?.messages || [];
                 next.set(conversationId, {
                     isProcessing: true,
-                    isPaused: false,
-                    latestReasoning: undefined,
-                    messages: newMessages,
+                    isStopped: false,
+                    latestReasoning: existing?.latestReasoning,
+                    messages: [...existingMessages, userMsg],
                 });
                 return next;
             });
         }
 
-        wsRef.current?.send(JSON.stringify({ message: input, conversationId }));
-        setInput("");
+        if (!conversationId && awaitingConversationIdRef.current) {
+            pendingNewConversationMessagesRef.current.push({ clientMessageId, runId, message: messageText });
+            scheduleTextareaFocus();
+            return;
+        }
+
+        if (!conversationId) {
+            awaitingConversationIdRef.current = true;
+        }
+
+        wsRef.current?.send(JSON.stringify({ type: 'message', message: messageText, conversationId, clientMessageId, runId }));
         scheduleTextareaFocus();
     };
 
@@ -1749,7 +1742,9 @@ const App = () => {
         setInput("");
 
         // Store pending message to associate when conversation_created arrives
-        pendingBackgroundMessageRef.current = userMsg;
+        const clientMessageId = generateUUID();
+        const runId = generateUUID();
+        pendingBackgroundMessageRef.current = { message: userMsg, clientMessageId, runId };
 
         // If we have a conversationId, fork it (includes chat history)
         // Otherwise, create a new conversation from scratch
@@ -1757,11 +1752,13 @@ const App = () => {
             wsRef.current?.send(JSON.stringify({
                 type: 'fork',
                 message: userMsg,
-                sourceConversationId: conversationId
+                sourceConversationId: conversationId,
+                clientMessageId,
+                runId,
             }));
         } else {
             // No conversationId - create new conversation from scratch
-            wsRef.current?.send(JSON.stringify({ message: userMsg }));
+            wsRef.current?.send(JSON.stringify({ type: 'message', message: userMsg, clientMessageId, runId }));
         }
 
         scheduleTextareaFocus();
@@ -1801,7 +1798,7 @@ const App = () => {
                 isOpen={sidebarOpen}
                 conversations={conversations}
                 conversationStates={conversationStates}
-                pendingConfirmations={pendingConfirmations}
+                pendingConfirmations={sidebarPendingConfirmations}
                 currentConversationId={conversationId}
                 exportingConversationId={exportingConversationId}
                 currentPage={currentPage}
@@ -1868,11 +1865,10 @@ const App = () => {
                     onKeyDown={handleKeyDown}
                     isConnected={isConnected}
                     isProcessing={isProcessing}
-                    isPaused={isPaused}
+                    isStopped={isStopped}
                     conversationId={conversationId}
-                    onPause={pauseResearch}
-                    onResume={() => resumeResearch()}
-                    pendingConfirmation={conversationId ? pendingConfirmations.get(conversationId)?.[0] : undefined}
+                    onStop={stopResearch}
+                    pendingConfirmation={conversationId ? pendingConfirmations.get(conversationId)?.[0]?.request : undefined}
                     onConfirmationRespond={sendCurrentConfirmationResponse}
                     textareaRef={textareaRef}
                     onBackgroundSend={sendAsBackgroundTask}

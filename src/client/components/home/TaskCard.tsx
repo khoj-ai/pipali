@@ -1,7 +1,7 @@
 // Individual task card for home page gallery
 
 import React from 'react';
-import { Loader2, Pause, ChevronRight } from 'lucide-react';
+import { Loader2, Square, ChevronRight } from 'lucide-react';
 import type { ActiveTask } from '../../types';
 
 interface TaskCardProps {
@@ -17,7 +17,7 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
 
     return (
         <div
-            className={`task-card ${task.isPaused ? 'paused' : ''}`}
+            className={`task-card ${task.isStopped ? 'stopped' : ''}`}
             onClick={onClick}
             role="button"
             tabIndex={0}
@@ -29,13 +29,13 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
             }}
         >
             <div className="task-card-header">
-                {task.isPaused ? (
-                    <Pause size={16} className="task-status-icon paused" />
+                {task.isStopped ? (
+                    <Square size={16} className="task-status-icon stopped" />
                 ) : (
                     <Loader2 size={16} className="task-status-icon spinning" />
                 )}
                 <span className="task-status-text">
-                    {task.isPaused ? 'Paused' : 'Running'}
+                    {task.isStopped ? 'Stopped' : 'Running'}
                 </span>
                 {task.stepCount !== undefined && task.stepCount > 0 && (
                     <span className="task-step-count">{task.stepCount} steps</span>
