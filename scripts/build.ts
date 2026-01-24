@@ -165,6 +165,7 @@ async function readBuiltinSkills(): Promise<{ [relativePath: string]: { content:
     console.log("📚 Reading builtin skills...");
 
     const skills: { [relativePath: string]: { content: string; binary: boolean } } = {};
+    const SKIP_DIR_NAMES = new Set(['node_modules']);
 
     async function readDirRecursive(dir: string, baseDir: string) {
         const entries = await fs.readdir(dir, { withFileTypes: true });
@@ -175,7 +176,7 @@ async function readBuiltinSkills(): Promise<{ [relativePath: string]: { content:
 
             if (entry.isDirectory()) {
                 // Skip hidden directories
-                if (!entry.name.startsWith('.')) {
+                if (!entry.name.startsWith('.') && !SKIP_DIR_NAMES.has(entry.name)) {
                     await readDirRecursive(fullPath, baseDir);
                 }
             } else if (entry.isFile()) {
@@ -398,4 +399,3 @@ main().catch(async (err) => {
     console.error("Build failed:", err);
     process.exit(1);
 });
-
