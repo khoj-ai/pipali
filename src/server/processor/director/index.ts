@@ -76,7 +76,7 @@ interface ResearchConfig {
     dayOfWeek?: string;
     location?: string;
     username?: string;
-    personality?: string;
+    userContext?: string;
     user?: typeof User.$inferSelect;
     /** Optional system prompt override (persisted at run start) */
     systemPrompt?: string;
@@ -93,19 +93,19 @@ export async function buildSystemPrompt(args: {
     dayOfWeek?: string;
     location?: string;
     username?: string;
-    personality?: string;
+    userContext?: string;
     now?: Date;
 }): Promise<string> {
     const now = args.now ?? new Date();
 
-    const personalityContext = args.personality
-        ? await prompts.personalityContext.format({ personality: args.personality })
+    const userContext = args.userContext
+        ? await prompts.userContext.format({ userContext: args.userContext })
         : '';
 
     const skillsContext = formatSkillsForPrompt(getLoadedSkills());
 
-    return prompts.planFunctionExecution.format({
-        personality_context: personalityContext,
+    return prompts.director.format({
+        user_context: userContext,
         skills_context: skillsContext,
         current_date: args.currentDate ?? now.toLocaleDateString('en-CA'),
         current_time: getTimeOfDay(now),
@@ -407,7 +407,7 @@ async function getAllTools(): Promise<ToolDefinition[]> {
 async function pickNextTool(
     config: ResearchConfig
 ): Promise<ResearchIteration> {
-    const { currentDate, dayOfWeek, location, username, personality, currentIteration = 0, maxIterations, thresholdStepCount } = config;
+    const { currentDate, dayOfWeek, location, username, userContext, currentIteration = 0, maxIterations, thresholdStepCount } = config;
     const lastUserIndex = config.chatHistory.steps.findLastIndex(s => s.source === 'user') || 0;
     const isLast = currentIteration >= maxIterations - 1;
     const previousIterations = config.chatHistory.steps.slice(lastUserIndex + 1);
@@ -416,21 +416,13 @@ async function pickNextTool(
     const tools = await getAllTools();
     const toolChoice = isLast ? 'none' : 'auto';
 
-    // Build personality context
-    const personalityContext = personality
-        ? prompts.personalityContext.format({ personality })
-        : Promise.resolve('');
-
-    // Build skills context
-    const skillsContext = formatSkillsForPrompt(getLoadedSkills());
-
     const now = new Date();
     const systemPrompt = config.systemPrompt ?? await buildSystemPrompt({
         currentDate,
         dayOfWeek,
         location,
         username,
-        personality,
+        userContext,
         now,
     });
 

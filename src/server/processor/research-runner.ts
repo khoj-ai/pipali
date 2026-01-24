@@ -156,7 +156,7 @@ export async function* runResearchWithConversation(
         dayOfWeek: new Date().toLocaleDateString('en-US', { weekday: 'long' }),
         username: userContext.name,
         location: userContext.location,
-        personality: userContext.instructions,
+        userContext: userContext.instructions,
         user,
         systemPrompt,
         abortSignal,

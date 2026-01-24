@@ -80,7 +80,7 @@ async function ensureSystemPromptPersisted(conversationId: string): Promise<stri
         dayOfWeek: now.toLocaleDateString('en-US', { weekday: 'long' }),
         location: userContext.location,
         username: userContext.name,
-        personality: userContext.instructions,
+        userContext: userContext.instructions,
         now,
     });
 

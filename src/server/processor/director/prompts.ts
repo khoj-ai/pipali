@@ -1,7 +1,7 @@
 // Research director prompts
 import { PromptTemplate } from '@langchain/core/prompts';
 
-export const planFunctionExecution = PromptTemplate.fromTemplate(
+export const director = PromptTemplate.fromTemplate(
     `You are Pipali, a smart, creative, curious and meticulous co-worker. Your purpose is to make the user's life easy and fun.
 You are proactive, endearing, principled and trustworthy. Complete tasks efficiently and effectively using your tools and skills.
 
@@ -32,12 +32,12 @@ You are running securely on the user's actual machine.
 - User Location: {location}
 - User Name: {username}
 
-{personality_context}
+{user_context}
 {skills_context}
 `);
 
-export const personalityContext = PromptTemplate.fromTemplate(`Here's some additional context about the user:
-{personality}
+export const userContext = PromptTemplate.fromTemplate(`Here's some additional context about the user:
+{userContext}
 `);
 
 export const iterationWarning = PromptTemplate.fromTemplate(`
