@@ -27,6 +27,8 @@ import { formatToolCallsForSidebar } from '../utils/formatting';
 export type RunStatus = 'idle' | 'running' | 'stopped';
 export type StopReason = 'user_stop' | 'soft_interrupt' | 'disconnect' | 'error';
 
+export type ChatPendingConfirmation = { runId: string; request: ConfirmationRequest };
+
 export interface ChatState {
     // Connection
     isConnected: boolean;
@@ -41,7 +43,7 @@ export interface ChatState {
     conversationStates: Map<string, ConversationState>;
 
     // Confirmations
-    pendingConfirmations: Map<string, ConfirmationRequest[]>;
+    pendingConfirmations: Map<string, ChatPendingConfirmation[]>;
 }
 
 export type ChatAction =
@@ -49,19 +51,34 @@ export type ChatAction =
     | { type: 'CONNECTION_CLOSED' }
     | { type: 'SET_CONVERSATION_ID'; id: string | undefined }
     | { type: 'SET_MESSAGES'; messages: Message[] }
-    | { type: 'ADD_USER_MESSAGE'; message: Message }
-    | { type: 'CONVERSATION_CREATED'; conversationId: string; history?: any[] }
-    | { type: 'RUN_STARTED'; conversationId: string; runId: string; clientMessageId: string }
+    | { type: 'ADD_USER_MESSAGE'; message: Message; conversationId?: string }
+    | { type: 'OPTIMISTIC_RUN_STARTED'; conversationId?: string; runId: string; clientMessageId: string }
+    | { type: 'CONVERSATION_CREATED'; conversationId: string; history?: any[]; activate: boolean }
+    | { type: 'RUN_STARTED'; conversationId: string; runId: string; clientMessageId: string; suggestedRunId?: string }
     | { type: 'RUN_STOPPED'; conversationId: string; runId: string; reason: StopReason; error?: string }
     | { type: 'RUN_COMPLETE'; conversationId: string; runId: string; response: string; stepId: number }
     | { type: 'STEP_START'; conversationId: string; runId: string; thought?: string; message?: string; toolCalls: any[] }
     | { type: 'STEP_END'; conversationId: string; runId: string; toolResults: any[]; stepId: number }
     | { type: 'CONFIRMATION_REQUEST'; conversationId: string; runId: string; request: ConfirmationRequest }
     | { type: 'CONFIRMATION_RESPONDED'; conversationId: string; requestId: string }
+    | { type: 'DISMISS_CONFIRMATION'; conversationId: string; requestId: string }
     | { type: 'USER_STEP_SAVED'; conversationId: string; runId: string; clientMessageId: string; stepId: number }
     | { type: 'BILLING_ERROR'; conversationId?: string; runId?: string; error: BillingError }
     | { type: 'CLEAR_CONVERSATION' }
-    | { type: 'SYNC_CONVERSATION_STATE'; conversationId: string; messages: Message[] };
+    | { type: 'SYNC_CONVERSATION_STATE'; conversationId: string; messages: Message[] }
+    | { type: 'REMOVE_CONVERSATION_STATE'; conversationId: string }
+    | { type: 'CLEAR_CONFIRMATIONS'; conversationId: string };
+
+export interface SendMessageOptions {
+    clientMessageId?: string;
+    runId?: string;
+    optimistic?: boolean;
+}
+
+export interface StopOptions {
+    optimistic?: boolean;
+    reason?: StopReason;
+}
 
 // ============================================================================
 // Helpers
@@ -83,6 +100,27 @@ function findRunAssistantIndex(messages: Message[], runId: string): number {
     return messages.findIndex(m => m.role === 'assistant' && m.stableId === runId);
 }
 
+function stopAllStreamingAssistants(messages: Message[]): Message[] {
+    let changed = false;
+    const next = messages.map(m => {
+        if (m.role !== 'assistant' || !m.isStreaming) return m;
+        changed = true;
+        return { ...m, isStreaming: false };
+    });
+    return changed ? next : messages;
+}
+
+function dropEmptyStreamingPlaceholders(messages: Message[], keepRunId?: string): Message[] {
+    const next = messages.filter(m => {
+        if (m.role !== 'assistant' || !m.isStreaming) return true;
+        if (keepRunId && m.stableId === keepRunId) return true;
+        const hasContent = (m.content ?? '').trim().length > 0;
+        const hasThoughts = (m.thoughts?.length ?? 0) > 0;
+        return hasContent || hasThoughts;
+    });
+    return next.length === messages.length ? messages : next;
+}
+
 // ============================================================================
 // Reducer
 // ============================================================================
@@ -102,7 +140,88 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             return { ...state, messages: action.messages };
 
         case 'ADD_USER_MESSAGE':
-            return { ...state, messages: [...state.messages, action.message] };
+            return (() => {
+                const targetConversationId = action.conversationId ?? state.conversationId;
+                const isCurrentConversation = !!targetConversationId && targetConversationId === state.conversationId;
+
+                // Always append to the current messages list if:
+                // - this message is for the current conversation, or
+                // - we don't yet have a conversationId (new chat bootstrap)
+                const nextMessages =
+                    (isCurrentConversation || state.conversationId === undefined)
+                        ? [...state.messages, action.message]
+                        : state.messages;
+
+                // Also keep conversationStates in sync so RUN_STARTED doesn't read stale messages.
+                if (!targetConversationId) {
+                    return { ...state, messages: nextMessages };
+                }
+
+                const conversationStates = new Map(state.conversationStates);
+                const existing = conversationStates.get(targetConversationId);
+
+                const baseMessages =
+                    isCurrentConversation
+                        ? nextMessages
+                        : (existing?.messages || []);
+
+                conversationStates.set(targetConversationId, {
+                    isProcessing: existing?.isProcessing ?? false,
+                    isStopped: existing?.isStopped ?? false,
+                    latestReasoning: existing?.latestReasoning,
+                    messages: isCurrentConversation ? baseMessages : [...baseMessages, action.message],
+                });
+
+                return {
+                    ...state,
+                    messages: nextMessages,
+                    conversationStates,
+                };
+            })();
+
+        case 'OPTIMISTIC_RUN_STARTED': {
+            const { conversationId, runId, clientMessageId } = action;
+            const targetConversationId = conversationId ?? state.conversationId;
+            const isCurrentConversation = targetConversationId === state.conversationId || (state.conversationId === undefined && !conversationId);
+
+            const insertAssistant = (msgs: Message[]): Message[] => {
+                if (findRunAssistantIndex(msgs, runId) !== -1) return msgs;
+                const assistant: Message = {
+                    id: runId,
+                    stableId: runId,
+                    role: 'assistant',
+                    content: '',
+                    isStreaming: true,
+                    thoughts: [],
+                };
+                const userIndex = msgs.findIndex(m => m.role === 'user' && (m.id === clientMessageId || m.stableId === clientMessageId));
+                return userIndex === -1
+                    ? [...msgs, assistant]
+                    : [...msgs.slice(0, userIndex + 1), assistant, ...msgs.slice(userIndex + 1)];
+            };
+
+            const nextMessages = isCurrentConversation ? insertAssistant(state.messages) : state.messages;
+
+            const conversationStates = new Map(state.conversationStates);
+            if (targetConversationId) {
+                const existing = conversationStates.get(targetConversationId);
+                const baseMessages = existing?.messages || (isCurrentConversation ? nextMessages : []);
+                conversationStates.set(targetConversationId, {
+                    isProcessing: true,
+                    isStopped: false,
+                    latestReasoning: existing?.latestReasoning,
+                    messages: isCurrentConversation ? nextMessages : insertAssistant(baseMessages),
+                });
+            }
+
+            return {
+                ...state,
+                runStatus: isCurrentConversation ? 'running' : state.runStatus,
+                currentRunId: isCurrentConversation ? runId : state.currentRunId,
+                messages: nextMessages,
+                conversationStates,
+            };
+        }
 
         case 'CONVERSATION_CREATED': {
             const { conversationId, history } = action;
@@ -120,21 +239,56 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     .filter(m => m.content);
             }
 
+            const conversationStates = new Map(state.conversationStates);
+            const existing = conversationStates.get(conversationId);
+
+            const canAutoActivate = action.activate && (state.conversationId === undefined || state.conversationId === conversationId);
+
+            const messagesForConversation =
+                (canAutoActivate && state.conversationId === undefined && state.messages.length > 0)
+                    ? state.messages
+                    : (existing?.messages && existing.messages.length > 0)
+                        ? existing.messages
+                        : messages;
+
+            conversationStates.set(conversationId, {
+                isProcessing: canAutoActivate ? state.runStatus === 'running' : (existing?.isProcessing ?? false),
+                isStopped: existing?.isStopped ?? false,
+                latestReasoning: existing?.latestReasoning,
+                messages: messagesForConversation,
+            });
+
             return {
                 ...state,
-                conversationId,
-                messages,
+                conversationId: canAutoActivate ? conversationId : state.conversationId,
+                messages: canAutoActivate ? messagesForConversation : state.messages,
+                conversationStates,
             };
         }
 
         case 'RUN_STARTED': {
-            const { conversationId, runId, clientMessageId } = action;
+            const { conversationId, runId, clientMessageId, suggestedRunId } = action;
             const isCurrentConversation = conversationId === state.conversationId;
 
             // Update conversation states
             const conversationStates = new Map(state.conversationStates);
             const existing = conversationStates.get(conversationId);
-            let messages = existing?.messages || (isCurrentConversation ? state.messages : []);
+            let messages = isCurrentConversation ? state.messages : (existing?.messages || []);
+
+            // If server overrode the runId, re-key the optimistic streaming assistant placeholder.
+            if (suggestedRunId && suggestedRunId !== runId) {
+                const rekey = (msgs: Message[]): Message[] => {
+                    let changed = false;
+                    const next = msgs.map(m => {
+                        if (m.role !== 'assistant') return m;
+                        if (m.stableId !== suggestedRunId && m.id !== suggestedRunId) return m;
+                        changed = true;
+                        return { ...m, id: runId, stableId: runId };
+                    });
+                    return changed ? next : msgs;
+                };
+                messages = rekey(messages);
+            }
 
             if (findRunAssistantIndex(messages, runId) === -1) {
                 const assistant: Message = {
@@ -156,14 +310,14 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 isProcessing: true,
                 isStopped: false,
                 latestReasoning: existing?.latestReasoning,
-                messages,
+                messages: dropEmptyStreamingPlaceholders(messages, runId),
             });
 
             return {
                 ...state,
                 runStatus: isCurrentConversation ? 'running' : state.runStatus,
                 currentRunId: isCurrentConversation ? runId : state.currentRunId,
-                messages: isCurrentConversation ? messages : state.messages,
+                messages: isCurrentConversation ? dropEmptyStreamingPlaceholders(messages, runId) : state.messages,
                 conversationStates,
             };
         }
@@ -175,7 +329,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             // Mark pending tool calls as interrupted
             const markInterrupted = (msgs: Message[]): Message[] => {
                 return msgs.map(msg => {
-                    if (msg.role === 'assistant' && msg.stableId === runId && msg.thoughts?.some(t => t.isPending)) {
+                    if (msg.role !== 'assistant' || !msg.thoughts) return msg;
+
+                    const isTargetRun = runId ? msg.stableId === runId : msg.thoughts.some(t => t.type === 'tool_call' && t.isPending);
+                    if (!isTargetRun) return msg;
+
+                    if (msg.thoughts?.some(t => t.isPending)) {
                         const updatedThoughts = msg.thoughts!.map(thought => {
                             if (thought.type === 'tool_call' && thought.isPending) {
                                 return { ...thought, isPending: false, toolResult: '[interrupted]' };
@@ -184,8 +343,19 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                         });
                         return { ...msg, thoughts: updatedThoughts, isStreaming: false };
                     }
-                    return msg;
+                    return { ...msg, isStreaming: false };
                 });
+            };
+
+            const finalizeStopped = (msgs: Message[]): Message[] => {
+                const interrupted = markInterrupted(msgs);
+                // Only force-stop all streaming indicators when we can't reliably
+                // target a run (disconnect/error), otherwise preserve streaming for
+                // any new optimistic run started by soft interrupt.
+                if (!runId || reason === 'disconnect' || reason === 'error') {
+                    return stopAllStreamingAssistants(interrupted);
+                }
+                return interrupted;
             };
 
             const conversationStates = new Map(state.conversationStates);
@@ -195,16 +365,25 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     ...existing,
                     isProcessing: false,
                     isStopped: reason === 'user_stop',
-                    messages: markInterrupted(existing.messages),
+                    messages: finalizeStopped(existing.messages),
                 });
             }
+
+            const pendingConfirmations = new Map(state.pendingConfirmations);
+            const existingConfirmations = pendingConfirmations.get(conversationId) || [];
+            const remainingConfirmations = runId
+                ? existingConfirmations.filter(c => c.runId !== runId)
+                : [];
+            if (remainingConfirmations.length > 0) pendingConfirmations.set(conversationId, remainingConfirmations);
+            else pendingConfirmations.delete(conversationId);
 
             return {
                 ...state,
                 runStatus: isCurrentConversation ? 'stopped' : state.runStatus,
                 currentRunId: isCurrentConversation ? undefined : state.currentRunId,
-                messages: isCurrentConversation ? markInterrupted(state.messages) : state.messages,
+                messages: isCurrentConversation ? finalizeStopped(state.messages) : state.messages,
                 conversationStates,
+                pendingConfirmations,
             };
         }
 
@@ -217,7 +396,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 const filteredMsgs = msgs.filter(msg => !msg.billingInfo);
                 const idx = findRunAssistantIndex(filteredMsgs, runId);
                 if (idx === -1) {
-                    return [
+                    const next = [
                         ...filteredMsgs,
                         {
                             id: messageId,
@@ -227,11 +406,13 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                             isStreaming: false,
                         },
                     ];
+                    return dropEmptyStreamingPlaceholders(stopAllStreamingAssistants(next), runId);
                 }
-                return filteredMsgs.map((msg, i) => {
+                const updated = filteredMsgs.map((msg, i) => {
                     if (i !== idx) return msg;
                     return { ...msg, id: messageId, content: response, isStreaming: false };
                 });
+                return dropEmptyStreamingPlaceholders(stopAllStreamingAssistants(updated), runId);
             };
 
             const conversationStates = new Map(state.conversationStates);
@@ -361,12 +542,12 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         }
 
         case 'CONFIRMATION_REQUEST': {
-            const { conversationId, request } = action;
+            const { conversationId, request, runId } = action;
 
             const pendingConfirmations = new Map(state.pendingConfirmations);
             const existing = pendingConfirmations.get(conversationId) || [];
-            if (!existing.some(c => c.requestId === request.requestId)) {
-                pendingConfirmations.set(conversationId, [...existing, request]);
+            if (!existing.some(c => c.request.requestId === request.requestId)) {
+                pendingConfirmations.set(conversationId, [...existing, { runId, request }]);
             }
 
             return { ...state, pendingConfirmations };
@@ -377,7 +558,22 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
             const pendingConfirmations = new Map(state.pendingConfirmations);
             const existingQueue = pendingConfirmations.get(conversationId) || [];
-            const remainingQueue = existingQueue.filter(c => c.requestId !== requestId);
+            const remainingQueue = existingQueue.filter(c => c.request.requestId !== requestId);
+            if (remainingQueue.length > 0) {
+                pendingConfirmations.set(conversationId, remainingQueue);
+            } else {
+                pendingConfirmations.delete(conversationId);
+            }
+
+            return { ...state, pendingConfirmations };
+        }
+
+        case 'DISMISS_CONFIRMATION': {
+            const { conversationId, requestId } = action;
+
+            const pendingConfirmations = new Map(state.pendingConfirmations);
+            const existingQueue = pendingConfirmations.get(conversationId) || [];
+            const remainingQueue = existingQueue.filter(c => c.request.requestId !== requestId);
             if (remainingQueue.length > 0) {
                 pendingConfirmations.set(conversationId, remainingQueue);
             } else {
@@ -459,13 +655,25 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             const { conversationId, messages } = action;
             const conversationStates = new Map(state.conversationStates);
             const existing = conversationStates.get(conversationId);
-            if (existing) {
-                conversationStates.set(conversationId, {
-                    ...existing,
-                    messages,
-                });
-            }
+            conversationStates.set(conversationId, {
+                isProcessing: existing?.isProcessing ?? false,
+                isStopped: existing?.isStopped ?? false,
+                latestReasoning: existing?.latestReasoning,
+                messages,
+            });
             return { ...state, conversationStates };
+        }
+
+        case 'REMOVE_CONVERSATION_STATE': {
+            const conversationStates = new Map(state.conversationStates);
+            conversationStates.delete(action.conversationId);
+            return { ...state, conversationStates };
+        }
+
+        case 'CLEAR_CONFIRMATIONS': {
+            const pendingConfirmations = new Map(state.pendingConfirmations);
+            pendingConfirmations.delete(action.conversationId);
+            return { ...state, pendingConfirmations };
         }
 
         default:
@@ -498,29 +706,81 @@ export interface UseWebSocketChatOptions {
     onTaskComplete?: (request: string | undefined, response: string, conversationId: string) => void;
     onBillingError?: (error: BillingError, conversationId?: string) => void;
     onError?: (error: string, conversationId?: string) => void;
+    shouldActivateConversationOnCreate?: (conversationId: string, history?: any[]) => boolean;
 }
 
 export function useWebSocketChat(options: UseWebSocketChatOptions) {
-    const { wsUrl, onConversationCreated, onConfirmationRequest, onTaskComplete, onBillingError, onError } = options;
+    const {
+        wsUrl,
+        onConversationCreated,
+        onConfirmationRequest,
+        onTaskComplete,
+        onBillingError,
+        onError,
+        shouldActivateConversationOnCreate,
+    } = options;
 
     const [state, dispatch] = useReducer(chatReducer, initialState);
     const wsRef = useRef<WebSocket | null>(null);
-    const conversationIdRef = useRef<string | undefined>(undefined);
 
-    // Keep ref in sync
+    const callbacksRef = useRef<Pick<
+        UseWebSocketChatOptions,
+        | 'onConversationCreated'
+        | 'onConfirmationRequest'
+        | 'onTaskComplete'
+        | 'onBillingError'
+        | 'onError'
+        | 'shouldActivateConversationOnCreate'
+    >>({
+        onConversationCreated,
+        onConfirmationRequest,
+        onTaskComplete,
+        onBillingError,
+        onError,
+        shouldActivateConversationOnCreate,
+    });
+
     useEffect(() => {
-        conversationIdRef.current = state.conversationId;
-    }, [state.conversationId]);
+        callbacksRef.current = {
+            onConversationCreated,
+            onConfirmationRequest,
+            onTaskComplete,
+            onBillingError,
+            onError,
+            shouldActivateConversationOnCreate,
+        };
+    }, [
+        onConversationCreated,
+        onConfirmationRequest,
+        onTaskComplete,
+        onBillingError,
+        onError,
+        shouldActivateConversationOnCreate,
+    ]);
 
     // Handle incoming messages
     const handleMessage = useCallback((message: any) => {
+        const {
+            onConversationCreated: onConversationCreatedCb,
+            onConfirmationRequest: onConfirmationRequestCb,
+            onTaskComplete: onTaskCompleteCb,
+            onBillingError: onBillingErrorCb,
+            onError: onErrorCb,
+            shouldActivateConversationOnCreate: shouldActivateConversationOnCreateCb,
+        } = callbacksRef.current;
+
         const convId = message.conversationId;
         const runId = message.runId;
 
         switch (message.type) {
             case 'conversation_created':
-                dispatch({ type: 'CONVERSATION_CREATED', conversationId: message.conversationId, history: message.history });
-                onConversationCreated?.(message.conversationId, message.history);
+                dispatch({
+                    type: 'CONVERSATION_CREATED',
+                    conversationId: message.conversationId,
+                    history: message.history,
+                    activate: shouldActivateConversationOnCreateCb?.(message.conversationId, message.history) ?? true,
+                });
+                onConversationCreatedCb?.(message.conversationId, message.history);
                 break;
 
             case 'run_started':
@@ -529,6 +789,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                     conversationId: convId,
                     runId,
                     clientMessageId: message.clientMessageId,
+                    suggestedRunId: message.suggestedRunId,
                 });
                 break;
 
@@ -541,7 +802,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                     error: message.error,
                 });
                 if (message.reason === 'error' && message.error) {
-                    onError?.(message.error, convId);
+                    onErrorCb?.(message.error, convId);
                 }
                 break;
 
@@ -553,7 +814,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                     response: message.data.response,
                     stepId: message.data.stepId,
                 });
-                onTaskComplete?.(undefined, message.data.response, convId);
+                onTaskCompleteCb?.(undefined, message.data.response, convId);
                 break;
 
             case 'step_start':
@@ -584,7 +845,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                     runId,
                     request: message.data,
                 });
-                onConfirmationRequest?.(message.data, convId, runId);
+                onConfirmationRequestCb?.(message.data, convId, runId);
                 break;
 
             case 'user_step_saved':
@@ -599,10 +860,10 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
 
             case 'billing_error':
                 dispatch({ type: 'BILLING_ERROR', conversationId: convId, runId, error: message.error });
-                onBillingError?.(message.error, convId);
+                onBillingErrorCb?.(message.error, convId);
                 break;
         }
-    }, [onConversationCreated, onConfirmationRequest, onTaskComplete, onBillingError, onError]);
+    }, []);
 
     // Connect to WebSocket
     const connect = useCallback(() => {
@@ -638,19 +899,26 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
     }, [connect]);
 
     // Actions
-    const sendMessage = useCallback((content: string, conversationId?: string) => {
+    const sendMessage = useCallback((content: string, conversationId?: string, options?: SendMessageOptions) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
-        const clientMessageId = generateUUID();
-        const runId = generateUUID();
+        const clientMessageId = options?.clientMessageId ?? generateUUID();
+        const runId = options?.runId ?? generateUUID();
+        const optimistic = options?.optimistic ?? true;
 
-        // Add user message optimistically
-        dispatch({ type: 'ADD_USER_MESSAGE', message: {
-            id: clientMessageId,
-            stableId: clientMessageId,
-            role: 'user',
-            content,
-        }});
+        if (optimistic) {
+            dispatch({
+                type: 'ADD_USER_MESSAGE',
+                conversationId,
+                message: {
+                    id: clientMessageId,
+                    stableId: clientMessageId,
+                    role: 'user',
+                    content,
+                },
+            });
+            dispatch({ type: 'OPTIMISTIC_RUN_STARTED', conversationId, runId, clientMessageId });
+        }
 
         // Send to server
         wsRef.current.send(JSON.stringify({
@@ -662,14 +930,33 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         }));
     }, []);
 
-    const stop = useCallback((conversationId: string, runId?: string) => {
+    const addOptimisticUserMessage = useCallback((message: Message, conversationId?: string) => {
+        dispatch({ type: 'ADD_USER_MESSAGE', message, conversationId });
+    }, []);
+
+    const startOptimisticRun = useCallback((conversationId: string | undefined, runId: string, clientMessageId: string) => {
+        dispatch({ type: 'OPTIMISTIC_RUN_STARTED', conversationId, runId, clientMessageId });
+    }, []);
+
+    const stop = useCallback((conversationId: string, runId?: string, options?: StopOptions) => {
         if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+        if (options?.optimistic) {
+            dispatch({
+                type: 'RUN_STOPPED',
+                conversationId,
+                runId: runId || state.currentRunId || '',
+                reason: options.reason ?? 'user_stop',
+            });
+            dispatch({ type: 'CLEAR_CONFIRMATIONS', conversationId });
+        }
+
         wsRef.current.send(JSON.stringify({
             type: 'stop',
             conversationId,
             runId,
         }));
-    }, []);
+    }, [state.currentRunId]);
 
     const respondToConfirmation = useCallback((
         conversationId: string,
@@ -726,6 +1013,18 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         dispatch({ type: 'SYNC_CONVERSATION_STATE', conversationId, messages });
     }, []);
 
+    const removeConversationState = useCallback((conversationId: string) => {
+        dispatch({ type: 'REMOVE_CONVERSATION_STATE', conversationId });
+    }, []);
+
+    const clearConfirmations = useCallback((conversationId: string) => {
+        dispatch({ type: 'CLEAR_CONFIRMATIONS', conversationId });
+    }, []);
+
+    const dismissConfirmation = useCallback((conversationId: string, requestId: string) => {
+        dispatch({ type: 'DISMISS_CONFIRMATION', conversationId, requestId });
+    }, []);
+
     return {
         // State
         ...state,
@@ -734,6 +1033,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
 
         // Actions
         sendMessage,
+        addOptimisticUserMessage,
+        startOptimisticRun,
         stop,
         respondToConfirmation,
         fork,
@@ -741,6 +1042,9 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         setMessages,
         clearConversation,
         syncConversationState,
+        removeConversationState,
+        clearConfirmations,
+        dismissConfirmation,
 
         // Refs
         wsRef,

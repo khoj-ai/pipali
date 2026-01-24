@@ -50,12 +50,13 @@ function ensureUniqueRunId(
     suggestedRunId: string
 ): { runId: string; suggestedRunId?: string } {
     const runIdInUse = new Set<string>();
-    if (session.runState.status === 'running') {
-        runIdInUse.add(session.runState.runId);
-        for (const qm of session.runState.queuedMessages) runIdInUse.add(qm.runId);
-    }
-    if (session.runState.status === 'stopped') {
-        runIdInUse.add(session.runState.runId);
+    if (session.runState.status === 'running' || session.runState.status === 'stopped') {
+        // The suggestedRunId will almost always be the current run's id, so don't
+        // treat that as a collision. Only guard against collisions with queued runs
+        // or other persisted ids.
+        if (session.runState.runId !== suggestedRunId) {
+            runIdInUse.add(session.runState.runId);
+        }
         for (const qm of session.runState.queuedMessages) runIdInUse.add(qm.runId);
     }
 
