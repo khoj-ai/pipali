@@ -80,6 +80,7 @@ async function installSkillDependencies(skillDir: string, skillName: string): Pr
 
         const proc = Bun.spawn([runtimes.bun, 'install'], {
             cwd: scriptsDir,
+            stdin: 'ignore',
             stdout: 'pipe',
             stderr: 'pipe',
         });

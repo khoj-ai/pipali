@@ -27,6 +27,18 @@ fn show_in_dock(_app: &AppHandle) {}
 #[cfg(not(target_os = "macos"))]
 fn hide_from_dock(_app: &AppHandle) {}
 
+#[cfg(target_os = "windows")]
+fn normalize_windows_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    let path_str = path.to_string_lossy();
+    let stripped = path_str.strip_prefix(r"\\?\").unwrap_or(&path_str);
+    std::path::PathBuf::from(stripped)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn normalize_windows_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    path
+}
+
 /// Show the main window and emit an event to focus the chat input
 fn show_window(app: &AppHandle) {
     show_in_dock(app);
@@ -127,13 +139,14 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
     }
 
     // Get and create the app data directory for the database
-    let app_data_dir = get_app_data_dir(app)?;
+    let app_data_dir = normalize_windows_path(get_app_data_dir(app)?);
     let legacy_data_dir = get_legacy_data_dir();
     let data_dir = legacy_data_dir
         .as_ref()
         .filter(|dir| has_existing_data_dir(dir))
         .cloned()
         .unwrap_or(app_data_dir);
+    let data_dir = normalize_windows_path(data_dir);
 
     if legacy_data_dir.as_ref().is_some_and(|dir| dir == &data_dir) {
         log::info!("[Sidecar] Using legacy data directory: {:?}", data_dir);
@@ -143,7 +156,7 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
         .map_err(|e| format!("Failed to create app data dir: {}", e))?;
 
     // Get the bundled server directory
-    let server_dir = get_server_resource_dir(app)?;
+    let server_dir = normalize_windows_path(get_server_resource_dir(app)?);
     log::info!("[Sidecar] Server directory: {:?}", server_dir);
 
     // Verify the server entry point exists
@@ -188,6 +201,7 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
         .ok()
         .and_then(|p| p.parent().map(|p| p.to_path_buf()))
         .unwrap_or_default();
+    let binaries_dir = normalize_windows_path(binaries_dir);
 
     // Use the bundled Bun runtime to start the server
     // The "bun" sidecar is registered in tauri.conf.json
@@ -233,6 +247,12 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
                         payload.code,
                         payload.signal
                     );
+                    #[cfg(target_os = "windows")]
+                    if payload.code == Some(-1073741795) {
+                        log::error!(
+                            "[Sidecar] Bun crashed with illegal instruction. This usually indicates an unsupported CPU instruction set."
+                        );
+                    }
                     // Clear the child state
                     if let Some(state) = app_handle.try_state::<SidecarState>() {
                         *state.child.lock().unwrap() = None;

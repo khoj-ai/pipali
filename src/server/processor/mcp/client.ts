@@ -32,6 +32,7 @@ async function getShellPath(): Promise<string | undefined> {
         try {
             const proc = Bun.spawn({
                 cmd: ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', 'echo $env:PATH'],
+                stdin: 'ignore',
                 stdout: 'pipe',
                 stderr: 'pipe',
                 timeout: 5000,
@@ -56,6 +57,7 @@ async function getShellPath(): Promise<string | undefined> {
     try {
         const proc = Bun.spawn({
             cmd: [userShell, '-lc', 'echo $PATH'],
+            stdin: 'ignore',
             stdout: 'pipe',
             stderr: 'pipe',
             timeout: 5000,
