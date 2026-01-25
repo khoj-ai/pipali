@@ -7,9 +7,29 @@
  * - Windows: Not supported (falls back to confirmation-based security)
  */
 
+import { execSync } from 'child_process';
 import os from 'os';
 import path from 'path';
 import type { SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
+
+/**
+ * Get the macOS user-specific temp directory.
+ * On macOS, this returns the per-user temp directory (/var/folders/XX/HASH/T/).
+ * Programs like Python's xcrun use this for caching and need write access.
+ * Returns null on non-macOS platforms or if the command fails.
+ */
+function getMacOSUserTempDir(): string | null {
+    if (process.platform !== 'darwin') {
+        return null;
+    }
+    try {
+        // Get the temp dir and resolve symlinks (e.g., /var -> /private/var)
+        const tempDir = execSync('realpath "$(getconf DARWIN_USER_TEMP_DIR)"', { encoding: 'utf-8' }).trim();
+        return tempDir || null;
+    } catch {
+        return null;
+    }
+}
 
 /**
  * User-configurable sandbox settings stored in the database.
@@ -34,14 +54,23 @@ export interface SandboxConfig {
  * - No prefix: matches against filename
  */
 export const DEFAULT_DENIED_READ_PATHS: string[] = [
-    // SSH and security keys - match anywhere using **/ prefix
+    // SSH and security keys - match anywhere (enforces only on macOS)
     '**/.ssh',
     '**/.gnupg',
     '**/.gpg',
-    // Cloud credentials - match anywhere
+    // SSH and security keys - match specific paths (enforces on Linux too)
+    '~/.ssh',
+    '~/.gnupg',
+    '~/.gpg',
+    // Cloud credentials - match anywhere (enforces only on macOS)
     '**/.aws',
     '**/.azure',
     '**/.gcloud',
+    // Cloud credentials - match specific paths (enforces on Linux too)
+    '~/.aws',
+    '~/.azure',
+    '~/.gcloud',
+    '~/.config/gcloud',
     // Package manager credentials - match as filenames
     '.npmrc',
     '.yarnrc',
@@ -66,34 +95,45 @@ export const DEFAULT_DENIED_READ_PATHS: string[] = [
 ];
 
 /**
- * Default paths that are always denied for writes.
+ * Default paths that are always denied for writes within allowed paths.
+ * Note: The sandbox-runtime already auto-protects many sensitive files
+ * (.bashrc, .git/hooks, etc.), this list can be used for additional protection.
  */
-export const DEFAULT_DENIED_WRITE_PATHS: string[] = [
-    '~/.ssh',
-    '~/.gnupg',
-    '~/.aws',
-    '~/.azure',
-    '~/.gcloud',
-    '/etc',
-    '/var',
-    '/private/etc',
-    '/private/var',
-];
+export const DEFAULT_DENIED_WRITE_PATHS: string[] = [];
 
 /**
  * Default paths that are allowed for writes.
- * Note: We use /tmp/pipali explicitly rather than os.tmpdir() because
- * on macOS os.tmpdir() returns /var/folders/... which is a symlink.
+ * Note: We include /tmp (and /private/tmp on macOS since /tmp is a symlink)
+ * because bash needs it for heredoc temp files and many tools use it for
+ * scratch space. This is safe as /tmp is cleared on reboot and doesn't
+ * contain sensitive user data.
  */
 export const DEFAULT_ALLOWED_WRITE_PATHS: string[] = [
-    '/tmp/pipali',
+    '/tmp',
+    '/private/tmp',  // macOS: /tmp is a symlink to /private/tmp
     '~/.pipali',
 ];
 
 /**
- * Get the default sandbox configuration.
- * Called when no settings exist in the database.
+ * Get platform-specific temp directories that should always be writable.
+ * These paths are added dynamically and should not be stored in the database.
  */
+export function getPlatformTempDirs(): string[] {
+    const paths: string[] = [];
+    const macTempDir = getMacOSUserTempDir();
+    if (macTempDir) {
+        paths.push(macTempDir);
+    }
+    return paths;
+}
+
+/**
+ * Get allowed write paths including platform-specific temp directories.
+ */
+function getAllowedWritePaths(): string[] {
+    return [...DEFAULT_ALLOWED_WRITE_PATHS, ...getPlatformTempDirs()];
+}
+
 /**
  * Default allowed network domains for common development use cases.
  */
@@ -104,6 +144,7 @@ export const DEFAULT_ALLOWED_DOMAINS: string[] = [
     'registry.npmjs.org',
     'pypi.org',
     '*.pypi.org',
+    'files.pythonhosted.org',
     'rubygems.org',
     'crates.io',
     // GitHub
@@ -120,10 +161,14 @@ export const DEFAULT_ALLOWED_DOMAINS: string[] = [
     'localhost',
 ];
 
+/**
+ * Get the default sandbox configuration.
+ * Called when no settings exist in the database.
+ */
 export function getDefaultConfig(): SandboxConfig {
     return {
         enabled: true,
-        allowedWritePaths: DEFAULT_ALLOWED_WRITE_PATHS,
+        allowedWritePaths: getAllowedWritePaths(),
         deniedWritePaths: DEFAULT_DENIED_WRITE_PATHS,
         deniedReadPaths: DEFAULT_DENIED_READ_PATHS,
         allowedDomains: DEFAULT_ALLOWED_DOMAINS,

@@ -5,7 +5,7 @@
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { SandboxSettings } from '../db/schema';
-import { type SandboxConfig, getDefaultConfig } from './config';
+import { type SandboxConfig, getDefaultConfig, getPlatformTempDirs, DEFAULT_ALLOWED_WRITE_PATHS, DEFAULT_ALLOWED_DOMAINS } from './config';
 
 /**
  * Load sandbox settings for a user from the database.
@@ -23,12 +23,29 @@ export async function loadSandboxSettings(userId: number): Promise<SandboxConfig
         return getDefaultConfig();
     }
 
+    // Merge stored settings with required defaults that may have been added after
+    // the user's settings were saved. This ensures new paths/domains are available.
+
+    // 1. Merge allowed write paths (includes platform-specific temp dirs)
+    const platformTempDirs = getPlatformTempDirs();
+    const requiredWritePaths = [...DEFAULT_ALLOWED_WRITE_PATHS, ...platformTempDirs];
+    const allowedWritePaths = [
+        ...settings.allowedWritePaths,
+        ...requiredWritePaths.filter(p => !settings.allowedWritePaths.includes(p)),
+    ];
+
+    // 2. Merge allowed domains (ensures new package registries are available)
+    const allowedDomains = [
+        ...settings.allowedDomains,
+        ...DEFAULT_ALLOWED_DOMAINS.filter(d => !settings.allowedDomains.includes(d)),
+    ];
+
     return {
         enabled: settings.enabled,
-        allowedWritePaths: settings.allowedWritePaths,
+        allowedWritePaths,
         deniedWritePaths: settings.deniedWritePaths,
         deniedReadPaths: settings.deniedReadPaths,
-        allowedDomains: settings.allowedDomains,
+        allowedDomains,
         allowLocalBinding: settings.allowLocalBinding,
     };
 }

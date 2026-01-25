@@ -13,11 +13,11 @@ import {
     expandPaths,
     buildRuntimeConfig,
     DEFAULT_ALLOWED_WRITE_PATHS,
-    DEFAULT_DENIED_WRITE_PATHS,
     DEFAULT_DENIED_READ_PATHS,
     DEFAULT_ALLOWED_DOMAINS,
     type SandboxConfig,
 } from '../../../src/server/sandbox/config';
+import { getSandboxEnvOverrides, SANDBOX_TEMP_DIR } from '../../../src/server/sandbox';
 
 describe('Sandbox Config', () => {
     describe('getDefaultConfig', () => {
@@ -25,29 +25,28 @@ describe('Sandbox Config', () => {
             const config = getDefaultConfig();
 
             expect(config.enabled).toBe(true);
-            expect(config.allowedWritePaths).toEqual(DEFAULT_ALLOWED_WRITE_PATHS);
-            expect(config.deniedWritePaths).toEqual(DEFAULT_DENIED_WRITE_PATHS);
+            // allowedWritePaths may include platform-specific paths (e.g., macOS user temp dir)
+            for (const p of DEFAULT_ALLOWED_WRITE_PATHS) {
+                expect(config.allowedWritePaths).toContain(p);
+            }
             expect(config.deniedReadPaths).toEqual(DEFAULT_DENIED_READ_PATHS);
             expect(config.allowedDomains).toEqual(DEFAULT_ALLOWED_DOMAINS);
             expect(config.allowLocalBinding).toBe(true);
         });
 
-        test('should have /tmp/pipali and ~/.pipali as default allowed write paths', () => {
+        test('should have /tmp, /private/tmp, and ~/.pipali as default allowed write paths', () => {
             const config = getDefaultConfig();
 
-            expect(config.allowedWritePaths).toContain('/tmp/pipali');
+            expect(config.allowedWritePaths).toContain('/tmp');
+            expect(config.allowedWritePaths).toContain('/private/tmp');
             expect(config.allowedWritePaths).toContain('~/.pipali');
-            // Should NOT include os.tmpdir() which could be /var/folders/... on macOS
-            expect(config.allowedWritePaths).not.toContain(os.tmpdir());
-        });
-
-        test('should have sensitive paths in denied write paths', () => {
-            const config = getDefaultConfig();
-
-            expect(config.deniedWritePaths).toContain('~/.ssh');
-            expect(config.deniedWritePaths).toContain('~/.gnupg');
-            expect(config.deniedWritePaths).toContain('~/.aws');
-            expect(config.deniedWritePaths).toContain('/etc');
+            // On macOS, should also include the user's temp dir (/private/var/folders/.../T/)
+            // to allow tools like Python's xcrun to write cache files
+            // Note: Uses /private/var because /var is a symlink and sandbox-exec needs real paths
+            if (process.platform === 'darwin') {
+                const hasMacTempDir = config.allowedWritePaths.some(p => p.startsWith('/private/var/folders/'));
+                expect(hasMacTempDir).toBe(true);
+            }
         });
 
         test('should have sensitive paths in denied read paths', () => {
@@ -117,7 +116,7 @@ describe('Sandbox Config', () => {
         test('should build valid SandboxRuntimeConfig', () => {
             const config: SandboxConfig = {
                 enabled: true,
-                allowedWritePaths: ['/tmp/pipali', '~/.pipali'],
+                allowedWritePaths: ['/tmp', '~/.pipali'],
                 deniedWritePaths: ['~/.ssh'],
                 deniedReadPaths: ['~/.aws', '.env'],
                 allowedDomains: ['github.com'],
@@ -127,7 +126,7 @@ describe('Sandbox Config', () => {
             const runtimeConfig = buildRuntimeConfig(config);
 
             // Filesystem config
-            expect(runtimeConfig.filesystem.allowWrite).toContain('/tmp/pipali');
+            expect(runtimeConfig.filesystem.allowWrite).toContain('/tmp');
             expect(runtimeConfig.filesystem.allowWrite).toContain(path.join(os.homedir(), '.pipali'));
             expect(runtimeConfig.filesystem.denyWrite).toContain(path.join(os.homedir(), '.ssh'));
             expect(runtimeConfig.filesystem.denyRead).toContain(path.join(os.homedir(), '.aws'));
@@ -159,6 +158,23 @@ describe('Sandbox Config', () => {
             expect(runtimeConfig.filesystem.denyWrite[0]).toBe(path.join(homeDir, '.ssh'));
             expect(runtimeConfig.filesystem.denyWrite[1]).toBe(path.join(homeDir, '.gnupg'));
             expect(runtimeConfig.filesystem.denyRead[0]).toBe(path.join(homeDir, '.aws'));
+        });
+    });
+
+    describe('getSandboxEnvOverrides', () => {
+        test('should return environment variables for tool caches', () => {
+            const env = getSandboxEnvOverrides();
+
+            // Should set TMPDIR to sandbox temp directory
+            expect(env.TMPDIR).toBe(SANDBOX_TEMP_DIR);
+
+            // Should redirect uv/pip caches to /tmp/pipali
+            expect(env.UV_CACHE_DIR).toContain(SANDBOX_TEMP_DIR);
+            expect(env.PIP_CACHE_DIR).toContain(SANDBOX_TEMP_DIR);
+
+            // Should redirect npm/bun caches
+            expect(env.npm_config_cache).toContain(SANDBOX_TEMP_DIR);
+            expect(env.BUN_INSTALL_CACHE_DIR).toContain(SANDBOX_TEMP_DIR);
         });
     });
 });

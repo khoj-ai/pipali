@@ -340,6 +340,34 @@ export function annotateStderrWithSandboxFailures(command: string, stderr: strin
     }
 }
 
+/**
+ * Sandbox temp directory path.
+ * Used for TMPDIR and tool cache environment variables.
+ */
+export const SANDBOX_TEMP_DIR = '/tmp/pipali';
+
+/**
+ * Get environment variables that redirect tool caches to sandbox-allowed directories.
+ * These should be merged with process.env when running sandboxed commands.
+ *
+ * This ensures tools like uv, pip, npm, etc. write their caches to allowed paths
+ * instead of ~/.cache which isn't in the sandbox allowlist.
+ */
+export function getSandboxEnvOverrides(): Record<string, string> {
+    return {
+        // General temp directory
+        TMPDIR: SANDBOX_TEMP_DIR,
+
+        // Python/Uv caches - redirect to /tmp/pipali instead of ~/.cache
+        UV_CACHE_DIR: `${SANDBOX_TEMP_DIR}/uv-cache`,
+        PIP_CACHE_DIR: `${SANDBOX_TEMP_DIR}/pip-cache`,
+
+        // Node/Bun caches
+        npm_config_cache: `${SANDBOX_TEMP_DIR}/npm-cache`,
+        BUN_INSTALL_CACHE_DIR: `${SANDBOX_TEMP_DIR}/bun-cache`,
+    };
+}
+
 // Re-export types and settings functions
 export type { SandboxConfig };
 export { getDefaultConfig } from './config';

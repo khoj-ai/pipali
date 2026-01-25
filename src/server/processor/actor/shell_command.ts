@@ -8,6 +8,7 @@ import {
     isSandboxActive,
     wrapCommandWithSandbox,
     annotateStderrWithSandboxFailures,
+    getSandboxEnvOverrides,
 } from '../../sandbox';
 import { createChildLogger } from '../../logger';
 import { buildBundledRuntimeEnv } from '../../bundled-runtimes';
@@ -222,10 +223,11 @@ export async function shellCommand(
             log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
         }
 
-        // Note: For sandboxed commands, TMPDIR is set by sandbox-runtime via CLAUDE_TMPDIR.
-        // This env override is redundant for sandbox mode but kept for consistency.
+        // For sandboxed commands, set environment variables to redirect tool caches
+        // to sandbox-allowed directories. This prevents tools like uv, pip, npm from
+        // trying to write to ~/.cache which isn't in the sandbox allowlist.
         const baseEnv = useSandbox
-            ? { ...process.env, TMPDIR: '/tmp/pipali' }
+            ? { ...process.env, ...getSandboxEnvOverrides() }
             : process.env;
         const env = await buildBundledRuntimeEnv(baseEnv);
 
@@ -241,6 +243,17 @@ export async function shellCommand(
         const exitCode = await proc.exited;
         const stdout = (await new Response(proc.stdout).text()).trim();
         let stderr = (await new Response(proc.stderr).text()).trim();
+
+        // Filter out known cosmetic xcrun cache creation warnings from stderr on macOS.
+        // Sandbox works fine, just can't cache the SDK path lookup. Unable to disable it.
+        if (useSandbox && stderr) {
+            stderr = stderr
+                .split('\n')
+                .filter(line => !line.includes("error: couldn't create cache file") && !line.includes("xcrun_db"))
+                .join('\n')
+                .trim();
+        }
+
         const originalStderr = stderr;
 
         // Annotate stderr with sandbox violation information if running in sandbox mode
