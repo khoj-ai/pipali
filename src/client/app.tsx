@@ -325,6 +325,9 @@ const App = () => {
         let unlisten: (() => void) | undefined;
 
         onWindowShown(() => {
+            // Refetch conversations when window is shown (ensures data is loaded after sidecar is ready)
+            fetchConversations();
+
             // Check for pending confirmations and navigate accordingly
             // Use refs to get current values (avoids stale closure issue)
             const chatConfirmations = pendingConfirmationsRef.current;
