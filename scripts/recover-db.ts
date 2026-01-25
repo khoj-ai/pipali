@@ -14,9 +14,9 @@ import { $ } from "bun";
 import { PGlite } from "@electric-sql/pglite";
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { getDatabaseDir } from "../src/server/paths";
+import { getDbName } from "../src/server/db/utils";
 
-const DB_PATH = getDatabaseDir();
+const DB_PATH = getDbName();
 const DRIZZLE_DIR = "./drizzle";
 
 /**
@@ -53,8 +53,8 @@ async function getPgResetwalPath(): Promise<string> {
 
     for (const pathPattern of possiblePaths) {
         try {
-            // Use glob to expand wildcards
-            const result = await $`ls ${pathPattern} 2>/dev/null`.quiet();
+            // Use bash -c for proper glob expansion (Bun's $ doesn't expand globs)
+            const result = await $`bash -c ${"ls " + pathPattern + " 2>/dev/null"}`.quiet();
             if (result.exitCode === 0) {
                 const foundPath = result.stdout.toString().trim().split("\n")[0];
                 if (foundPath) {
