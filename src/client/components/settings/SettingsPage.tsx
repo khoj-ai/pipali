@@ -1,7 +1,7 @@
 // Settings page component
 
 import React, { useState, useEffect } from 'react';
-import { Save, Loader2, Check, AlertCircle, CheckCircle, Shield, ShieldOff, User } from 'lucide-react';
+import { Save, Loader2, Check, AlertCircle, Shield, User } from 'lucide-react';
 import { apiFetch } from '../../utils/api';
 import { PathListEditor } from './PathListEditor';
 
@@ -195,22 +195,24 @@ export function SettingsPage() {
                         <h2>Settings</h2>
                     </div>
 
-                    <div className="settings-tabs">
-                        <button
-                            className={`settings-tab ${activeTab === 'profile' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('profile')}
-                        >
-                            <User size={16} />
-                            <span>Profile</span>
-                        </button>
-                        <button
-                            className={`settings-tab ${activeTab === 'permissions' ? 'active' : ''}`}
-                            onClick={() => setActiveTab('permissions')}
-                        >
-                            <Shield size={16} />
-                            <span>Permissions</span>
-                        </button>
-                    </div>
+                    {sandboxStatus?.supported && (
+                        <div className="settings-tabs">
+                            <button
+                                className={`settings-tab ${activeTab === 'profile' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('profile')}
+                            >
+                                <User size={16} />
+                                <span>Profile</span>
+                            </button>
+                            <button
+                                className={`settings-tab ${activeTab === 'permissions' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('permissions')}
+                            >
+                                <Shield size={16} />
+                                <span>Permissions</span>
+                            </button>
+                        </div>
+                    )}
 
                     {error && (
                         <div className="settings-error">
@@ -310,23 +312,6 @@ export function SettingsPage() {
                             <div className="settings-error">
                                 <AlertCircle size={14} />
                                 <span>{sandboxError}</span>
-                            </div>
-                        )}
-
-                        {/* Platform status indicator */}
-                        {sandboxStatus && (
-                            <div className={`sandbox-status ${sandboxStatus.supported ? 'supported' : 'unsupported'}`}>
-                                {sandboxStatus.supported ? (
-                                    <>
-                                        <CheckCircle size={16} />
-                                        <span>Sandbox supported on {sandboxStatus.platform === 'darwin' ? 'macOS' : sandboxStatus.platform}</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <ShieldOff size={16} />
-                                        <span>Sandbox not available on {sandboxStatus.platform}. Shell commands will require confirmation.</span>
-                                    </>
-                                )}
                             </div>
                         )}
 

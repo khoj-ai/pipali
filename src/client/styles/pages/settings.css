@@ -306,33 +306,6 @@
     transform: translateX(20px);
 }
 
-/* Sandbox Status Indicator */
-.sandbox-status {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px;
-    border-radius: var(--radius-md);
-    font-size: 13px;
-    margin-bottom: 20px;
-}
-
-.sandbox-status.supported {
-    background: var(--color-success-subtle);
-    color: var(--color-success);
-    border: 1px solid var(--color-success);
-}
-
-.sandbox-status.unsupported {
-    background: var(--color-warning-subtle);
-    color: var(--color-warning);
-    border: 1px solid var(--color-warning);
-}
-
-.sandbox-status svg {
-    flex-shrink: 0;
-}
-
 /* Path List Editor */
 .path-list-editor {
     display: flex;
