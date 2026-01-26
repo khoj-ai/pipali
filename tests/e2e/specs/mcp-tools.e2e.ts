@@ -49,12 +49,16 @@ test.describe('MCP Tools Page', () => {
             expect(btnText).toContain('Connect Tool');
         });
 
-        test('should show empty state when no servers exist', async () => {
-            // First ensure no servers exist
+        test('should show default chrome-browser server', async () => {
+            // Default chrome-browser server is created on init
+            // Wait for the page to fully load and display servers
+            await mcpToolsPage.page.waitForTimeout(500);
             const count = await mcpToolsPage.getServerCardsCount();
-            if (count === 0) {
-                await expect(mcpToolsPage.mcpToolsEmpty).toBeVisible();
-            }
+            expect(count).toBeGreaterThanOrEqual(1);
+
+            // Verify the default chrome-browser server exists
+            const chromeBrowserCard = mcpToolsPage.getServerCardByName('chrome-browser');
+            await expect(chromeBrowserCard).toBeVisible();
         });
     });
 

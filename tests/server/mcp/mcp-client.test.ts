@@ -33,12 +33,12 @@ describe('MCP Client', () => {
 
     describe('parseStdioCommand', () => {
         const cases: Array<{ path: string; command: string; args: string[]; desc: string }> = [
-            // NPM packages -> bunx
-            { path: '@modelcontextprotocol/server-github', command: 'bunx', args: ['-y', '@modelcontextprotocol/server-github'], desc: 'scoped npm package' },
-            { path: 'mcp-server-sqlite', command: 'bunx', args: ['-y', 'mcp-server-sqlite'], desc: 'simple npm package' },
-            { path: '@example/mcp-server@1.0.0', command: 'bunx', args: ['-y', '@example/mcp-server@1.0.0'], desc: 'npm with version' },
-            { path: 'chrome-devtools-mcp@latest --autoConnect', command: 'bunx', args: ['-y', 'chrome-devtools-mcp@latest', '--autoConnect'], desc: 'npm with args' },
-            { path: '  mcp-server-sqlite  ', command: 'bunx', args: ['-y', 'mcp-server-sqlite'], desc: 'trims whitespace' },
+            // NPM packages -> bun x (not bunx, since desktop app bundles bun but not bunx)
+            { path: '@modelcontextprotocol/server-github', command: 'bun', args: ['x', '-y', '@modelcontextprotocol/server-github'], desc: 'scoped npm package' },
+            { path: 'mcp-server-sqlite', command: 'bun', args: ['x', '-y', 'mcp-server-sqlite'], desc: 'simple npm package' },
+            { path: '@example/mcp-server@1.0.0', command: 'bun', args: ['x', '-y', '@example/mcp-server@1.0.0'], desc: 'npm with version' },
+            { path: 'chrome-devtools-mcp@latest --autoConnect', command: 'bun', args: ['x', '-y', 'chrome-devtools-mcp@latest', '--autoConnect'], desc: 'npm with args' },
+            { path: '  mcp-server-sqlite  ', command: 'bun', args: ['x', '-y', 'mcp-server-sqlite'], desc: 'trims whitespace' },
 
             // Python -> python
             { path: '/path/to/server.py', command: 'python', args: ['/path/to/server.py'], desc: 'python absolute' },

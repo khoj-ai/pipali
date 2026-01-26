@@ -1,5 +1,5 @@
 import { db } from './db';
-import { User, AiModelApi, ChatModel } from './db/schema';
+import { User, AiModelApi, ChatModel, McpServer } from './db/schema';
 import { eq } from 'drizzle-orm';
 import { getDefaultUser } from './utils';
 import { createChildLogger } from './logger';
@@ -66,5 +66,51 @@ export async function initializeDatabase() {
         }
     }
 
+    // 3. Setup default MCP servers
+    await setupDefaultMcpServers();
+
     log.info('📀 Database initialization complete.');
+}
+
+/**
+ * Setup default MCP servers that come pre-installed.
+ */
+async function setupDefaultMcpServers(): Promise<void> {
+    // Chrome Browser MCP - enables browser automation capabilities
+    const chromeBrowserName = 'chrome-browser';
+    const [existingChromeBrowser] = await db
+        .select()
+        .from(McpServer)
+        .where(eq(McpServer.name, chromeBrowserName));
+
+    if (!existingChromeBrowser) {
+        await db.insert(McpServer).values({
+            name: chromeBrowserName,
+            description: 'Use to interact with pages that require login and/or UX interactions. Useful when normal webpage read, web search tools do not suffice.',
+            transportType: 'stdio',
+            path: 'chrome-devtools-mcp@latest --autoConnect',
+            requiresConfirmation: true,
+            enabled: true,
+            enabledTools: [
+                'click',
+                'close_page',
+                'drag',
+                'evaluate_script',
+                'fill',
+                'fill_form',
+                'handle_dialog',
+                'hover',
+                'list_pages',
+                'navigate_page',
+                'new_page',
+                'press_key',
+                'select_page',
+                'take_screenshot',
+                'take_snapshot',
+                'upload_file',
+                'wait_for',
+            ],
+        });
+        log.info('🌐 Added Chrome Browser MCP server.');
+    }
 }

@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/
 import type { McpServerConfig, McpToolInfo, McpToolCallResult, McpClientStatus, McpContentType } from './types';
 import os from 'os';
 import { createChildLogger } from '../../logger';
+import { getBundledRuntimes } from '../../bundled-runtimes';
 
 const log = createChildLogger({ component: 'mcp' });
 
@@ -60,8 +61,9 @@ export function parseStdioCommand(path: string): { command: string; args: string
     }
 
     // npm package (starts with @ or has no path separator in the first part)
+    // Use 'bun x' instead of 'bunx' since desktop app bundles 'bun' but not 'bunx'
     if (firstPart.startsWith('@') || !firstPart.includes('/')) {
-        return { command: 'bunx', args: ['-y', firstPart, ...extraArgs] };
+        return { command: 'bun', args: ['x', '-y', firstPart, ...extraArgs] };
     }
 
     // Python script
@@ -228,10 +230,16 @@ export class McpClient {
      * Connect using stdio transport (for local scripts or npm packages)
      */
     private async connectStdio(): Promise<void> {
-        const { command, args } = parseStdioCommand(this.config.path);
+        let { command, args } = parseStdioCommand(this.config.path);
+
+        // Use bundled bun if available (desktop app)
+        const runtimes = await getBundledRuntimes();
+        if (command === 'bun' && runtimes.isBundled) {
+            command = runtimes.bun;
+        }
 
         // Build environment with user-specified overrides
-        // Use shell PATH to ensure tools like bunx are found (important for desktop apps)
+        // Use shell PATH to ensure tools are found (important for desktop apps)
         const defaultEnv = getDefaultEnvironment();
         const shellPath = await getShellPath();
 

@@ -1,4 +1,4 @@
-#!/usr/bin/env npx tsx
+#!/usr/bin/env bunx tsx
 /**
  * Word Document Creator
  * Creates .docx files from JSON specifications using the docx library.
