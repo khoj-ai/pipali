@@ -15,6 +15,7 @@ import {
 import {
   addStepToTrajectory,
   removeStepFromTrajectory,
+  removeTurnFromTrajectory,
   removeAgentMessageFromTrajectory,
   calculateFinalMetrics,
   validateATIFTrajectory,
@@ -554,5 +555,183 @@ describe('ATIF Agent Message Removal', () => {
     expect(removedCount).toBe(1);
     expect(trajectory.steps).toHaveLength(1);
     expect(trajectory.steps[0]?.source).toBe('user');
+  });
+});
+
+describe('ATIF User Message Removal', () => {
+  test('should remove user message and following assistant message', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    // User message 1
+    addStepToTrajectory(trajectory, 'user', 'First question');
+    // Agent response 1
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'First answer',
+      undefined,
+      undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cost_usd: 0.01 }
+    );
+    // User message 2
+    addStepToTrajectory(trajectory, 'user', 'Second question');
+    // Agent response 2
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Second answer',
+      undefined,
+      undefined,
+      { prompt_tokens: 80, completion_tokens: 40, cost_usd: 0.008 }
+    );
+
+    expect(trajectory.steps).toHaveLength(4);
+    expect(trajectory.final_metrics?.total_cost_usd).toBeCloseTo(0.018);
+
+    // Remove first user message (step_id 1) - should also remove the following agent message
+    const removedCount = removeTurnFromTrajectory(trajectory, 1);
+
+    expect(removedCount).toBe(2); // User message + agent response removed
+    expect(trajectory.steps).toHaveLength(2);
+
+    // Verify remaining steps are the second exchange
+    expect(trajectory.steps[0]?.source).toBe('user');
+    expect(trajectory.steps[0]?.message).toBe('Second question');
+    expect(trajectory.steps[1]?.source).toBe('agent');
+    expect(trajectory.steps[1]?.message).toBe('Second answer');
+
+    // Verify metrics recalculated
+    expect(trajectory.final_metrics?.total_cost_usd).toBeCloseTo(0.008);
+    expect(trajectory.final_metrics?.total_steps).toBe(2);
+  });
+
+  test('should remove user message with multi-step agent response', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    // User message
+    addStepToTrajectory(trajectory, 'user', 'Question');
+    // Agent tool call step
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      '',
+      [{ function_name: 'search', arguments: { query: 'test' }, tool_call_id: 'call-1' }],
+      { results: [{ source_call_id: 'call-1', content: 'result' }] },
+      { prompt_tokens: 50, completion_tokens: 20, cost_usd: 0.005 }
+    );
+    // Agent final response
+    addStepToTrajectory(
+      trajectory,
+      'agent',
+      'Final answer',
+      undefined,
+      undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cost_usd: 0.01 }
+    );
+    // Next user message
+    addStepToTrajectory(trajectory, 'user', 'Follow-up');
+
+    expect(trajectory.steps).toHaveLength(4);
+
+    // Remove first user message - should remove user + both agent steps
+    const removedCount = removeTurnFromTrajectory(trajectory, 1);
+
+    expect(removedCount).toBe(3); // User + 2 agent steps
+    expect(trajectory.steps).toHaveLength(1);
+    expect(trajectory.steps[0]?.source).toBe('user');
+    expect(trajectory.steps[0]?.message).toBe('Follow-up');
+  });
+
+  test('should remove user message at end of conversation with no following assistant', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'First question');
+    addStepToTrajectory(trajectory, 'agent', 'Answer');
+    addStepToTrajectory(trajectory, 'user', 'Pending question'); // No response yet
+
+    expect(trajectory.steps).toHaveLength(3);
+
+    // Remove the last user message (no following assistant message)
+    const removedCount = removeTurnFromTrajectory(trajectory, 3);
+
+    expect(removedCount).toBe(1); // Only the user message
+    expect(trajectory.steps).toHaveLength(2);
+    expect(trajectory.steps[0]?.source).toBe('user');
+    expect(trajectory.steps[1]?.source).toBe('agent');
+  });
+
+  test('should return 0 when step_id not found', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'Question');
+    addStepToTrajectory(trajectory, 'agent', 'Answer');
+
+    const removedCount = removeTurnFromTrajectory(trajectory, 999);
+
+    expect(removedCount).toBe(0);
+    expect(trajectory.steps).toHaveLength(2);
+  });
+
+  test('should return 0 when step_id points to non-user step', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    addStepToTrajectory(trajectory, 'user', 'Question');
+    addStepToTrajectory(trajectory, 'agent', 'Answer');
+
+    // Try to delete using agent step_id
+    const removedCount = removeTurnFromTrajectory(trajectory, 2);
+
+    expect(removedCount).toBe(0);
+    expect(trajectory.steps).toHaveLength(2);
+  });
+
+  test('should handle intermediate user messages before agent response', () => {
+    const trajectory = createEmptyATIFTrajectory(
+      'session-123',
+      'test-agent',
+      '1.0.0',
+      'gpt-4'
+    );
+
+    // User sends multiple messages before agent responds
+    addStepToTrajectory(trajectory, 'user', 'First message');
+    addStepToTrajectory(trajectory, 'user', 'Actually, let me add more');
+    addStepToTrajectory(trajectory, 'agent', 'Response to both');
+    addStepToTrajectory(trajectory, 'user', 'Follow-up');
+
+    expect(trajectory.steps).toHaveLength(4);
+
+    // Remove first user message - should also remove second user message and agent response
+    const removedCount = removeTurnFromTrajectory(trajectory, 1);
+
+    expect(removedCount).toBe(3); // Both user messages + agent response
+    expect(trajectory.steps).toHaveLength(1);
+    expect(trajectory.steps[0]?.source).toBe('user');
+    expect(trajectory.steps[0]?.message).toBe('Follow-up');
   });
 });

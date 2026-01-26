@@ -28,6 +28,8 @@ export const Selectors = {
     assistantMessage: '.assistant-message',
     messageLabel: '.message-label',
     messageContent: '.message-content',
+    messageActions: '.message-actions',
+    messageActionBtn: '.message-action-btn',
 
     // Thoughts / Train of Thought
     thoughtsSection: '.thoughts-section',

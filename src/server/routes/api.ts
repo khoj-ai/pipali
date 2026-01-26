@@ -251,12 +251,12 @@ api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
             }
             return c.json({ success: true, deletedCount });
         } else {
-            // Delete just the single step (user message or legacy behavior)
-            const deleted = await atifConversationService.deleteStep(conversationId, stepId);
-            if (!deleted) {
+            // Delete user message and the following assistant message (if any)
+            const deletedCount = await atifConversationService.deleteTurn(conversationId, stepId);
+            if (deletedCount === 0) {
                 return c.json({ error: 'Message not found' }, 404);
             }
-            return c.json({ success: true, deletedCount: 1 });
+            return c.json({ success: true, deletedCount });
         }
     } catch (error) {
         log.error({ err: error }, 'Error deleting message');

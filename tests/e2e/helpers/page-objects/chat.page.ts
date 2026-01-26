@@ -240,6 +240,34 @@ export class ChatPage extends AppPage {
     }
 
     /**
+     * Delete a user message by index (0-based)
+     * Hovers over the message to reveal the delete button, then clicks it
+     */
+    async deleteUserMessage(index: number): Promise<void> {
+        const userMessage = this.userMessages.nth(index);
+        await userMessage.hover();
+        // Wait for the action button to appear
+        const deleteBtn = userMessage.locator(Selectors.messageActionBtn);
+        await deleteBtn.waitFor({ state: 'visible', timeout: 5000 });
+        // Use force click since the button appears on hover and may shift position
+        await deleteBtn.click({ force: true });
+    }
+
+    /**
+     * Delete an assistant message by index (0-based)
+     * Hovers over the message to reveal the delete button, then clicks it
+     */
+    async deleteAssistantMessage(index: number): Promise<void> {
+        const assistantMessage = this.assistantMessages.nth(index);
+        await assistantMessage.hover();
+        // Wait for the action button to appear
+        const deleteBtn = assistantMessage.locator(Selectors.messageActionBtn);
+        await deleteBtn.waitFor({ state: 'visible', timeout: 5000 });
+        // Use force click since the button appears on hover and may shift position
+        await deleteBtn.click({ force: true });
+    }
+
+    /**
      * Check if input is empty
      */
     async isInputEmpty(): Promise<boolean> {

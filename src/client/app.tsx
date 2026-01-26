@@ -952,8 +952,29 @@ const App = () => {
                 method: 'DELETE'
             });
             if (res.ok) {
-                // Remove the message from local state
-                const next = messages.filter(m => m.id !== messageId);
+                // Remove messages from local state
+                let next: Message[];
+                if (role === 'user') {
+                    // For user messages, also remove the following assistant message (if any)
+                    const messageIndex = messages.findIndex(m => m.id === messageId);
+                    if (messageIndex === -1) {
+                        next = messages;
+                    } else {
+                        // Find the next assistant message after this user message
+                        let endIndex = messageIndex;
+                        for (let i = messageIndex + 1; i < messages.length; i++) {
+                            if (messages[i]?.role === 'assistant') {
+                                endIndex = i;
+                                break;
+                            }
+                        }
+                        // Remove from messageIndex to endIndex (inclusive)
+                        next = [...messages.slice(0, messageIndex), ...messages.slice(endIndex + 1)];
+                    }
+                } else {
+                    // For assistant messages, just remove that message
+                    next = messages.filter(m => m.id !== messageId);
+                }
                 setChatMessages(next);
                 syncConversationState(conversationId, next);
             } else {

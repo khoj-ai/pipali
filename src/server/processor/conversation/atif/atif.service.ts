@@ -19,6 +19,7 @@ import {
 import {
   addStepToTrajectory,
   removeStepFromTrajectory,
+  removeTurnFromTrajectory,
   removeAgentMessageFromTrajectory,
   validateATIFTrajectory,
   exportATIFTrajectory,
@@ -198,6 +199,38 @@ export class ATIFConversationService {
       .where(eq(Conversation.id, conversationId));
 
     return true;
+  }
+
+  /**
+   * Deletes a user message and the following assistant message (all agent steps until
+   * the next user message) from a conversation. Also removes any intermediate user
+   * messages between the deleted user message and the following assistant message's end.
+   * Returns the number of steps deleted.
+   */
+  async deleteTurn(conversationId: string, stepId: number): Promise<number> {
+    const conversation = await this.getConversation(conversationId);
+
+    if (!conversation) {
+      throw new Error(`Conversation ${conversationId} not found`);
+    }
+
+    const trajectory = conversation.trajectory;
+    const removedCount = removeTurnFromTrajectory(trajectory, stepId);
+
+    if (removedCount === 0) {
+      return 0;
+    }
+
+    // Update database
+    await db
+      .update(Conversation)
+      .set({
+        trajectory,
+        updatedAt: new Date(),
+      })
+      .where(eq(Conversation.id, conversationId));
+
+    return removedCount;
   }
 
   /**

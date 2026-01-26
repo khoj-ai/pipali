@@ -169,6 +169,56 @@ export function removeStepFromTrajectory(
 }
 
 /**
+ * Removes a user message and the following assistant message (all agent steps until the
+ * next user message) from the trajectory. Also removes any intermediate user messages
+ * between the deleted user message and the following assistant message's end.
+ * Returns the number of steps removed.
+ */
+export function removeTurnFromTrajectory(
+  trajectory: ATIFTrajectory,
+  stepId: number
+): number {
+  const startIndex = trajectory.steps.findIndex(s => s.step_id === stepId);
+
+  if (startIndex === -1) {
+    return 0;
+  }
+
+  // Verify this is a user message
+  if (trajectory.steps[startIndex]?.source !== 'user') {
+    return 0;
+  }
+
+  // Find the end of the following assistant message (all steps until next user message
+  // that follows an agent step, or end of trajectory)
+  let endIndex = startIndex;
+  let foundAgentStep = false;
+  for (let i = startIndex + 1; i < trajectory.steps.length; i++) {
+    const step = trajectory.steps[i];
+    if (step?.source === 'agent') {
+      foundAgentStep = true;
+      endIndex = i;
+    } else if (step?.source === 'user') {
+      if (foundAgentStep) {
+        // Stop at user message after we've seen agent steps
+        break;
+      }
+      // Include intermediate user messages before any agent response
+      endIndex = i;
+    }
+  }
+
+  // Remove all steps from startIndex to endIndex (inclusive)
+  const removeCount = endIndex - startIndex + 1;
+  trajectory.steps.splice(startIndex, removeCount);
+
+  // Recalculate final metrics
+  trajectory.final_metrics = calculateFinalMetrics(trajectory.steps);
+
+  return removeCount;
+}
+
+/**
  * Removes an agent message and all associated steps (reasoning, tool calls, tool results)
  * from the trajectory. Deletes all consecutive 'agent' steps starting from the step
  * that contains the given step_id, going backwards to find the first agent step after
