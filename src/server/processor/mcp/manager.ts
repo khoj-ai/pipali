@@ -188,7 +188,16 @@ export async function executeMcpTool(
     const result = await client.runTool(toolName, args);
 
     if (!result.success) {
-        return `Error executing MCP tool ${namespacedName}: ${result.error}`;
+        let errorMessage = `Error executing MCP tool ${namespacedName}: ${result.error}`;
+
+        // Add Chrome-specific setup guidance
+        if (serverName === 'chrome-browser' && result.error?.includes('chrome://inspect/#remote-debugging')) {
+            errorMessage +=
+                '\n\nIf Chrome is already installed and running, the user may need to ' +
+                '1. Open chrome://inspect/#remote-debugging on Chrome and 2. Tick "Allow remote debugging for this browser instance" to enable chrome browser use for you.';
+        }
+
+        return errorMessage;
     }
 
     // Convert result content to the format expected by the director
