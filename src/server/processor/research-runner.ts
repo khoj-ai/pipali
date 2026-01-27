@@ -22,6 +22,9 @@ import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
 import type { ResearchIteration } from './director/types';
 import type { ConfirmationContext } from './confirmation';
+import { createChildLogger } from '../logger';
+
+const log = createChildLogger({ component: 'research-runner' });
 
 export { ResearchPausedError };
 
@@ -256,6 +259,7 @@ export async function* runResearchWithConversation(
 
     // If no final response was generated, create a fallback
     if (!finalResponse) {
+        log.warn({ conversationId, iterationCount, hasThought: !!finalThought, rawOutputTypes: finalRaw?.map((item: any) => item.type) }, 'Model returned no message, using fallback response');
         finalResponse = 'Failed to generate response.';
     }
 

@@ -497,6 +497,9 @@ async function pickNextTool(
 
         // No tool calls - model wants to respond directly
         if (functionCalls.length === 0) {
+            if (!response.message) {
+                log.warn({ hasThought: !!response.thought, rawOutputTypes: response.raw?.map((item: any) => item.type) }, 'Model returned no tool calls and no message');
+            }
             return {
                 toolCalls: [],
                 thought: response.thought,
