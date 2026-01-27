@@ -209,6 +209,8 @@ export interface QueuedMessage {
  */
 export interface PendingConfirmation {
     requestId: string;
+    /** The original request, stored so we can match by operation type */
+    request: ConfirmationRequest;
     resolve: (response: ConfirmationResponse) => void;
     reject: (error: Error) => void;
 }

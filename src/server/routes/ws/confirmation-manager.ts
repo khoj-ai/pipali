@@ -7,16 +7,27 @@
 
 import type { ServerWebSocket } from 'bun';
 import type { WebSocketData } from '../ws';
-import type {
-    ConfirmationRequest,
-    ConfirmationResponse,
-    ConfirmationCallback,
+import {
+    type ConfirmationRequest,
+    type ConfirmationResponse,
+    type ConfirmationCallback,
+    CONFIRMATION_OPTIONS,
 } from '../../processor/confirmation';
 import type { PendingConfirmation } from './message-types';
 import type { RunningState } from './session-state';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'confirmation-manager' });
+
+/**
+ * Get the confirmation key for a request.
+ * This matches the key format used in confirmation.service.ts for preferences.
+ * Format: "operation" or "operation:operationType"
+ */
+function getConfirmationKey(request: ConfirmationRequest): string {
+    const operationType = request.context?.operationType;
+    return operationType ? `${request.operation}:${operationType}` : request.operation;
+}
 
 /**
  * Send a confirmation request message to the client
@@ -46,9 +57,10 @@ export function createConfirmationCallback(
 ): ConfirmationCallback {
     return async (request: ConfirmationRequest): Promise<ConfirmationResponse> => {
         return new Promise((resolve, reject) => {
-            // Store the pending confirmation
+            // Store the pending confirmation with the original request
             runState.pendingConfirmations.set(request.requestId, {
                 requestId: request.requestId,
+                request,
                 resolve,
                 reject,
             });
@@ -68,7 +80,10 @@ export function createConfirmationCallback(
 }
 
 /**
- * Handle a confirmation response from the client
+ * Handle a confirmation response from the client.
+ *
+ * When "Yes, don't ask again" is selected, this also auto-approves any other
+ * pending confirmations of the same operation type (from parallel tool calls).
  */
 export function handleConfirmationResponse(
     runState: RunningState,
@@ -91,8 +106,43 @@ export function handleConfirmationResponse(
         remainingCount: runState.pendingConfirmations.size - 1,
     }, 'Confirmation response received');
 
+    // Remove and resolve the specific confirmation
     runState.pendingConfirmations.delete(response.requestId);
     pending.resolve(response);
+
+    // If "Yes, don't ask again" was selected, auto-approve other pending
+    // confirmations of the same operation type (from parallel tool calls)
+    if (response.selectedOptionId === CONFIRMATION_OPTIONS.YES_DONT_ASK) {
+        const sourceKey = getConfirmationKey(pending.request);
+        const toAutoApprove: PendingConfirmation[] = [];
+
+        // Find all pending confirmations with matching confirmation key
+        for (const [requestId, otherPending] of runState.pendingConfirmations) {
+            const otherKey = getConfirmationKey(otherPending.request);
+            if (otherKey === sourceKey) {
+                toAutoApprove.push(otherPending);
+            }
+        }
+
+        if (toAutoApprove.length > 0) {
+            log.info({
+                runId: runState.runId,
+                confirmationKey: sourceKey,
+                autoApprovedCount: toAutoApprove.length,
+            }, 'Auto-approving matching pending confirmations');
+
+            for (const otherPending of toAutoApprove) {
+                runState.pendingConfirmations.delete(otherPending.requestId);
+                // Resolve with same "don't ask again" response
+                otherPending.resolve({
+                    requestId: otherPending.requestId,
+                    selectedOptionId: CONFIRMATION_OPTIONS.YES_DONT_ASK,
+                    timestamp: new Date().toISOString(),
+                });
+            }
+        }
+    }
+
     return true;
 }
 
