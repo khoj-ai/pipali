@@ -7,7 +7,7 @@ import {
     requestOperationConfirmation,
 } from '../confirmation';
 import { McpClient } from './client';
-import type { McpServerConfig, McpToolInfo, McpContentType } from './types';
+import type { McpServerConfig, McpContentType } from './types';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'mcp' });
@@ -89,7 +89,9 @@ export async function reconnectMcpServer(serverName: string): Promise<void> {
 }
 
 /**
- * Get all MCP tools as ToolDefinition[] for the director
+ * Get all MCP tools as ToolDefinition[] for the director.
+ * Each tool's schema is augmented with an `operation_type` property that the agent
+ * must specify to indicate whether the tool call is safe or unsafe.
  */
 export async function getMcpToolDefinitions(): Promise<ToolDefinition[]> {
     const toolDefinitions: ToolDefinition[] = [];
@@ -111,10 +113,13 @@ export async function getMcpToolDefinitions(): Promise<ToolDefinition[]> {
                     }
                 }
 
+                // Augment the tool schema with operation_type property
+                const augmentedSchema = augmentSchemaWithOperationType(tool.inputSchema);
+
                 toolDefinitions.push({
                     name: tool.namespacedName,
                     description: `[MCP: ${tool.serverName}] ${tool.description}`,
-                    schema: tool.inputSchema,
+                    schema: augmentedSchema,
                 });
             }
         } catch (error) {
@@ -123,6 +128,75 @@ export async function getMcpToolDefinitions(): Promise<ToolDefinition[]> {
     }
 
     return toolDefinitions;
+}
+
+/**
+ * Augment a tool's input schema with the operation_type property.
+ * This property is required for all MCP tool calls so the confirmation system
+ * can determine whether confirmation is needed based on server settings.
+ */
+function augmentSchemaWithOperationType(originalSchema: Record<string, unknown>): Record<string, unknown> {
+    const schema = { ...originalSchema };
+
+    // Ensure properties object exists
+    const properties = (schema.properties as Record<string, unknown>) || {};
+    schema.properties = {
+        ...properties,
+        operation_type: {
+            type: 'string',
+            enum: ['safe', 'unsafe'],
+            description: `
+Indicate whether this action is safe (no lasting side effects, can be undone) or unsafe (has lasting side effects, cannot be easily undone).
+Use safe for search, read, list, draft, and fill operations.
+Use unsafe for send, submit, delete, post, and publish style actions with permanent effects.
+Examples:
+- Filling a form is safe, submitting it is unsafe.
+- Filling a shopping cart is safe, placing the order is unsafe.
+- Drafting an email is safe, sending it is unsafe.
+- Doing a web search is safe, posting on social media is unsafe.
+`.trim(),
+        },
+    };
+
+    // Add operation_type to required array
+    const required = Array.isArray(schema.required) ? [...schema.required] : [];
+    if (!required.includes('operation_type')) {
+        required.push('operation_type');
+    }
+    schema.required = required;
+
+    return schema;
+}
+
+/**
+ * Determine if confirmation is required based on server's confirmation mode and the operation type.
+ *
+ * @param confirmationMode - The server's confirmation mode setting
+ * @param operationType - The operation type specified by the agent ('safe' or 'unsafe')
+ * @returns true if confirmation should be requested, false otherwise
+ */
+function shouldRequireConfirmation(
+    confirmationMode: 'always' | 'unsafe_only' | 'never',
+    operationType: 'safe' | 'unsafe' | undefined
+): boolean {
+    switch (confirmationMode) {
+        case 'never':
+            // Never require confirmation regardless of operation type
+            return false;
+
+        case 'always':
+            // Always require confirmation regardless of operation type
+            return true;
+
+        case 'unsafe_only':
+            // Only require confirmation for unsafe operations (those with lasting side effects)
+            // If operation_type is not specified, default to requiring confirmation (safer)
+            return operationType !== 'safe';
+
+        default:
+            // Unknown mode, default to requiring confirmation (safer)
+            return true;
+    }
 }
 
 /**
@@ -143,7 +217,7 @@ function parseNamespacedToolName(namespacedName: string): { serverName: string; 
 /**
  * Execute an MCP tool by its namespaced name
  * @param namespacedName - e.g., "github__create_issue"
- * @param args - Tool arguments
+ * @param args - Tool arguments (should include operation_type)
  * @param confirmationContext - Optional context for user confirmation
  */
 export async function executeMcpTool(
@@ -168,8 +242,16 @@ export async function executeMcpTool(
         throw new Error(`MCP server not connected: ${serverName}`);
     }
 
-    // Check if confirmation is required
-    if (client.requiresConfirmation && confirmationContext) {
+    // Extract operation_type from args (agent must provide this)
+    const operationType = args.operation_type as 'safe' | 'unsafe' | undefined;
+
+    // Check if confirmation is required based on server's confirmation mode and operation type
+    const needsConfirmation = shouldRequireConfirmation(client.confirmationMode, operationType);
+
+    if (needsConfirmation && confirmationContext) {
+        // Map operation_type to the format expected by confirmation service
+        const operationSubType = operationType === 'safe' ? 'safe' : 'unsafe';
+
         const result = await requestOperationConfirmation(
             'mcp_tool_call',
             namespacedName,
@@ -177,6 +259,7 @@ export async function executeMcpTool(
             {
                 toolName: namespacedName,
                 toolArgs: args,
+                operationSubType,
             }
         );
         if (!result.approved) {
@@ -184,8 +267,11 @@ export async function executeMcpTool(
         }
     }
 
+    // Remove operation_type from args before passing to MCP server (it's not part of the actual tool schema)
+    const { operation_type: _, ...toolArgs } = args;
+
     // Execute the tool
-    const result = await client.runTool(toolName, args);
+    const result = await client.runTool(toolName, toolArgs);
 
     if (!result.success) {
         let errorMessage = `Error executing MCP tool ${namespacedName}: ${result.error}`;

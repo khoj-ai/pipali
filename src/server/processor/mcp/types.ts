@@ -6,6 +6,19 @@ import type { McpServer } from '../../db/schema';
 export type McpServerConfig = typeof McpServer.$inferSelect;
 
 /**
+ * Confirmation mode for MCP server tool calls
+ */
+export type McpConfirmationMode = 'always' | 'unsafe_only' | 'never';
+
+/**
+ * Operation type for MCP tool calls - indicates whether the tool has lasting side effects
+ * The agent specifies this when calling an MCP tool to inform the confirmation system.
+ * - safe: No lasting side effects, can be undone (e.g., fetch page, list items, fill form, draft email, add to cart)
+ * - unsafe: Has lasting side effects, cannot be easily undone (e.g., send email, submit order, delete item, post message)
+ */
+export type McpToolOperationType = 'safe' | 'unsafe';
+
+/**
  * Information about a tool from an MCP server, with namespacing
  */
 export interface McpToolInfo {

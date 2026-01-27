@@ -183,8 +183,8 @@ export class McpClient {
         return this.config.name;
     }
 
-    get requiresConfirmation(): boolean {
-        return this.config.requiresConfirmation;
+    get confirmationMode(): 'always' | 'unsafe_only' | 'never' {
+        return this.config.confirmationMode;
     }
 
     get enabledTools(): string[] | null {

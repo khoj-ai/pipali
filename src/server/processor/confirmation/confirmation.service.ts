@@ -48,14 +48,15 @@ export type ConfirmableOperation =
     | 'fetch_internal_url';
 
 /**
- * Get risk level based on operation and optional sub-type
- * For bash commands: read-only = low, write-only = medium, read-write = high
+ * Get risk level based on operation and optional sub-type.
+ * For shell commands: read-only = low, write-only = medium, read-write = high
+ * For MCP tools: safe = low, unsafe = high
  */
 function getRiskLevel(
     operation: ConfirmableOperation,
     operationSubType?: string
 ): 'low' | 'medium' | 'high' {
-    // For execute_command, risk level depends on operation_type
+    // For execute_command, risk level depends on operation_type directly
     if (operation === 'execute_command' && operationSubType) {
         switch (operationSubType) {
             case 'read-only':
@@ -64,6 +65,16 @@ function getRiskLevel(
                 return 'medium';
             case 'read-write':
                 return 'high';
+        }
+    }
+
+    // For mcp_tool_call, subType is "safe" or "unsafe"
+    if (operation === 'mcp_tool_call' && operationSubType) {
+        if (operationSubType === 'safe') {
+            return 'low';
+        }
+        if (operationSubType === 'unsafe') {
+            return 'high';
         }
     }
 

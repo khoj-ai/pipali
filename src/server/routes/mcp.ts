@@ -25,7 +25,7 @@ const createMcpServerSchema = z.object({
     path: z.string().min(1),
     apiKey: z.string().optional(),
     env: z.record(z.string(), z.string()).optional(),
-    requiresConfirmation: z.boolean().optional(),
+    confirmationMode: z.enum(['always', 'unsafe_only', 'never']).optional(),
     enabled: z.boolean().optional(),
     enabledTools: z.array(z.string()).optional(),
 });
@@ -69,7 +69,7 @@ mcp.post('/servers', zValidator('json', createMcpServerSchema), async (c) => {
             path: input.path,
             apiKey: input.apiKey,
             env: input.env,
-            requiresConfirmation: input.requiresConfirmation ?? true,
+            confirmationMode: input.confirmationMode ?? 'always',
             enabled: input.enabled ?? true,
             enabledTools: input.enabledTools,
         }).returning();
@@ -149,7 +149,7 @@ mcp.put('/servers/:id', zValidator('json', updateMcpServerSchema), async (c) => 
         if (input.path !== undefined) updateData.path = input.path;
         if (input.apiKey !== undefined) updateData.apiKey = input.apiKey;
         if (input.env !== undefined) updateData.env = input.env;
-        if (input.requiresConfirmation !== undefined) updateData.requiresConfirmation = input.requiresConfirmation;
+        if (input.confirmationMode !== undefined) updateData.confirmationMode = input.confirmationMode;
         if (input.enabled !== undefined) updateData.enabled = input.enabled;
         if (input.enabledTools !== undefined) updateData.enabledTools = input.enabledTools;
 

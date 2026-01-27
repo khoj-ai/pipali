@@ -89,7 +89,7 @@ async function setupDefaultMcpServers(): Promise<void> {
             description: 'Use to interact with pages that require login and/or UX interactions. Useful when normal webpage read, web search tools do not suffice.',
             transportType: 'stdio',
             path: 'chrome-devtools-mcp@latest --autoConnect',
-            requiresConfirmation: true,
+            confirmationMode: 'unsafe_only',
             enabled: true,
             enabledTools: [
                 'click',

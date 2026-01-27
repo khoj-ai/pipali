@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Terminal, Globe, Plus, Trash2 } from 'lucide-react';
-import type { McpTransportType, CreateMcpServerInput } from '../../types/mcp';
+import type { McpTransportType, McpConfirmationMode, CreateMcpServerInput } from '../../types/mcp';
 import { apiFetch } from '../../utils/api';
 
 interface CreateMcpServerModalProps {
@@ -14,7 +14,7 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
     const [transportType, setTransportType] = useState<McpTransportType>('stdio');
     const [path, setPath] = useState('');
     const [apiKey, setApiKey] = useState('');
-    const [requiresConfirmation, setRequiresConfirmation] = useState(true);
+    const [confirmationMode, setConfirmationMode] = useState<McpConfirmationMode>('always');
     const [enabled, setEnabled] = useState(true);
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
 
@@ -73,7 +73,7 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
             path,
             apiKey: apiKey || undefined,
             env: Object.keys(env).length > 0 ? env : undefined,
-            requiresConfirmation,
+            confirmationMode,
             enabled,
         };
 
@@ -239,16 +239,23 @@ export function CreateMcpServerModal({ onClose, onCreated }: CreateMcpServerModa
                         </div>
                     )}
 
-                    <div className="form-group form-checkbox-group">
-                        <label className="checkbox-label">
-                            <input
-                                type="checkbox"
-                                checked={requiresConfirmation}
-                                onChange={(e) => setRequiresConfirmation(e.target.checked)}
-                            />
-                            <span>Require confirmation for tool calls</span>
-                        </label>
-                        <span className="form-hint">When enabled, the user must approve each tool call from this server</span>
+                    <div className="form-group">
+                        <label htmlFor="confirmation-mode">Confirmation Mode</label>
+                        <select
+                            id="confirmation-mode"
+                            value={confirmationMode}
+                            onChange={(e) => setConfirmationMode(e.target.value as McpConfirmationMode)}
+                            className="form-select"
+                        >
+                            <option value="always">Always require confirmation</option>
+                            <option value="unsafe_only">Only for unsafe operations</option>
+                            <option value="never">Never require confirmation</option>
+                        </select>
+                        <span className="form-hint">
+                            {confirmationMode === 'always' && 'User must approve every tool call from this server'}
+                            {confirmationMode === 'unsafe_only' && 'User approves only unsafe operations (safe operations are auto-approved)'}
+                            {confirmationMode === 'never' && 'All tool calls run without confirmation (use with trusted servers only)'}
+                        </span>
                     </div>
 
                     <div className="form-group form-checkbox-group">

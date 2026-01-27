@@ -2,6 +2,14 @@ export type McpTransportType = 'stdio' | 'sse';
 
 export type McpConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+/**
+ * Confirmation mode for MCP server tool calls:
+ * - 'always': Always require confirmation for all tool calls (most restrictive)
+ * - 'unsafe_only': Only require confirmation for unsafe operations (balanced)
+ * - 'never': Never require confirmation (least restrictive)
+ */
+export type McpConfirmationMode = 'always' | 'unsafe_only' | 'never';
+
 export interface McpServerInfo {
     id: number;
     name: string;
@@ -10,7 +18,7 @@ export interface McpServerInfo {
     path: string;
     apiKey?: string;
     env?: Record<string, string>;
-    requiresConfirmation: boolean;
+    confirmationMode: McpConfirmationMode;
     enabled: boolean;
     enabledTools?: string[];  // When null/empty, all tools enabled; otherwise only listed tools
     lastConnectedAt?: string;
@@ -57,7 +65,7 @@ export interface CreateMcpServerInput {
     path: string;
     apiKey?: string;
     env?: Record<string, string>;
-    requiresConfirmation?: boolean;
+    confirmationMode?: McpConfirmationMode;
     enabled?: boolean;
 }
 
@@ -67,7 +75,7 @@ export interface UpdateMcpServerInput {
     path?: string;
     apiKey?: string;
     env?: Record<string, string>;
-    requiresConfirmation?: boolean;
+    confirmationMode?: McpConfirmationMode;
     enabled?: boolean;
     enabledTools?: string[];
 }

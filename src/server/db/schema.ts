@@ -308,6 +308,14 @@ export const PendingConfirmation = pgTable('pending_confirmation', {
 // MCP Server Configuration Schema
 export const McpTransportTypeEnum = pgEnum('mcp_transport_type', ['stdio', 'sse']);
 
+/**
+ * Confirmation mode for MCP server tool calls:
+ * - 'always': Always require confirmation for all tool calls
+ * - 'unsafe_only': Only require confirmation for unsafe operations (those with lasting side effects)
+ * - 'never': Never require confirmation (trust all tool calls)
+ */
+export const McpConfirmationModeEnum = pgEnum('mcp_confirmation_mode', ['always', 'unsafe_only', 'never']);
+
 export const McpServer = pgTable('mcp_server', {
     id: serial('id').primaryKey(),
 
@@ -327,8 +335,11 @@ export const McpServer = pgTable('mcp_server', {
     // Optional environment variables to pass to stdio servers (JSON object)
     env: jsonb('env').$type<Record<string, string>>(),
 
-    // Whether tool calls from this server require user confirmation
-    requiresConfirmation: boolean('requires_confirmation').default(true).notNull(),
+    // Confirmation mode for tool calls from this server
+    // - 'always': Always require confirmation (most restrictive, default)
+    // - 'unsafe_only': Only require confirmation for unsafe operations
+    // - 'never': Never require confirmation (least restrictive)
+    confirmationMode: McpConfirmationModeEnum('confirmation_mode').default('always').notNull(),
 
     // Status tracking
     enabled: boolean('enabled').default(true).notNull(),

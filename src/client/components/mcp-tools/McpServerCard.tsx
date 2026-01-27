@@ -75,9 +75,13 @@ export function McpServerCard({ server, onClick }: McpServerCardProps) {
 
             <div className="mcp-server-card-footer">
                 <div className="mcp-server-meta">
-                    {server.requiresConfirmation && (
-                        <span className="mcp-server-confirmation-badge" title="Requires confirmation">
-                            Confirmation required
+                    {server.confirmationMode !== 'never' && (
+                        <span className="mcp-server-confirmation-badge" title={
+                            server.confirmationMode === 'always'
+                                ? 'Confirmation required for all operations'
+                                : 'Confirmation required for write operations'
+                        }>
+                            {server.confirmationMode === 'always' ? 'Confirm all' : 'Confirm writes'}
                         </span>
                     )}
                 </div>

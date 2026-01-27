@@ -68,8 +68,8 @@ export class McpToolsPage {
         this.serverPathInput = page.locator('#server-path');
         this.serverApiKeyInput = page.locator('#server-api-key');
         this.transportTypeSelector = page.locator('.transport-type-selector');
-        this.confirmationCheckbox = page.locator('input[type="checkbox"]').first();
-        this.enabledCheckbox = page.locator('input[type="checkbox"]').nth(1);
+        this.confirmationCheckbox = page.locator('#confirmation-mode');
+        this.enabledCheckbox = page.locator('input[type="checkbox"]').first(); // Only checkbox is for enabled
 
         // Detail modal
         this.detailModal = page.locator('.mcp-server-detail-modal');

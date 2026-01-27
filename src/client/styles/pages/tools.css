@@ -445,6 +445,104 @@
     color: var(--danger, #dc2626);
 }
 
+/* Confirmation Mode Selector */
+.confirmation-mode-selector {
+    display: flex;
+    gap: 8px;
+}
+
+.confirmation-mode-btn {
+    flex: 1;
+    padding: 10px 12px;
+    background: var(--color-bg-elevated);
+    border: 2px solid var(--color-border);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition: all var(--transition);
+}
+
+.confirmation-mode-btn:hover {
+    border-color: var(--color-text-muted);
+    color: var(--color-text);
+}
+
+.confirmation-mode-btn.active {
+    border-color: var(--color-accent);
+    background: var(--color-bg-muted);
+    color: var(--color-text);
+}
+
+/* Enable Server Toggle */
+.form-toggle-group {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+}
+
+.form-toggle-group > label:first-child {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--color-text);
+}
+
+/* Toggle Switch (reused from settings) */
+.mcp-server-form .toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 44px;
+    height: 24px;
+    flex-shrink: 0;
+}
+
+.mcp-server-form .toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.mcp-server-form .toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--color-border);
+    transition: var(--transition);
+    border-radius: 24px;
+}
+
+.mcp-server-form .toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 18px;
+    width: 18px;
+    left: 3px;
+    bottom: 3px;
+    background-color: var(--color-bg);
+    transition: var(--transition);
+    border-radius: 50%;
+}
+
+.mcp-server-form .toggle-switch input:checked + .toggle-slider {
+    background-color: var(--color-accent);
+}
+
+.mcp-server-form .toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(20px);
+}
+
+/* Form Hint */
+.form-hint {
+    font-size: 12px;
+    color: var(--color-text-muted);
+    margin-top: 6px;
+}
+
 /* MCP Test Connection Section */
 .mcp-test-section {
     display: flex;
@@ -651,5 +749,14 @@
 
     .env-var-key {
         flex: 1 1 100%;
+    }
+
+    .confirmation-mode-selector {
+        flex-direction: column;
+    }
+
+    .confirmation-mode-btn {
+        flex: none;
+        width: 100%;
     }
 }

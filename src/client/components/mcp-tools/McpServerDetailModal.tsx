@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Trash2, Save, Play, Terminal, Globe, Plus, AlertCircle, CheckCircle } from 'lucide-react';
-import type { McpServerInfo, McpTransportType, McpToolInfo, UpdateMcpServerInput } from '../../types/mcp';
+import type { McpServerInfo, McpTransportType, McpConfirmationMode, McpToolInfo, UpdateMcpServerInput } from '../../types/mcp';
 import { apiFetch } from '../../utils/api';
 
 interface McpServerDetailModalProps {
@@ -15,7 +15,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
     const [transportType, setTransportType] = useState<McpTransportType>(server.transportType);
     const [path, setPath] = useState(server.path);
     const [apiKey, setApiKey] = useState(server.apiKey || '');
-    const [requiresConfirmation, setRequiresConfirmation] = useState(server.requiresConfirmation);
+    const [confirmationMode, setConfirmationMode] = useState<McpConfirmationMode>(server.confirmationMode);
     const [enabled, setEnabled] = useState(server.enabled);
     const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>(() => {
         if (!server.env) return [];
@@ -41,7 +41,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         if (transportType !== server.transportType) return true;
         if (path !== server.path) return true;
         if (apiKey !== (server.apiKey || '')) return true;
-        if (requiresConfirmation !== server.requiresConfirmation) return true;
+        if (confirmationMode !== server.confirmationMode) return true;
         if (enabled !== server.enabled) return true;
 
         // Check env vars
@@ -127,7 +127,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
             path,
             apiKey: apiKey || undefined,
             env: Object.keys(env).length > 0 ? env : undefined,
-            requiresConfirmation,
+            confirmationMode,
             enabled,
             enabledTools: enabledToolsSet.size > 0 ? Array.from(enabledToolsSet) : undefined,
         };
@@ -345,25 +345,48 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                             </div>
                         )}
 
-                        <div className="form-group form-checkbox-group">
-                            <label className="checkbox-label">
-                                <input
-                                    type="checkbox"
-                                    checked={requiresConfirmation}
-                                    onChange={(e) => setRequiresConfirmation(e.target.checked)}
-                                />
-                                <span>Require confirmation for tool calls</span>
-                            </label>
+                        <div className="form-group">
+                            <label htmlFor="confirmation-mode">Confirmation Mode</label>
+                            <div className="confirmation-mode-selector">
+                                <button
+                                    type="button"
+                                    className={`confirmation-mode-btn ${confirmationMode === 'always' ? 'active' : ''}`}
+                                    onClick={() => setConfirmationMode('always')}
+                                >
+                                    Always
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`confirmation-mode-btn ${confirmationMode === 'unsafe_only' ? 'active' : ''}`}
+                                    onClick={() => setConfirmationMode('unsafe_only')}
+                                >
+                                    Unsafe Only
+                                </button>
+                                <button
+                                    type="button"
+                                    className={`confirmation-mode-btn ${confirmationMode === 'never' ? 'active' : ''}`}
+                                    onClick={() => setConfirmationMode('never')}
+                                >
+                                    Never
+                                </button>
+                            </div>
+                            <span className="form-hint">
+                                {confirmationMode === 'always' && 'User must approve every tool call'}
+                                {confirmationMode === 'unsafe_only' && 'Only operations with lasting side effects need approval. E.g., submit, send, delete, not search or read.'}
+                                {confirmationMode === 'never' && 'All tool calls run without confirmation'}
+                            </span>
                         </div>
 
-                        <div className="form-group form-checkbox-group">
-                            <label className="checkbox-label">
+                        <div className="form-group form-toggle-group">
+                            <label htmlFor="server-enabled">Enable Server</label>
+                            <label className="toggle-switch">
                                 <input
+                                    id="server-enabled"
                                     type="checkbox"
                                     checked={enabled}
                                     onChange={(e) => setEnabled(e.target.checked)}
                                 />
-                                <span>Enable server</span>
+                                <span className="toggle-slider"></span>
                             </label>
                         </div>
 
