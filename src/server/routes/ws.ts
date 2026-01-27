@@ -18,6 +18,28 @@ import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'ws' });
 
+/**
+ * Sanitize error message for client display.
+ * Removes internal details like SQL queries, params, and trajectory data.
+ */
+function sanitizeErrorForClient(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+
+    // Database query errors - don't expose SQL or params
+    if (message.includes('Failed query:')) {
+        return 'A database error occurred. Please try again.';
+    }
+
+    // Truncate very long error messages (likely contain internal data dumps).
+    // Shorten to first and last N characters.
+    const maxLength = 300;
+    if (message.length > maxLength) {
+        return message.slice(0, maxLength / 2) + '...' + message.slice(-maxLength / 2);
+    }
+
+    return message;
+}
+
 export type WebSocketData = {};
 
 type ConnectionSessions = Map<string, Session>;
@@ -321,7 +343,7 @@ async function runConversationExecutor(
                 type: 'run_stopped',
                 runId: runIdAuthoritative,
                 reason: 'error',
-                error: error instanceof Error ? error.message : String(error),
+                error: sanitizeErrorForClient(error),
             });
 
             setSessionInactive(conversationId);
