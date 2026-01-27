@@ -250,7 +250,10 @@ export async function executeMcpTool(
 
     if (needsConfirmation && confirmationContext) {
         // Map operation_type to the format expected by confirmation service
-        const operationSubType = operationType === 'safe' ? 'safe' : 'unsafe';
+        // Include server name in the subtype for per-server "don't ask again" preferences
+        // e.g., "github:safe" -> key becomes "mcp_tool_call:github:safe"
+        const opTypeStr = operationType === 'safe' ? 'safe' : 'unsafe';
+        const operationSubType = `${serverName}:${opTypeStr}`;
 
         const result = await requestOperationConfirmation(
             'mcp_tool_call',

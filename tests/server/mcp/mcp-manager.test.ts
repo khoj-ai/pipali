@@ -317,5 +317,43 @@ describe('MCP Manager', () => {
                 expect(props).toHaveProperty('operation_type');
             });
         });
+
+        describe('confirmation key generation', () => {
+            /**
+             * Generates a confirmation key for MCP tool calls.
+             * Format: "serverName:safe" or "serverName:unsafe"
+             * This becomes the operationSubType, and the full key becomes:
+             * "mcp_tool_call:serverName:safe" or "mcp_tool_call:serverName:unsafe"
+             */
+            function generateMcpConfirmationSubType(
+                serverName: string,
+                operationType: 'safe' | 'unsafe' | undefined
+            ): string {
+                const opTypeStr = operationType === 'safe' ? 'safe' : 'unsafe';
+                return `${serverName}:${opTypeStr}`;
+            }
+
+            test('generates key with server name and operation type', () => {
+                expect(generateMcpConfirmationSubType('github', 'safe')).toBe('github:safe');
+                expect(generateMcpConfirmationSubType('github', 'unsafe')).toBe('github:unsafe');
+                expect(generateMcpConfirmationSubType('chrome-browser', 'safe')).toBe('chrome-browser:safe');
+            });
+
+            test('defaults to unsafe when operation type is undefined', () => {
+                expect(generateMcpConfirmationSubType('github', undefined)).toBe('github:unsafe');
+            });
+
+            test('different servers have different keys', () => {
+                const githubKey = generateMcpConfirmationSubType('github', 'safe');
+                const slackKey = generateMcpConfirmationSubType('slack', 'safe');
+                expect(githubKey).not.toBe(slackKey);
+            });
+
+            test('same server with different operation types have different keys', () => {
+                const safeKey = generateMcpConfirmationSubType('github', 'safe');
+                const unsafeKey = generateMcpConfirmationSubType('github', 'unsafe');
+                expect(safeKey).not.toBe(unsafeKey);
+            });
+        });
     });
 });

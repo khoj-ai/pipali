@@ -50,7 +50,7 @@ export type ConfirmableOperation =
 /**
  * Get risk level based on operation and optional sub-type.
  * For shell commands: read-only = low, write-only = medium, read-write = high
- * For MCP tools: safe = low, unsafe = high
+ * For MCP tools: subType format is "serverName:safe" or "serverName:unsafe"
  */
 function getRiskLevel(
     operation: ConfirmableOperation,
@@ -68,12 +68,12 @@ function getRiskLevel(
         }
     }
 
-    // For mcp_tool_call, subType is "safe" or "unsafe"
+    // For mcp_tool_call, subType format is "serverName:safe" or "serverName:unsafe"
     if (operation === 'mcp_tool_call' && operationSubType) {
-        if (operationSubType === 'safe') {
+        if (operationSubType.endsWith(':safe')) {
             return 'low';
         }
-        if (operationSubType === 'unsafe') {
+        if (operationSubType.endsWith(':unsafe')) {
             return 'high';
         }
     }
