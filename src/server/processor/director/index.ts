@@ -508,18 +508,55 @@ async function pickNextTool(
             };
         }
 
-        const toolCalls: ATIFToolCall[] = functionCalls.map((fc: any) => ({
-            function_name: fc.name,
-            arguments: typeof fc.arguments === 'string' ? JSON.parse(fc.arguments) : fc.arguments,
-            tool_call_id: fc.call_id,
-        }));
+        // Parse tool calls, handling malformed JSON arguments gracefully
+        const toolCalls: ATIFToolCall[] = [];
+        const parseErrors: string[] = [];
+        const failedCallIds = new Set<string>();
+
+        for (const fc of functionCalls as any[]) {
+            try {
+                const args = typeof fc.arguments === 'string' ? JSON.parse(fc.arguments) : fc.arguments;
+                toolCalls.push({
+                    function_name: fc.name,
+                    arguments: args,
+                    tool_call_id: fc.call_id,
+                });
+            } catch (parseError) {
+                log.warn({ toolName: fc.name, callId: fc.call_id, arguments: fc.arguments?.substring?.(0, 200), err: parseError }, 'Failed to parse tool call arguments');
+                parseErrors.push(`Tool "${fc.name}" has invalid JSON arguments: ${parseError instanceof Error ? parseError.message : String(parseError)}`);
+                failedCallIds.add(fc.call_id);
+            }
+        }
+
+        // Filter out malformed function_calls from raw output to prevent them from being
+        // passed through to subsequent API requests (which would cause 400 errors)
+        const sanitizedRaw = parseErrors.length > 0
+            ? response.raw?.filter((item: any) => item.type !== 'function_call' || !failedCallIds.has(item.call_id))
+            : response.raw;
+
+        // If all tool calls failed to parse, return warning asking model to retry
+        if (toolCalls.length === 0 && parseErrors.length > 0) {
+            return {
+                toolCalls: [],
+                warning: `Failed to parse tool call arguments. Please retry with valid JSON.\n${parseErrors.join('\n')}`,
+                thought: response.thought,
+                metrics,
+                raw: sanitizedRaw,
+                systemPrompt: isFirstIteration ? systemPrompt : undefined,
+            };
+        }
+
+        // If some tool calls failed, log but continue with the valid ones
+        if (parseErrors.length > 0) {
+            log.warn({ parseErrors, validCount: toolCalls.length }, 'Some tool calls had invalid JSON, continuing with valid ones');
+        }
 
         return {
             toolCalls,
             thought: response.thought,
             message: response.message,
             metrics,
-            raw: response.raw,
+            raw: sanitizedRaw,
             systemPrompt: isFirstIteration ? systemPrompt : undefined,
         };
     } catch (error) {
@@ -695,7 +732,25 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
 
         const iteration = await pickNextTool({ ...config, currentIteration: i, thresholdStepCount });
 
-        // Stop research if no tool calls
+        // Handle warnings first (e.g., invalid JSON in tool arguments) - feed back to model for retry
+        // Must check before empty tool calls check, since warnings with no valid tool calls should continue loop
+        if (iteration.warning) {
+            // Create a synthetic observation to feed the warning back to the model
+            const syntheticCallId = `warning-${Date.now()}`;
+            iteration.toolCalls = [{
+                function_name: '_system_warning',
+                arguments: {},
+                tool_call_id: syntheticCallId,
+            }];
+            iteration.toolResults = [{
+                source_call_id: syntheticCallId,
+                content: iteration.warning,
+            }];
+            yield iteration;
+            continue;
+        }
+
+        // Stop research if no tool calls (model wants to respond directly)
         if (iteration.toolCalls.length === 0) {
             yield iteration;
             // Check if paused after yielding final response
@@ -704,14 +759,6 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
                 throw new ResearchPausedError();
             }
             break;
-        }
-
-        // Add warning to trajectory and skip tool execution
-        if (iteration.warning) {
-            const warningObservations: ATIFObservationResult[] = iteration.toolCalls.map(tc => ({ source_call_id: tc.tool_call_id, content: `Skipped due to warning: ${iteration.warning}` }));
-            iteration.toolResults = warningObservations;
-            yield iteration;
-            continue;
         }
 
         // Yield tool calls before execution so UI can show current step
