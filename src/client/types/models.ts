@@ -6,5 +6,6 @@ export type ChatModelInfo = {
     friendlyName: string | null;
     modelType: string;
     visionEnabled?: boolean;
-    providerName: string | null;
+    inputCostPerMillion: number | null;
+    outputCostPerMillion: number | null;
 };

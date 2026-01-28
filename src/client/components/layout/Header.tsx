@@ -5,6 +5,13 @@ import { PanelLeftClose, PanelLeft, ChevronDown, Circle, Check } from 'lucide-re
 import type { ChatModelInfo } from '../../types';
 import { getApiBaseUrl } from '../../utils/api';
 
+function formatCost(inputCost: number | null, outputCost: number | null): string {
+    if (inputCost === null && outputCost === null) return '';
+    const input = inputCost !== null ? `$${inputCost.toFixed(2)}` : '-';
+    const output = outputCost !== null ? `$${outputCost.toFixed(2)}` : '-';
+    return `↓${input}  ↑${output}`;
+}
+
 interface HeaderProps {
     sidebarOpen: boolean;
     onToggleSidebar: () => void;
@@ -98,8 +105,8 @@ export function Header({
                                                 <span className="model-option-name">
                                                     {model.friendlyName || model.name}
                                                 </span>
-                                                <span className="model-option-provider">
-                                                    {model.providerName}
+                                                <span className="model-option-cost">
+                                                    {formatCost(model.inputCostPerMillion, model.outputCostPerMillion)}
                                                 </span>
                                             </div>
                                             {selectedModel?.id === model.id && <Check size={16} />}

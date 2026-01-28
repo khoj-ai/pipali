@@ -405,6 +405,8 @@ export async function syncPlatformModels(): Promise<void> {
             model_type?: 'openai' | 'anthropic' | 'google';
             vision_enabled?: boolean;
             use_responses_api?: boolean;
+            input_cost_per_million?: number;
+            output_cost_per_million?: number;
         }>;
 
         // Check if Pipali provider already exists
@@ -463,6 +465,8 @@ export async function syncPlatformModels(): Promise<void> {
             const visionEnabled = model.vision_enabled ?? false;
             const useResponsesApi = model.use_responses_api ?? false;
             const friendlyName = model.name || model.id;
+            const inputCostPerMillion = model.input_cost_per_million ?? null;
+            const outputCostPerMillion = model.output_cost_per_million ?? null;
 
             if (!existingModelNames.has(model.id)) {
                 await db.insert(ChatModel).values({
@@ -471,6 +475,8 @@ export async function syncPlatformModels(): Promise<void> {
                     modelType,
                     visionEnabled,
                     useResponsesApi,
+                    inputCostPerMillion,
+                    outputCostPerMillion,
                     aiModelApiId: providerId,
                 });
                 addedCount++;
@@ -483,7 +489,9 @@ export async function syncPlatformModels(): Promise<void> {
                         existingModel.friendlyName !== friendlyName ||
                         existingModel.modelType !== modelType ||
                         existingModel.visionEnabled !== visionEnabled ||
-                        existingModel.useResponsesApi !== useResponsesApi;
+                        existingModel.useResponsesApi !== useResponsesApi ||
+                        existingModel.inputCostPerMillion !== inputCostPerMillion ||
+                        existingModel.outputCostPerMillion !== outputCostPerMillion;
 
                     if (hasChanges) {
                         await db.update(ChatModel)
@@ -492,6 +500,8 @@ export async function syncPlatformModels(): Promise<void> {
                                 modelType,
                                 visionEnabled,
                                 useResponsesApi,
+                                inputCostPerMillion,
+                                outputCostPerMillion,
                                 updatedAt: new Date()
                             })
                             .where(eq(ChatModel.id, existingModel.id));

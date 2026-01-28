@@ -277,7 +277,8 @@ api.get('/models', async (c) => {
         friendlyName: ChatModel.friendlyName,
         modelType: ChatModel.modelType,
         visionEnabled: ChatModel.visionEnabled,
-        providerName: AiModelApi.name,
+        inputCostPerMillion: ChatModel.inputCostPerMillion,
+        outputCostPerMillion: ChatModel.outputCostPerMillion,
     })
     .from(ChatModel)
     .leftJoin(AiModelApi, eq(ChatModel.aiModelApiId, AiModelApi.id));
@@ -293,15 +294,15 @@ api.get('/user/model', async (c) => {
     }
 
     const [userModel] = await db.select({
-        modelId: UserChatModel.modelId,
-        modelName: ChatModel.name,
+        id: UserChatModel.modelId,
+        name: ChatModel.name,
         friendlyName: ChatModel.friendlyName,
         modelType: ChatModel.modelType,
-        providerName: AiModelApi.name,
+        inputCostPerMillion: ChatModel.inputCostPerMillion,
+        outputCostPerMillion: ChatModel.outputCostPerMillion,
     })
     .from(UserChatModel)
     .leftJoin(ChatModel, eq(UserChatModel.modelId, ChatModel.id))
-    .leftJoin(AiModelApi, eq(ChatModel.aiModelApiId, AiModelApi.id))
     .where(eq(UserChatModel.userId, adminUser.id));
 
     if (!userModel) {
@@ -311,10 +312,10 @@ api.get('/user/model', async (c) => {
             name: ChatModel.name,
             friendlyName: ChatModel.friendlyName,
             modelType: ChatModel.modelType,
-            providerName: AiModelApi.name,
+            inputCostPerMillion: ChatModel.inputCostPerMillion,
+            outputCostPerMillion: ChatModel.outputCostPerMillion,
         })
         .from(ChatModel)
-        .leftJoin(AiModelApi, eq(ChatModel.aiModelApiId, AiModelApi.id))
         .limit(1);
 
         return c.json({ model: defaultModel || null });
