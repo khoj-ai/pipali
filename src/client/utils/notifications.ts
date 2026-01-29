@@ -9,6 +9,51 @@ import type { ConfirmationRequest } from '../../server/processor/confirmation/co
 
 let notificationPermissionGranted: boolean | null = null;
 
+// Shared AudioContext for notification sounds (created lazily)
+let audioCtx: AudioContext | null = null;
+
+/**
+ * Play a short two-tone chime for notifications using the Web Audio API.
+ * No audio file required — synthesizes a brief ping sound.
+ */
+function playNotificationSound(): void {
+    try {
+        if (!audioCtx) {
+            audioCtx = new AudioContext();
+        }
+        // Resume context if suspended (browsers require user gesture)
+        if (audioCtx.state === 'suspended') {
+            audioCtx.resume();
+        }
+
+        const now = audioCtx.currentTime;
+
+        // First tone — higher pitch
+        const osc1 = audioCtx.createOscillator();
+        const gain1 = audioCtx.createGain();
+        osc1.type = 'sine';
+        osc1.frequency.value = 830;
+        gain1.gain.setValueAtTime(0.3, now);
+        gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+        osc1.connect(gain1).connect(audioCtx.destination);
+        osc1.start(now);
+        osc1.stop(now + 0.15);
+
+        // Second tone — slightly higher, delayed
+        const osc2 = audioCtx.createOscillator();
+        const gain2 = audioCtx.createGain();
+        osc2.type = 'sine';
+        osc2.frequency.value = 1050;
+        gain2.gain.setValueAtTime(0.3, now + 0.12);
+        gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+        osc2.connect(gain2).connect(audioCtx.destination);
+        osc2.start(now + 0.12);
+        osc2.stop(now + 0.3);
+    } catch {
+        // Audio not available — silently ignore
+    }
+}
+
 // Track active web notifications for cleanup
 const activeWebNotifications: Map<string, Notification> = new Map();
 
@@ -48,6 +93,7 @@ function sendWebNotification(tag: string, title: string, body: string, conversat
             body,
             icon: '/icons/pipali_128.png',
             tag,
+            requireInteraction: true,
         });
 
         notification.onclick = async () => {
@@ -154,7 +200,10 @@ export async function notifyConfirmationRequest(
     conversationTitle?: string,
     conversationId?: string
 ): Promise<void> {
-    // Don't notify if window is focused - user can see the toast
+    // Always play sound for confirmation requests — user may not be looking at screen
+    playNotificationSound();
+
+    // Don't send visual notification if window is focused - user can see the toast
     if (isWindowFocused()) {
         return;
     }
@@ -214,6 +263,8 @@ export async function notifyTaskComplete(
     if (isWindowFocused()) {
         return;
     }
+
+    playNotificationSound();
 
     // Check permissions (lazy init)
     if (notificationPermissionGranted === null) {
