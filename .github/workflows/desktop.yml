@@ -24,10 +24,15 @@ on:
   workflow_dispatch:
     inputs:
       debug_build:
-        description: 'Build debug version (unoptimized, with symbols)'
+        description: 'Build debug version'
         required: false
         default: false
         type: boolean
+      release_version:
+        description: 'Version to publish updater metadata'
+        required: false
+        default: ''
+        type: string
       platforms:
         description: 'Platforms to build'
         required: false
@@ -111,23 +116,28 @@ jobs:
           # Best-effort cleanup of the temporary file; keep keychain for subsequent signing steps.
           rm -f certificate.p12
 
-      # PR builds: build unsigned (secrets aren't available for fork PRs anyway)
-      - name: 🔨 Build Desktop App (macOS) (Unsigned)
+      # PR builds: build unsigned as secrets aren't available for fork PRs
+      - name: 🔨 Build Desktop App (macOS) (PR)
         if: github.event_name == 'pull_request'
-        run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
+        run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }} -- --no-updater-artifacts
 
       # Release, Main build
-      - name: 🔨 Build Desktop App (macOS) (Signed, Notarized)
+      - name: 🔨 Build Desktop App (macOS)
         if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           echo "Building with certificate: ${CERT_ID}"
           export APPLE_SIGNING_IDENTITY="$CERT_ID"
+          # Remove newlines from secrets (GitHub may add newlines)
+          export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "${TAURI_SIGNING_PRIVATE_KEY:-}" | tr -d '\r\n')"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(printf '%s' "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" | tr -d '\r\n')"
           bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
 
       - name: 📦 Package macOS App Bundle
@@ -217,6 +227,16 @@ jobs:
         with:
           name: Pipali-macos-arm64${{ inputs.debug_build && '-debug' || '' }}.dmg
           path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/dmg/*.dmg
+          if-no-files-found: error
+
+      - name: ⏫ Upload macOS Updater Artifact
+        if: "!inputs.debug_build && github.event_name != 'pull_request'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: Pipali-macos-arm64-updater
+          path: |
+            src-tauri/target/release/bundle/macos/*.app.tar.gz
+            src-tauri/target/release/bundle/macos/*.app.tar.gz.sig
           if-no-files-found: error
 
   build-linux:
@@ -313,8 +333,21 @@ jobs:
       - name: ⤵️ Install Tauri Frontend Dependencies
         run: cd src-tauri-frontend && bun install
 
-      - name: 🔨 Build Desktop App
-        run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
+      - name: 🔨 Build Desktop App (Windows) (PR)
+        if: github.event_name == 'pull_request'
+        run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }} -- --no-updater-artifacts
+
+      - name: 🔨 Build Desktop App (Windows)
+        if: github.event_name != 'pull_request'
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        shell: pwsh
+        run: |
+          # Remove newlines from secrets (GitHub may add newlines)
+          $env:TAURI_SIGNING_PRIVATE_KEY = ($env:TAURI_SIGNING_PRIVATE_KEY) -replace "`r|`n", ""
+          $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) -replace "`r|`n", ""
+          bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
 
       - name: 📁 List Build Artifacts
         shell: bash
@@ -327,19 +360,22 @@ jobs:
           echo "=== nsis ==="
           ls -la src-tauri/target/${BUILD_TYPE}/bundle/nsis/ || true
 
-      - name: ⏫ Upload Windows MSI
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipali-windows-x64${{ inputs.debug_build && '-debug' || '' }}.msi
-          path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/msi/*.msi
-          if-no-files-found: error
-
       - name: ⏫ Upload Windows Installer (NSIS)
         uses: actions/upload-artifact@v4
         with:
           name: pipali-windows-x64${{ inputs.debug_build && '-debug' || '' }}-setup.exe
           path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/nsis/*.exe
           if-no-files-found: error
+
+      - name: ⏫ Upload Windows Updater Artifacts
+        if: "!inputs.debug_build && github.event_name != 'pull_request'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipali-windows-x64-updater
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/nsis/*.exe.sig
+          if-no-files-found: warn
 
   release:
     name: 📦 Create Release
@@ -369,7 +405,6 @@ jobs:
             artifacts/**/*.dmg
             artifacts/**/*.deb
             artifacts/**/*.AppImage
-            artifacts/**/*.msi
             artifacts/**/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -380,7 +415,7 @@ jobs:
     runs-on: ubuntu-latest
     if: |
       !inputs.debug_build &&
-      (startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch') &&
+      (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')) &&
       !cancelled() &&
       (needs.build-macos.result == 'success' || needs.build-windows.result == 'success')
     steps:
@@ -391,33 +426,91 @@ jobs:
 
       - name: 📁 Collect Release Files
         run: |
-          TAG="${GITHUB_REF_NAME}"
           mkdir -p upload
 
-          # Find and copy all release artifacts with flat names
+          # Download page artifacts
           find artifacts -name "*.dmg" -exec cp {} "upload/Pipali-macos-arm64.dmg" \;
-          find artifacts -name "*.msi" -exec cp {} "upload/pipali-windows-x64.msi" \;
-          find artifacts -name "*.exe" -exec cp {} "upload/pipali-windows-x64-setup.exe" \;
+          find artifacts -name "*-setup.exe" -exec cp {} "upload/pipali-windows-x64-setup.exe" \;
+
+          # Updater artifacts (generated by Tauri with createUpdaterArtifacts + signing key)
+          find artifacts -name "*.app.tar.gz" ! -name "*.sig" -exec cp {} "upload/Pipali-macos-arm64.app.tar.gz" \;
+          find artifacts -name "*.app.tar.gz.sig" -exec cp {} "upload/Pipali-macos-arm64.app.tar.gz.sig" \;
+          find artifacts -name "*.exe.sig" -exec cp {} "upload/pipali-windows-x64-setup.exe.sig" \;
 
           echo "=== Files to upload ==="
           ls -la upload/
 
-      - name: 📝 Generate Manifest
+      - name: 📝 Generate Manifests
         run: |
           TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -z "${{ inputs.release_version }}" ]; then
+              echo "Skipping manifest generation (workflow_dispatch without release_version)"
+              exit 0
+            fi
+            TAG="${{ inputs.release_version }}"
+          fi
           DATE=$(date -u +"%Y-%m-%d")
-          cat > upload/manifest.json << EOF
+          PUB_DATE=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          CDN="https://download.pipali.ai/releases/${TAG}"
+          NOTES="See full release notes at https://github.com/${{ github.repository }}/releases/tag/${TAG}"
+
+          # Download page manifest
+          cat > upload/manifest.json <<EOF
           {
             "version": "${TAG}",
             "date": "${DATE}",
             "assets": {
               "macos-dmg": "releases/${TAG}/Pipali-macos-arm64.dmg",
-              "windows-msi": "releases/${TAG}/pipali-windows-x64.msi",
               "windows-exe": "releases/${TAG}/pipali-windows-x64-setup.exe"
             }
           }
           EOF
-          cat upload/manifest.json
+
+          # Updater manifest
+          export TAG PUB_DATE NOTES CDN
+          python3 - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          tag = os.environ["TAG"]
+          pub_date = os.environ["PUB_DATE"]
+          notes = os.environ["NOTES"]
+          cdn = os.environ["CDN"]
+
+          platforms = {}
+
+          def add_platform(key: str, sig_path: str, url: str) -> None:
+              sig_file = Path(sig_path)
+              if sig_file.is_file():
+                  signature = sig_file.read_text()
+                  platforms[key] = {"signature": signature, "url": url}
+
+          add_platform(
+              "darwin-aarch64",
+              "upload/Pipali-macos-arm64.app.tar.gz.sig",
+              f"{cdn}/Pipali-macos-arm64.app.tar.gz",
+          )
+          add_platform(
+              "windows-x86_64",
+              "upload/pipali-windows-x64-setup.exe.sig",
+              f"{cdn}/pipali-windows-x64-setup.exe",
+          )
+
+          if platforms:
+              payload = {
+                  "version": tag,
+                  "notes": notes,
+                  "pub_date": pub_date,
+                  "platforms": platforms,
+              }
+              Path("upload/update.json").write_text(json.dumps(payload) + "\n")
+              print("Generated update.json")
+          PY
+
+          echo "=== All files to upload ==="
+          ls -la upload/
 
       - name: ☁️ Upload to R2
         env:
@@ -427,21 +520,29 @@ jobs:
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
         run: |
           TAG="${GITHUB_REF_NAME}"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            if [ -z "${{ inputs.release_version }}" ]; then
+              echo "Skipping upload (workflow_dispatch without release_version)"
+              exit 0
+            fi
+            TAG="${{ inputs.release_version }}"
+          fi
 
-          # Upload versioned release files
+          # Upload all files to versioned and latest paths
           for file in upload/*; do
             [ -f "$file" ] || continue
             filename=$(basename "$file")
-            aws s3 cp "$file" "s3://pipali-download/releases/${TAG}/${filename}" \
-              --endpoint-url "$R2_ENDPOINT"
-          done
-
-          # Copy latest manifest and files
-          for file in upload/*; do
-            [ -f "$file" ] || continue
-            filename=$(basename "$file")
-            aws s3 cp "$file" "s3://pipali-download/releases/latest/${filename}" \
-              --endpoint-url "$R2_ENDPOINT"
+            if [[ "$filename" == *.json ]]; then
+              aws s3 cp "$file" "s3://pipali-download/releases/${TAG}/${filename}" \
+                --endpoint-url "$R2_ENDPOINT" --content-type "application/json"
+              aws s3 cp "$file" "s3://pipali-download/releases/latest/${filename}" \
+                --endpoint-url "$R2_ENDPOINT" --content-type "application/json"
+            else
+              aws s3 cp "$file" "s3://pipali-download/releases/${TAG}/${filename}" \
+                --endpoint-url "$R2_ENDPOINT"
+              aws s3 cp "$file" "s3://pipali-download/releases/latest/${filename}" \
+                --endpoint-url "$R2_ENDPOINT"
+            fi
           done
 
           echo "=== Upload complete ==="

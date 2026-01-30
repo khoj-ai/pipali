@@ -9,6 +9,53 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
+/// Check for app updates and prompt user to install
+#[cfg(desktop)]
+async fn check_for_updates(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
+    use tauri_plugin_updater::UpdaterExt;
+
+    if cfg!(debug_assertions) {
+        log::info!("[Updater] Skipping update check in debug build");
+        return Ok(());
+    }
+
+    let Some(updater) = app.updater_builder().build().ok() else {
+        return Ok(());
+    };
+
+    let update = updater.check().await?;
+
+    if let Some(update) = update {
+        let version = update.version.clone();
+        let body = update.body.clone().unwrap_or_default();
+
+        let should_update = app
+            .dialog()
+            .message(format!(
+                "Update to {} is available!\n\nRelease notes:\n{}",
+                version, body
+            ))
+            .title("New Version Available")
+            .buttons(MessageDialogButtons::OkCancelCustom(
+                "Update".to_string(),
+                "Later".to_string(),
+            ))
+            .blocking_show();
+
+        if should_update {
+            log::info!("[Updater] Downloading and installing update...");
+            update.download_and_install(|_, _| {}, || {}).await?;
+            log::info!("[Updater] Update installed, restarting...");
+            app.restart();
+        }
+    } else {
+        log::info!("[Updater] No updates available");
+    }
+
+    Ok(())
+}
+
 /// Show the app in the dock and Cmd+Tab switcher (macOS)
 #[cfg(target_os = "macos")]
 fn show_in_dock(app: &AppHandle) {
@@ -378,6 +425,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
@@ -404,6 +452,20 @@ pub fn run() {
         }))
         .manage(SidecarState::default())
         .setup(|app| {
+            // Initialize updater plugin
+            #[cfg(desktop)]
+            {
+                let handle = app.handle().clone();
+                app.handle().plugin(tauri_plugin_updater::Builder::new().build())?;
+
+                // Check for updates on startup (non-blocking)
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = check_for_updates(&handle).await {
+                        log::warn!("[Updater] Failed to check for updates: {}", e);
+                    }
+                });
+            }
+
             let handle = app.handle().clone();
             let state: State<SidecarState> = app.state();
             let host = state.host.clone();

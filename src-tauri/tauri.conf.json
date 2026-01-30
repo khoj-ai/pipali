@@ -43,11 +43,26 @@
       "id": "main-tray"
     },
     "security": {
-      "csp": "default-src 'self' tauri: asset: ipc: http://ipc.localhost; connect-src 'self' http: ws: tauri: asset: ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline' tauri: asset:; script-src 'self' 'unsafe-inline' tauri: asset:; img-src 'self' data: blob: tauri: asset: http: https://*.googleusercontent.com https://www.gravatar.com; font-src 'self' data: tauri: asset:"
+      "csp": "default-src 'self' tauri: asset: ipc: http://ipc.localhost; connect-src 'self' http: ws: tauri: asset: ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline' tauri: asset:; script-src 'self' 'unsafe-inline' tauri: asset:; img-src 'self' data: blob: tauri: asset: http: https://*.googleusercontent.com https://www.gravatar.com; font-src 'self' data: tauri: asset:",
+      "capabilities": [
+        {
+          "identifier": "main",
+          "description": "Main window permissions",
+          "windows": [
+            "main"
+          ],
+          "permissions": [
+            "core:default",
+            "dialog:default",
+            "updater:default"
+          ]
+        }
+      ]
     }
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
@@ -95,7 +110,18 @@
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["pipali"]
+        "schemes": [
+          "pipali"
+        ]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDBCRkUzMDRBRDJFMjRBM0YKUldRL1N1TFNTakQrQzRBcm9vcVVQWktsTWNQV3YzV052UlFBS1pPek5QZ3VjdGR2UUgzOWgvTzkK",
+      "endpoints": [
+        "https://download.pipali.ai/releases/latest/update.json"
+      ],
+      "windows": {
+        "installMode": "passive"
       }
     }
   }

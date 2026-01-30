@@ -12,7 +12,7 @@
  * - Python scripts to use bundled UV (no manual install)
  * - Offline-capable document creation
  *
- * Usage: bun run scripts/build-tauri.ts [--platform=<platform>] [--debug]
+ * Usage: bun run scripts/build-tauri.ts [--platform=<platform>] [--debug] [--no-updater-artifacts]
  *
  * Platforms:
  *   - darwin-arm64 (macOS Apple Silicon)
@@ -52,10 +52,11 @@ const UV_DOWNLOAD_MAP: Record<Platform, string> = {
     "windows-x64": `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-pc-windows-msvc.zip`,
 };
 
-async function parseArgs(): Promise<{ platform: Platform; debug: boolean }> {
+async function parseArgs(): Promise<{ platform: Platform; debug: boolean; disableUpdaterArtifacts: boolean }> {
     const args = process.argv.slice(2);
     let platform: Platform | undefined;
     let debug = false;
+    let disableUpdaterArtifacts = false;
 
     for (const arg of args) {
         if (arg.startsWith("--platform=")) {
@@ -63,6 +64,9 @@ async function parseArgs(): Promise<{ platform: Platform; debug: boolean }> {
         }
         if (arg === "--debug") {
             debug = true;
+        }
+        if (arg === "--no-updater-artifacts") {
+            disableUpdaterArtifacts = true;
         }
     }
 
@@ -80,7 +84,7 @@ async function parseArgs(): Promise<{ platform: Platform; debug: boolean }> {
         }
     }
 
-    return { platform, debug };
+    return { platform, debug, disableUpdaterArtifacts };
 }
 
 /**
@@ -492,18 +496,18 @@ async function cleanupTemp() {
     await fs.rm(path.join(DIST_DIR, "_temp_uv"), { recursive: true, force: true });
 }
 
-async function buildTauri(debug: boolean, platform: Platform) {
+async function buildTauri(debug: boolean, platform: Platform, disableUpdaterArtifacts: boolean) {
     console.log(`🚀 Building Tauri app (${debug ? "debug" : "release"})...`);
 
     // Determine which bundles to build based on platform
     // macOS: app bundle only (DMG created separately via create-dmg for proper layout)
-    // Windows: msi and exe
+    // Windows: exe
     // Linux: deb and appimage
     let bundles: string[];
     if (platform.startsWith("darwin")) {
         bundles = ["app"];
     } else if (platform.startsWith("windows")) {
-        bundles = ["msi", "nsis"];
+        bundles = ["nsis"];
     } else {
         bundles = ["deb", "appimage"];
     }
@@ -511,6 +515,9 @@ async function buildTauri(debug: boolean, platform: Platform) {
     const args = ["tauri", "build", "--bundles", bundles.join(",")];
     if (debug) {
         args.push("--debug");
+    }
+    if (disableUpdaterArtifacts) {
+        args.push("--config", JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
     }
 
     const proc = Bun.spawn(["bunx", ...args], {
@@ -529,7 +536,7 @@ async function buildTauri(debug: boolean, platform: Platform) {
 
 async function main() {
     const startTime = Date.now();
-    const { platform, debug } = await parseArgs();
+    const { platform, debug, disableUpdaterArtifacts } = await parseArgs();
 
     console.log("🍞 Pipali Tauri Desktop Build (Bundled Runtimes)");
     console.log("=".repeat(50));
@@ -554,7 +561,7 @@ async function main() {
         await buildServerBundle();
 
         // Build Tauri app
-        await buildTauri(debug, platform);
+        await buildTauri(debug, platform, disableUpdaterArtifacts);
     } finally {
         await cleanupTemp();
     }
