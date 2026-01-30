@@ -23,11 +23,18 @@ let isInitialized = false;
 let appVersion: string | undefined;
 let platform: string | undefined;
 
+function isTelemetryDisabled(): boolean {
+    const value = process.env.PIPALI_TELEMETRY_DISABLE;
+    if (!value) return false;
+    return value === '1' || value.toLowerCase() === 'true';
+}
+
 /**
  * Initialize the platform transport
  */
 export function initPlatformTransport(options?: { appVersion?: string }): void {
     if (isInitialized) return;
+    if (isTelemetryDisabled()) return;
 
     appVersion = options?.appVersion;
     platform = process.platform;
