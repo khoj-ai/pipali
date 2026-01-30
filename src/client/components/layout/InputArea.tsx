@@ -119,7 +119,7 @@ export function InputArea({
                         ? "Stopped. Send a new message to start a new run."
                         : isProcessing
                             ? "Type to interrupt, or press Esc to stop"
-                            : `Enter to send, ${navigator.platform.indexOf('Mac') !== -1 ? 'Cmd' : 'Ctrl'}+Enter to ${conversationId ? 'fork conversation' : 'run for background task'}`
+                            : `Enter to send, ${navigator.platform.indexOf('Mac') !== -1 ? 'Cmd' : 'Ctrl'}+Enter to ${conversationId ? 'fork conversation' : 'to run in background'}`
                     }
                 </p>
             </div>
