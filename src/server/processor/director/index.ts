@@ -11,6 +11,7 @@ import { shellCommand, type ShellCommandArgs } from '../actor/shell_command';
 import { webSearch, type WebSearchArgs } from '../actor/search_web';
 import { readWebpage, type ReadWebpageArgs } from '../actor/read_webpage';
 import { askUser, type AskUserArgs } from '../actor/ask_user';
+import { generateImage, type GenerateImageArgs } from '../actor/generate_image';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
@@ -352,6 +353,25 @@ REQUIRED:
         },
     },
     {
+        name: 'generate_image',
+        description: 'Generate an image from a text description. Creates images based on detailed prompts. Returns the generated image. Use this when the user asks to create, generate, draw, or design an image, illustration, icon, diagram, or any visual content.',
+        schema: {
+            type: 'object',
+            properties: {
+                prompt: {
+                    type: 'string',
+                    description: 'A detailed text description of the image to generate. Be specific about subject, style, composition, colors, lighting, and mood for best results.',
+                },
+                aspect_ratio: {
+                    type: 'string',
+                    enum: ['1:1', '3:4', '4:3', '9:16', '16:9'],
+                    description: 'Aspect ratio of the generated image. Default is 1:1 (square). Use 4:3 or 16:9 for landscape, 3:4 or 9:16 for portrait.',
+                },
+            },
+            required: ['prompt'],
+        },
+    },
+    {
         name: 'ask_user',
         description: `Ask the user a question or send them a notification. This tool displays a structured prompt that the user can see and respond to even when not actively viewing the chat - making it ideal for background tasks and automations.
 
@@ -659,6 +679,10 @@ async function executeTool(
                         metricsAccumulator: context?.metricsAccumulator,
                     }
                 );
+                return result.compiled;
+            }
+            case 'generate_image': {
+                const result = await generateImage(toolCall.arguments as GenerateImageArgs);
                 return result.compiled;
             }
             case 'ask_user': {
