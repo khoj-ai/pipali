@@ -88,6 +88,8 @@ interface ResearchConfig {
     chatModelId?: number;
     // Step count when iteration threshold was first reached, for stable warning injection
     thresholdStepCount?: number;
+    // Whether this is the user's very first conversation ever
+    isFirstEverConversation?: boolean;
 }
 
 export async function buildSystemPrompt(args: {
@@ -96,6 +98,7 @@ export async function buildSystemPrompt(args: {
     location?: string;
     username?: string;
     userContext?: string;
+    isFirstEverConversation?: boolean;
     now?: Date;
 }): Promise<string> {
     const now = args.now ?? new Date();
@@ -106,9 +109,14 @@ export async function buildSystemPrompt(args: {
 
     const skillsContext = formatSkillsForPrompt(getLoadedSkills());
 
+    const firstConversationContext = args.isFirstEverConversation
+        ? await prompts.firstConversation.format({})
+        : '';
+
     return prompts.director.format({
         user_context: userContext,
         skills_context: skillsContext,
+        first_conversation_context: firstConversationContext,
         current_date: args.currentDate ?? now.toLocaleDateString('en-CA'),
         current_time: getTimeOfDay(now),
         day_of_week: args.dayOfWeek ?? now.toLocaleDateString('en-US', { weekday: 'long' }),
@@ -423,6 +431,7 @@ async function pickNextTool(
         location,
         username,
         userContext,
+        isFirstEverConversation: config.isFirstEverConversation,
         now,
     });
 

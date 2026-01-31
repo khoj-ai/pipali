@@ -17,4 +17,9 @@ function getMigrationsFolder(): string {
     return `${process.cwd()}/drizzle`;
 }
 
-export { getDefaultUser, getMigrationsFolder, maxIterations };
+/** Easter egg phrases that re-trigger the first-conversation onboarding prompt */
+function isFirstRunEasterEgg(message: string): boolean {
+    return /^(we have(n'?t| not) been properly introduced|(hi,?\s+)?i('?m| am) new here)[\s!.?]*$/i.test(message.trim());
+}
+
+export { getDefaultUser, getMigrationsFolder, maxIterations, isFirstRunEasterEgg };

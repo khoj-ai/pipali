@@ -1,5 +1,6 @@
 import { test, expect, describe } from 'bun:test';
-import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS } from '../../src/server/processor/director';
+import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt } from '../../src/server/processor/director';
+import { isFirstRunEasterEgg } from '../../src/server/utils';
 
 type MultimodalContent = Array<{ type: string; [key: string]: string }>;
 
@@ -111,5 +112,58 @@ describe('truncateToolOutput', () => {
             // Image unchanged
             expect(result[2]!['data']).toBe('imgdata');
         });
+    });
+});
+
+describe('buildSystemPrompt', () => {
+    test('should include first conversation instructions when isFirstEverConversation is true', async () => {
+        const prompt = await buildSystemPrompt({
+            isFirstEverConversation: true,
+            username: 'TestUser',
+        });
+
+        expect(prompt).toContain('First Conversation');
+        expect(prompt).toContain('USER.md');
+    });
+
+    test('should not include first conversation instructions when isFirstEverConversation is false', async () => {
+        const prompt = await buildSystemPrompt({
+            isFirstEverConversation: false,
+            username: 'TestUser',
+        });
+
+        expect(prompt).not.toContain('First Conversation');
+    });
+
+    test('should not include first conversation instructions when isFirstEverConversation is undefined', async () => {
+        const prompt = await buildSystemPrompt({
+            username: 'TestUser',
+        });
+
+        expect(prompt).not.toContain('First Conversation');
+    });
+});
+
+describe('easter egg onboarding trigger', () => {
+    test('should match "we have not been properly introduced" variants', () => {
+        expect(isFirstRunEasterEgg('we have not been properly introduced')).toBe(true);
+        expect(isFirstRunEasterEgg('we have not been properly introduced!')).toBe(true);
+        expect(isFirstRunEasterEgg("we haven't been properly introduced")).toBe(true);
+        expect(isFirstRunEasterEgg("We havent been properly introduced")).toBe(true);
+    });
+
+    test('should match "i\'m new here"', () => {
+        expect(isFirstRunEasterEgg("I'm new here")).toBe(true);
+        expect(isFirstRunEasterEgg("im new here")).toBe(true);
+        expect(isFirstRunEasterEgg("I am new here")).toBe(true);
+        expect(isFirstRunEasterEgg("i am new here!")).toBe(true);
+        expect(isFirstRunEasterEgg("Hi, I'm new here")).toBe(true);
+        expect(isFirstRunEasterEgg("hi I am new here")).toBe(true);
+    });
+
+    test('should not match unrelated messages', () => {
+        expect(isFirstRunEasterEgg('hello')).toBe(false);
+        expect(isFirstRunEasterEgg('we have been introduced')).toBe(false);
+        expect(isFirstRunEasterEgg('I think we have not been properly introduced yet')).toBe(false);
     });
 });

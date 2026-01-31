@@ -3,7 +3,7 @@
  * Manages conversation storage and retrieval in ATIF format
  */
 
-import { eq } from 'drizzle-orm';
+import { eq, and, isNull, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
 import { db } from '../../../db';
 import { Conversation, User } from '../../../db/schema';
@@ -390,6 +390,16 @@ export class ATIFConversationService {
     }
   }
 
+  /**
+   * Counts non-automation conversations for a user
+   */
+  async countUserConversations(userId: number): Promise<number> {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(Conversation)
+      .where(and(eq(Conversation.userId, userId), isNull(Conversation.automationId)));
+    return result?.count ?? 0;
+  }
 }
 
 // Export singleton instance

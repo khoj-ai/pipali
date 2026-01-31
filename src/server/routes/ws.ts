@@ -6,6 +6,7 @@ import { getDefaultUser, maxIterations as defaultMaxIterations } from '../utils'
 import { atifConversationService } from '../processor/conversation/atif/atif.service';
 import { PlatformBillingError } from '../http/billing-errors';
 import { runResearchWithConversation, ResearchPausedError } from '../processor/research-runner';
+import { isFirstRunEasterEgg } from '../utils';
 import { buildSystemPrompt } from '../processor/director';
 import { loadUserContext } from '../user-context';
 import { type ConfirmationContext } from '../processor/confirmation';
@@ -90,10 +91,17 @@ function ensureUniqueRunId(
     return { runId: regenerated, suggestedRunId };
 }
 
-async function ensureSystemPromptPersisted(conversationId: string): Promise<string | undefined> {
+async function ensureSystemPromptPersisted(
+    conversationId: string,
+    userId: number,
+    userMessage?: string,
+): Promise<string | undefined> {
     const conversation = await atifConversationService.getConversation(conversationId);
     const hasSystem = !!conversation?.trajectory.steps.some(s => s.source === 'system');
     if (hasSystem) return undefined;
+
+    const isFirstEverConversation = (userMessage && isFirstRunEasterEgg(userMessage))
+        || (await atifConversationService.countUserConversations(userId)) <= 1;
 
     const userContext = await loadUserContext();
     const now = new Date();
@@ -103,6 +111,7 @@ async function ensureSystemPromptPersisted(conversationId: string): Promise<stri
         location: userContext.location,
         username: userContext.name,
         userContext: userContext.instructions,
+        isFirstEverConversation,
         now,
     });
 
@@ -175,7 +184,7 @@ async function runConversationExecutor(
 
         let systemPromptOverride: string | undefined;
         try {
-            systemPromptOverride = await ensureSystemPromptPersisted(conversationId);
+            systemPromptOverride = await ensureSystemPromptPersisted(conversationId, session.user.id, session.userMessage);
         } catch (error) {
             log.error({ err: error, conversationId }, 'Failed to persist system prompt');
         }
