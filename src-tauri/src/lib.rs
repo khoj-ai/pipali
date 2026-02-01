@@ -607,6 +607,7 @@ pub fn run() {
             commands::get_sidecar_config,
             commands::restart_sidecar,
             commands::focus_window,
+            commands::open_file,
             wake_lock::acquire_wake_lock,
             wake_lock::release_wake_lock
         ])

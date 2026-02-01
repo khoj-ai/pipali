@@ -2,7 +2,7 @@
   "$schema": "https://schemas.tauri.app/config/capability",
   "identifier": "default",
   "description": "Default capability set for Pipali",
-  "windows": ["main"],
+  "windows": ["main", "splashscreen"],
   "permissions": [
     "core:default",
     "core:window:default",
@@ -20,17 +20,6 @@
     },
     "shell:allow-kill",
     "shell:allow-stdin-write",
-    "opener:default",
-    {
-      "identifier": "opener:allow-open-path",
-      "allow": [
-        {
-          "path": "$HOME/**"
-        },
-        {
-          "path": "/tmp/pipali/**"
-        }
-      ]
-    }
+    "opener:default"
   ]
 }
