@@ -244,6 +244,14 @@
     background: var(--color-bg-muted);
 }
 
+.message-inline-image {
+    max-width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+    margin: 8px 0;
+}
+
 /* Streaming Animation */
 .streaming {
     display: flex;

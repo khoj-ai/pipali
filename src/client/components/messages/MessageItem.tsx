@@ -10,7 +10,8 @@ import type { Message } from '../../types';
 import { ThoughtsSection } from '../thoughts/ThoughtsSection';
 import { StreamingIndicator } from './StreamingIndicator';
 import { ExternalLink } from '../ExternalLink';
-import { safeMarkdownUrlTransform } from '../../utils/markdown';
+import { safeMarkdownUrlTransform, localImageSrc } from '../../utils/markdown';
+import { getApiBaseUrl } from '../../utils/api';
 import { BillingMessage } from '../billing';
 
 interface MessageItemProps {
@@ -68,7 +69,15 @@ export function MessageItem({ message, platformFrontendUrl, onDelete }: MessageI
                         remarkPlugins={[remarkGfm, [remarkMath, { singleDollarTextMath: false }]]}
                         rehypePlugins={[rehypeKatex]}
                         urlTransform={safeMarkdownUrlTransform}
-                        components={{ a: ExternalLink }}
+                        components={{
+                            a: ExternalLink,
+                            img: ({ src, alt }) => {
+                                const resolvedSrc = localImageSrc(src, getApiBaseUrl());
+                                return resolvedSrc
+                                    ? <img src={resolvedSrc} alt={alt || ''} className="message-inline-image" />
+                                    : null;
+                            },
+                        }}
                     >
                         {message.content}
                     </ReactMarkdown>

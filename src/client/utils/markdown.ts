@@ -62,3 +62,18 @@ export function makeMarkdownUrlTransform(options: MarkdownUrlTransformOptions = 
 }
 
 export const safeMarkdownUrlTransform = makeMarkdownUrlTransform();
+
+const IMAGE_EXTENSIONS = /\.(png|jpe?g|gif|webp)$/i;
+
+/** Convert a local file path or file:// URL to an API-served image src. Passes through http(s) and data URIs. */
+export function localImageSrc(src: string | undefined, apiBaseUrl = ''): string | undefined {
+    if (!src) return undefined;
+    if (src.startsWith('http://') || src.startsWith('https://') || src.startsWith('data:')) return src;
+
+    const filePath = src.startsWith('file://')
+        ? decodeURIComponent(src.slice('file://'.length))
+        : src;
+
+    if (!IMAGE_EXTENSIONS.test(filePath)) return undefined;
+    return `${apiBaseUrl}/api/files?path=${encodeURIComponent(filePath)}`;
+}

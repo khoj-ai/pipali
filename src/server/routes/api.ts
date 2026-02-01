@@ -1,3 +1,6 @@
+import os from 'os';
+import path from 'path';
+import { realpath } from 'fs/promises';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { z } from 'zod';
@@ -618,6 +621,54 @@ api.put('/user/sandbox', zValidator('json', sandboxSettingsSchema), async (c) =>
     } catch (err) {
         log.error({ err }, 'Failed to save sandbox settings');
         return c.json({ error: 'Failed to save sandbox settings' }, 500);
+    }
+});
+
+// Serve local image files referenced in model responses
+const IMAGE_MIME: Record<string, string> = {
+    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif', '.webp': 'image/webp',
+};
+
+const ALLOWED_IMAGE_ROOTS = [
+    os.homedir(),
+    '/tmp/pipali',
+    '/private/tmp/pipali', // macOS: /tmp symlinks to /private/tmp
+    os.tmpdir(),
+];
+
+function isUnderAllowedRoot(filePath: string): boolean {
+    return ALLOWED_IMAGE_ROOTS.some(root => filePath.startsWith(root + '/'));
+}
+
+api.get('/files', async (c) => {
+    const filePath = c.req.query('path');
+    if (!filePath) return c.json({ error: 'Missing path parameter' }, 400);
+
+    const ext = path.extname(filePath).toLowerCase();
+    if (!IMAGE_MIME[ext]) return c.json({ error: 'Only image files can be served' }, 403);
+
+    const resolved = path.resolve(filePath);
+    if (!isUnderAllowedRoot(resolved)) {
+        return c.json({ error: 'Path not within allowed directories' }, 403);
+    }
+
+    try {
+        const real = await realpath(resolved);
+        if (!isUnderAllowedRoot(real)) {
+            return c.json({ error: 'Path not within allowed directories' }, 403);
+        }
+
+        const file = Bun.file(real);
+        if (!await file.exists()) return c.json({ error: 'File not found' }, 404);
+
+        return c.body(await file.arrayBuffer(), 200, {
+            'Content-Type': IMAGE_MIME[ext],
+            'Cache-Control': 'private, max-age=3600',
+        });
+    } catch (err) {
+        log.error({ err, path: resolved }, 'Failed to serve file');
+        return c.json({ error: 'Failed to read file' }, 500);
     }
 });
 
