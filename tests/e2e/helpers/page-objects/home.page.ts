@@ -55,10 +55,11 @@ export class HomePage extends AppPage {
     /**
      * Get the status of a task card (running or stopped)
      */
-    async getTaskStatus(index: number): Promise<'running' | 'stopped'> {
+    async getTaskStatus(index: number): Promise<'running' | 'stopped' | 'completed'> {
         const card = this.getTaskCard(index);
-        const isStopped = await card.locator(Selectors.taskStatusIconStopped).isVisible();
-        return isStopped ? 'stopped' : 'running';
+        if (await card.locator(Selectors.taskStatusIconCompleted).isVisible()) return 'completed';
+        if (await card.locator(Selectors.taskStatusIconStopped).isVisible()) return 'stopped';
+        return 'running';
     }
 
     /**

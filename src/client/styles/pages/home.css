@@ -112,6 +112,10 @@
     outline-offset: 2px;
 }
 
+.task-card.needs-input {
+    border-left: 3px solid var(--color-warning);
+}
+
 .task-card.stopped {
     border-left: 3px solid var(--color-warning);
 }
@@ -122,7 +126,16 @@
     gap: 8px;
 }
 
-.task-status-icon {
+.task-status-icon.running {
+    color: var(--color-info);
+    animation: spin 1s linear infinite;
+}
+
+.task-status-icon.needs-input {
+    color: var(--color-warning);
+}
+
+.task-status-icon.completed {
     color: var(--color-success);
 }
 
@@ -130,16 +143,27 @@
     color: var(--color-warning);
 }
 
-.task-status-icon.spinning {
-    animation: spin 1s linear infinite;
-}
-
 .task-status-text {
     font-size: 12px;
     font-weight: 500;
-    color: var(--color-text-muted);
     text-transform: uppercase;
     letter-spacing: 0.5px;
+}
+
+.task-status-text.running {
+    color: var(--color-info);
+}
+
+.task-status-text.needs-input {
+    color: var(--color-warning);
+}
+
+.task-status-text.completed {
+    color: var(--color-success);
+}
+
+.task-status-text.stopped {
+    color: var(--color-warning);
 }
 
 .task-step-count {

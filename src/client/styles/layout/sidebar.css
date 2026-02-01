@@ -346,8 +346,17 @@
     flex-shrink: 0;
 }
 
+.conversation-icon.running {
+    color: var(--color-info);
+    animation: spin 1s linear infinite;
+}
+
 .conversation-icon.needs-attention {
     color: var(--color-warning);
+}
+
+.conversation-icon.completed {
+    color: var(--color-success);
 }
 
 .conversation-title {

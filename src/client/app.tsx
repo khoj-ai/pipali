@@ -166,6 +166,7 @@ const App = () => {
         clearConversation,
         syncConversationState,
         removeConversationState,
+        clearCompleted,
         clearConfirmations,
         dismissConfirmation,
     } = useWebSocketChat({
@@ -877,22 +878,34 @@ const App = () => {
         const activeTasks: ActiveTask[] = [];
 
         conversationStates.forEach((state, convId) => {
-            if (state.isProcessing || state.isStopped) {
+            const hasPendingConfirmation = (pendingConfirmations.get(convId)?.length ?? 0) > 0;
+            if (state.isProcessing || state.isStopped || state.isCompleted || hasPendingConfirmation) {
                 const conv = conversations.find(c => c.id === convId);
                 // Get latest user message from conversation messages or title
                 const latestUserMessage = state.messages
                     .filter(m => m.role === 'user')
                     .pop()?.content || conv?.title || 'New task';
 
-                // Count tool calls (steps) from the streaming assistant message
-                const streamingMsg = state.messages.find(m => m.role === 'assistant' && m.isStreaming);
-                const stepCount = streamingMsg?.thoughts?.filter(t => t.type === 'tool_call').length || 0;
+                // Find the latest assistant message (streaming or finalized)
+                const assistantMsg = state.messages.findLast(m => m.role === 'assistant');
+                const stepCount = assistantMsg?.thoughts?.filter(t => t.type === 'tool_call').length || 0;
+
+                // Determine status: pending confirmation takes precedence over processing
+                const status = hasPendingConfirmation ? 'needs_input' as const
+                    : state.isProcessing ? 'running' as const
+                    : state.isCompleted ? 'completed' as const
+                    : 'stopped' as const;
+
+                // For completed tasks, show the final response instead of intermediate reasoning
+                const reasoning = (status === 'completed' || status === 'stopped') && assistantMsg?.content
+                    ? assistantMsg.content
+                    : state.latestReasoning;
 
                 activeTasks.push({
                     conversationId: convId,
                     title: latestUserMessage,
-                    reasoning: state.latestReasoning,
-                    isStopped: state.isStopped,
+                    reasoning,
+                    status,
                     stepCount,
                 });
             }
@@ -967,6 +980,8 @@ const App = () => {
         if (conversationId) {
             syncConversationState(conversationId, messages);
         }
+        // Clear completed flag so the task no longer shows on home page
+        clearCompleted(id);
         conversationIdRef.current = id;
         setChatConversationId(id);
         const convState = conversationStates.get(id);

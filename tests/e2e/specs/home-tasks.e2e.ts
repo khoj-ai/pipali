@@ -60,7 +60,7 @@ test.describe('Home Page Task Gallery', () => {
         expect(status).toBe('running');
 
         // Should show spinning loader icon
-        const spinningIcon = page.locator('.task-status-icon.spinning').first();
+        const spinningIcon = page.locator('.task-status-icon.running').first();
         await expect(spinningIcon).toBeVisible();
     });
 
@@ -178,7 +178,7 @@ test.describe('Home Page Task Gallery', () => {
         }
     });
 
-    test('should show no active task cards after all tasks complete', async ({ page }) => {
+    test('should show completed task card after foreground task finishes', async ({ page }) => {
         // Start a quick foreground task (not background)
         const chatPage = new ChatPage(page);
         await chatPage.goto();
@@ -191,13 +191,14 @@ test.describe('Home Page Task Gallery', () => {
         // Wait a moment for state to settle
         await page.waitForTimeout(500);
 
-        // Should have no active tasks (the foreground task completed)
-        const hasActiveTasks = await homePage.hasActiveTasks();
-        expect(hasActiveTasks).toBe(false);
-
-        // Either empty state visible or no task cards
-        const isEmpty = await homePage.isEmptyStateVisible();
+        // Completed task should still be visible with completed status
         const taskCount = await homePage.getTaskCardCount();
-        expect(isEmpty || taskCount === 0).toBe(true);
+        expect(taskCount).toBeGreaterThanOrEqual(1);
+        const status = await homePage.getTaskStatus(0);
+        expect(status).toBe('completed');
+
+        // Subtitle should show the final response, not intermediate reasoning
+        const subtitle = await homePage.getTaskSubtitle(0);
+        expect(subtitle).toContain('5 items');
     });
 });

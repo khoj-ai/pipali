@@ -1,8 +1,14 @@
 // Individual task card for home page gallery
 
-import React from 'react';
-import { Loader2, Square, ChevronRight } from 'lucide-react';
-import type { ActiveTask } from '../../types';
+import { Loader2, AlertCircle, CheckCircle, ChevronRight } from 'lucide-react';
+import type { ActiveTask, TaskStatus } from '../../types';
+
+const statusConfig: Record<TaskStatus, { label: string; className: string; Icon: typeof Loader2 }> = {
+    running: { label: 'Running', className: 'running', Icon: Loader2 },
+    needs_input: { label: 'Needs Input', className: 'needs-input', Icon: AlertCircle },
+    completed: { label: 'Completed', className: 'completed', Icon: CheckCircle },
+    stopped: { label: 'Stopped', className: 'stopped', Icon: AlertCircle },
+};
 
 interface TaskCardProps {
     task: ActiveTask;
@@ -15,9 +21,11 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
         ? task.reasoning.split('\n')[0]?.slice(0, 100) + (task.reasoning.length > 100 ? '...' : '')
         : undefined;
 
+    const { label, className, Icon } = statusConfig[task.status];
+
     return (
         <div
-            className={`task-card ${task.isStopped ? 'stopped' : ''}`}
+            className={`task-card ${className}`}
             onClick={onClick}
             role="button"
             tabIndex={0}
@@ -29,13 +37,9 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
             }}
         >
             <div className="task-card-header">
-                {task.isStopped ? (
-                    <Square size={16} className="task-status-icon stopped" />
-                ) : (
-                    <Loader2 size={16} className="task-status-icon spinning" />
-                )}
-                <span className="task-status-text">
-                    {task.isStopped ? 'Stopped' : 'Running'}
+                <Icon size={16} className={`task-status-icon ${className}`} />
+                <span className={`task-status-text ${className}`}>
+                    {label}
                 </span>
                 {task.stepCount !== undefined && task.stepCount > 0 && (
                     <span className="task-step-count">{task.stepCount} steps</span>

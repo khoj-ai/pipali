@@ -221,8 +221,10 @@ test.describe('Chat Flow - Complete User Journey', () => {
         await chatPage.goHome();
         await page.waitForTimeout(500);
 
-        // Should have no active tasks (all completed)
-        const hasActiveTasks = await homePage.hasActiveTasks();
-        expect(hasActiveTasks).toBe(false);
+        // Completed tasks should show as completed cards on home
+        const taskCount = await homePage.getTaskCardCount();
+        expect(taskCount).toBeGreaterThanOrEqual(1);
+        const finalStatus = await homePage.getTaskStatus(0);
+        expect(finalStatus).toBe('completed');
     });
 });

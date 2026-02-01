@@ -16,6 +16,7 @@ export type ConversationSummary = {
 export type ConversationState = {
     isProcessing: boolean;
     isStopped: boolean;
+    isCompleted: boolean;
     latestReasoning?: string;
     // Store messages for this conversation to preserve streaming updates when switching
     messages: Message[];

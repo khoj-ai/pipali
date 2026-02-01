@@ -1,7 +1,7 @@
 // Sidebar with conversation list
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Loader2, MessageSquare, AlertCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Hammer, Settings, User, LogOut, Shield, Sun, Moon, Monitor } from 'lucide-react';
+import { Loader2, MessageSquare, AlertCircle, CheckCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Hammer, Settings, User, LogOut, Shield, Sun, Moon, Monitor } from 'lucide-react';
 import type { ConversationSummary, ConversationState, ConfirmationRequest, AuthStatus, BillingAlert } from '../../types';
 import { useTheme } from '../../hooks';
 import { BillingAlertBanner } from '../billing';
@@ -247,8 +247,14 @@ export function Sidebar({
     const renderConversationItem = (conv: ConversationSummary, inModal = false, index?: number) => {
         const liveState = conversationStates.get(conv.id);
         const isActive = liveState?.isProcessing ?? conv.isActive ?? false;
-        const latestReasoning = liveState?.latestReasoning ?? conv.latestReasoning;
         const hasPendingConfirmation = (pendingConfirmations.get(conv.id)?.length ?? 0) > 0;
+        const isCompleted = liveState?.isCompleted ?? false;
+        const isStopped = liveState ? !liveState.isProcessing && liveState.isStopped : false;
+        // For completed/stopped tasks, show the final response instead of intermediate reasoning
+        const assistantMsg = liveState?.messages.findLast(m => m.role === 'assistant');
+        const latestReasoning = (isCompleted || isStopped) && assistantMsg?.content
+            ? assistantMsg.content
+            : (liveState?.latestReasoning ?? conv.latestReasoning);
         const isSelected = inModal && index === selectedIndex;
 
         return (
@@ -264,10 +270,12 @@ export function Sidebar({
                 aria-selected={isSelected}
             >
                 {/* Activity indicator */}
-                {isActive ? (
-                    <Loader2 size={16} className="spinning conversation-icon" />
+                {isActive && !hasPendingConfirmation ? (
+                    <Loader2 size={16} className="conversation-icon running" />
                 ) : hasPendingConfirmation ? (
                     <AlertCircle size={16} className="conversation-icon needs-attention" />
+                ) : isCompleted ? (
+                    <CheckCircle size={16} className="conversation-icon completed" />
                 ) : (
                     <MessageSquare size={16} className="conversation-icon" />
                 )}
@@ -275,7 +283,7 @@ export function Sidebar({
                 <div className="conversation-info">
                     <span className="conversation-title">{conv.title}</span>
                     {/* Subtitle with train of thought */}
-                    {isActive && latestReasoning && (
+                    {(isActive || isCompleted || hasPendingConfirmation) && latestReasoning && (
                         <span className="conversation-subtitle">
                             {(() => {
                                 const firstLine = latestReasoning.split('\n')[0] ?? '';

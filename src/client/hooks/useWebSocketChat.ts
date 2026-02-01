@@ -69,7 +69,8 @@ export type ChatAction =
     | { type: 'CLEAR_CONVERSATION' }
     | { type: 'SYNC_CONVERSATION_STATE'; conversationId: string; messages: Message[] }
     | { type: 'REMOVE_CONVERSATION_STATE'; conversationId: string }
-    | { type: 'CLEAR_CONFIRMATIONS'; conversationId: string };
+    | { type: 'CLEAR_CONFIRMATIONS'; conversationId: string }
+    | { type: 'CLEAR_COMPLETED'; conversationId: string };
 
 export interface SendMessageOptions {
     clientMessageId?: string;
@@ -192,6 +193,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 conversationStates.set(targetConversationId, {
                     isProcessing: existing?.isProcessing ?? false,
                     isStopped: existing?.isStopped ?? false,
+                    isCompleted: existing?.isCompleted ?? false,
                     latestReasoning: existing?.latestReasoning,
                     messages: isCurrentConversation ? baseMessages : [...baseMessages, action.message],
                 });
@@ -233,6 +235,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 conversationStates.set(targetConversationId, {
                     isProcessing: true,
                     isStopped: false,
+                    isCompleted: false,
                     latestReasoning: existing?.latestReasoning,
                     messages: isCurrentConversation ? nextMessages : insertAssistant(baseMessages),
                 });
@@ -285,6 +288,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             conversationStates.set(conversationId, {
                 isProcessing: canAutoActivate ? state.runStatus === 'running' : (existing?.isProcessing ?? false),
                 isStopped: existing?.isStopped ?? false,
+                isCompleted: existing?.isCompleted ?? false,
                 latestReasoning: existing?.latestReasoning,
                 messages: messagesForConversation,
             });
@@ -340,6 +344,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             conversationStates.set(conversationId, {
                 isProcessing: true,
                 isStopped: false,
+                isCompleted: false,
                 latestReasoning: existing?.latestReasoning,
                 messages: dropEmptyStreamingPlaceholders(messages, runId),
             });
@@ -400,6 +405,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     ...existing,
                     isProcessing: false,
                     isStopped: reason === 'user_stop',
+                    isCompleted: false,
                     messages: finalizeStopped(existing.messages),
                 });
             }
@@ -457,6 +463,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     ...existing,
                     isProcessing: false,
                     isStopped: false,
+                    isCompleted: true,
                     messages: finalizeMessages(existing.messages),
                 });
             }
@@ -730,6 +737,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             conversationStates.set(conversationId, {
                 isProcessing: existing?.isProcessing ?? false,
                 isStopped: existing?.isStopped ?? false,
+                isCompleted: existing?.isCompleted ?? false,
                 latestReasoning: existing?.latestReasoning,
                 messages,
             });
@@ -739,6 +747,15 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         case 'REMOVE_CONVERSATION_STATE': {
             const conversationStates = new Map(state.conversationStates);
             conversationStates.delete(action.conversationId);
+            return { ...state, conversationStates };
+        }
+
+        case 'CLEAR_COMPLETED': {
+            const conversationStates = new Map(state.conversationStates);
+            const existing = conversationStates.get(action.conversationId);
+            if (existing?.isCompleted) {
+                conversationStates.set(action.conversationId, { ...existing, isCompleted: false });
+            }
             return { ...state, conversationStates };
         }
 
@@ -1105,6 +1122,10 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         dispatch({ type: 'CLEAR_CONFIRMATIONS', conversationId });
     }, []);
 
+    const clearCompleted = useCallback((conversationId: string) => {
+        dispatch({ type: 'CLEAR_COMPLETED', conversationId });
+    }, []);
+
     const dismissConfirmation = useCallback((conversationId: string, requestId: string) => {
         dispatch({ type: 'DISMISS_CONFIRMATION', conversationId, requestId });
     }, []);
@@ -1127,6 +1148,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         clearConversation,
         syncConversationState,
         removeConversationState,
+        clearCompleted,
         clearConfirmations,
         dismissConfirmation,
 
