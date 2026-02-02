@@ -9,8 +9,6 @@ import os from 'os';
 import path from 'path';
 import {
     getDefaultConfig,
-    expandPath,
-    expandPaths,
     buildRuntimeConfig,
     DEFAULT_ALLOWED_WRITE_PATHS,
     DEFAULT_DENIED_READ_PATHS,
@@ -18,6 +16,7 @@ import {
     type SandboxConfig,
 } from '../../../src/server/sandbox/config';
 import { getSandboxEnvOverrides, SANDBOX_TEMP_DIR } from '../../../src/server/sandbox';
+import { expandPath, expandPaths } from '../../../src/server/utils';
 
 describe('Sandbox Config', () => {
     describe('getDefaultConfig', () => {

@@ -167,6 +167,7 @@ export async function* runResearchWithConversation(
         abortSignal,
         confirmationContext,
         chatModelId: options.chatModelId,
+        conversationId,
     })) {
         // On first iteration (new conversation), persist system prompt and user message to DB
         // System prompt is persisted first to maintain correct ordering: system → user → agent

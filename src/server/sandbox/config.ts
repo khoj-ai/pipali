@@ -8,9 +8,8 @@
  */
 
 import { execSync } from 'child_process';
-import os from 'os';
-import path from 'path';
 import type { SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
+import { expandPaths } from '../utils';
 
 /**
  * Get the macOS user-specific temp directory.
@@ -174,26 +173,6 @@ export function getDefaultConfig(): SandboxConfig {
         allowedDomains: DEFAULT_ALLOWED_DOMAINS,
         allowLocalBinding: true,
     };
-}
-
-/**
- * Expand ~ to home directory in a path.
- */
-export function expandPath(inputPath: string): string {
-    if (inputPath.startsWith('~/')) {
-        return path.join(os.homedir(), inputPath.slice(2));
-    }
-    if (inputPath === '~') {
-        return os.homedir();
-    }
-    return inputPath;
-}
-
-/**
- * Expand paths in an array
- */
-export function expandPaths(paths: string[]): string[] {
-    return paths.map(expandPath);
 }
 
 /**

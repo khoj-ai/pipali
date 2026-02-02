@@ -21,8 +21,8 @@ import {
     type SandboxConfig,
     getDefaultConfig,
     buildRuntimeConfig,
-    expandPath,
 } from './config';
+import { expandPath } from '../utils';
 import { loadSandboxSettings, saveSandboxSettings, ensureSandboxSettings } from './settings';
 
 const log = createChildLogger({ component: 'sandbox' });

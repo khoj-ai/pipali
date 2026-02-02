@@ -12,6 +12,7 @@ import { webSearch, type WebSearchArgs } from '../actor/search_web';
 import { readWebpage, type ReadWebpageArgs } from '../actor/read_webpage';
 import { askUser, type AskUserArgs } from '../actor/ask_user';
 import { generateImage, type GenerateImageArgs } from '../actor/generate_image';
+import { emailUser, type EmailUserArgs } from '../actor/email_user';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
@@ -92,6 +93,8 @@ interface ResearchConfig {
     thresholdStepCount?: number;
     // Whether this is the user's very first conversation ever
     isFirstEverConversation?: boolean;
+    // Conversation ID for tools that need to reference the current conversation
+    conversationId?: string;
 }
 
 export async function buildSystemPrompt(args: {
@@ -369,6 +372,42 @@ REQUIRED:
                 },
             },
             required: ['prompt'],
+        },
+    },
+    {
+        name: 'email_user',
+        description: 'Send an email to the user. Use this to deliver reports, summaries, notifications, or any content the user should receive in their inbox. Especially useful for background tasks and automations where the user may not be actively watching the chat.',
+        schema: {
+            type: 'object',
+            properties: {
+                subject: {
+                    type: 'string',
+                    description: 'The email subject line. Keep it concise and descriptive.',
+                },
+                body: {
+                    type: 'string',
+                    description: 'The email body content in HTML format. Use proper HTML tags for formatting (paragraphs, lists, headings, etc.).',
+                },
+                attachments: {
+                    type: 'array',
+                    description: 'Optional array of file attachments to include with the email. Provide the local file path for each attachment.',
+                    items: {
+                        type: 'object',
+                        properties: {
+                            path: {
+                                type: 'string',
+                                description: 'Local file path of the file to attach (e.g., /tmp/pipali/chart.png).',
+                            },
+                            filename: {
+                                type: 'string',
+                                description: 'Optional filename to display for the attachment. Defaults to path basename if unspecified.',
+                            },
+                        },
+                        required: ['path'],
+                    },
+                },
+            },
+            required: ['subject', 'body'],
         },
     },
     {
@@ -685,6 +724,10 @@ async function executeTool(
                 const result = await generateImage(toolCall.arguments as GenerateImageArgs);
                 return result.compiled;
             }
+            case 'email_user': {
+                const result = await emailUser(toolCall.arguments as EmailUserArgs, context?.conversationId);
+                return result.compiled;
+            }
             case 'ask_user': {
                 const result = await askUser(
                     toolCall.arguments as AskUserArgs,
@@ -828,6 +871,7 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         const executionContext: ToolExecutionContext = {
             confirmation: config.confirmationContext,
             metricsAccumulator,
+            conversationId: config.conversationId,
         };
         iteration.toolResults = await executeToolsInParallel(iteration.toolCalls, executionContext, config.abortSignal);
 

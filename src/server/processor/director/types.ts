@@ -58,4 +58,6 @@ export interface ToolExecutionContext {
     confirmation?: ConfirmationContext;
     /** Accumulator for LLM usage metrics from tool executions */
     metricsAccumulator?: MetricsAccumulator;
+    /** Conversation ID for tools that need to reference the current conversation */
+    conversationId?: string;
 }
