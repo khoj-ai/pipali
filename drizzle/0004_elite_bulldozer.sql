@@ -1,6 +1,16 @@
-CREATE TYPE "public"."mcp_transport_type" AS ENUM('stdio', 'sse');--> statement-breakpoint
+-- Add MCP server support
+
+-- Create type if not exists
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'mcp_transport_type') THEN
+        CREATE TYPE "public"."mcp_transport_type" AS ENUM('stdio', 'sse');
+    END IF;
+END $$;
 --> statement-breakpoint
-CREATE TABLE "mcp_server" (
+
+-- Create table if not exists
+CREATE TABLE IF NOT EXISTS "mcp_server" (
     "id" serial PRIMARY KEY NOT NULL,
     "name" text NOT NULL,
     "description" text,

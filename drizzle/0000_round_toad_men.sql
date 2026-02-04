@@ -1,11 +1,57 @@
-CREATE TYPE "public"."chat_model_type" AS ENUM('openai', 'anthropic', 'google');--> statement-breakpoint
-CREATE TYPE "public"."subscription_type" AS ENUM('free', 'premium');--> statement-breakpoint
-CREATE TYPE "public"."input_tool" AS ENUM('general', 'online', 'notes', 'webpage', 'code');--> statement-breakpoint
-CREATE TYPE "public"."output_mode" AS ENUM('image', 'diagram');--> statement-breakpoint
-CREATE TYPE "public"."privacy_level" AS ENUM('public', 'private', 'protected');--> statement-breakpoint
-CREATE TYPE "public"."style_color" AS ENUM('blue', 'green', 'red', 'yellow', 'orange', 'purple', 'pink', 'teal', 'cyan', 'lime', 'indigo', 'fuchsia', 'rose', 'sky', 'amber', 'emerald');--> statement-breakpoint
-CREATE TYPE "public"."style_icon" AS ENUM('Lightbulb', 'Health', 'Robot', 'Aperture', 'GraduationCap', 'Jeep', 'Island', 'MathOperations', 'Asclepius', 'Couch', 'Code', 'Atom', 'ClockCounterClockwise', 'PencilLine', 'Chalkboard', 'Cigarette', 'CraneTower', 'Heart', 'Leaf', 'NewspaperClipping', 'OrangeSlice', 'SmileyMelting', 'YinYang', 'SneakerMove', 'Student', 'Oven', 'Gavel', 'Broadcast');--> statement-breakpoint
-CREATE TABLE "ai_model_api" (
+-- Initial schema creation
+-- Types
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'chat_model_type') THEN
+        CREATE TYPE "public"."chat_model_type" AS ENUM('openai', 'anthropic', 'google');
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'subscription_type') THEN
+        CREATE TYPE "public"."subscription_type" AS ENUM('free', 'premium');
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'input_tool') THEN
+        CREATE TYPE "public"."input_tool" AS ENUM('general', 'online', 'notes', 'webpage', 'code');
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'output_mode') THEN
+        CREATE TYPE "public"."output_mode" AS ENUM('image', 'diagram');
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'privacy_level') THEN
+        CREATE TYPE "public"."privacy_level" AS ENUM('public', 'private', 'protected');
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'style_color') THEN
+        CREATE TYPE "public"."style_color" AS ENUM('blue', 'green', 'red', 'yellow', 'orange', 'purple', 'pink', 'teal', 'cyan', 'lime', 'indigo', 'fuchsia', 'rose', 'sky', 'amber', 'emerald');
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'style_icon') THEN
+        CREATE TYPE "public"."style_icon" AS ENUM('Lightbulb', 'Health', 'Robot', 'Aperture', 'GraduationCap', 'Jeep', 'Island', 'MathOperations', 'Asclepius', 'Couch', 'Code', 'Atom', 'ClockCounterClockwise', 'PencilLine', 'Chalkboard', 'Cigarette', 'CraneTower', 'Heart', 'Leaf', 'NewspaperClipping', 'OrangeSlice', 'SmileyMelting', 'YinYang', 'SneakerMove', 'Student', 'Oven', 'Gavel', 'Broadcast');
+    END IF;
+END $$;
+--> statement-breakpoint
+
+-- Tables
+CREATE TABLE IF NOT EXISTS "ai_model_api" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"name" text NOT NULL,
 	"api_key" text NOT NULL,
@@ -14,7 +60,7 @@ CREATE TABLE "ai_model_api" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "api_key" (
+CREATE TABLE IF NOT EXISTS "api_key" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"token" text NOT NULL,
@@ -23,7 +69,7 @@ CREATE TABLE "api_key" (
 	CONSTRAINT "api_key_token_unique" UNIQUE("token")
 );
 --> statement-breakpoint
-CREATE TABLE "chat_model" (
+CREATE TABLE IF NOT EXISTS "chat_model" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"max_prompt_size" integer,
 	"tokenizer" text,
@@ -36,7 +82,7 @@ CREATE TABLE "chat_model" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "conversation" (
+CREATE TABLE IF NOT EXISTS "conversation" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"user_id" integer NOT NULL,
 	"trajectory" jsonb NOT NULL,
@@ -48,7 +94,7 @@ CREATE TABLE "conversation" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "google_user" (
+CREATE TABLE IF NOT EXISTS "google_user" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"sub" text NOT NULL,
@@ -61,7 +107,7 @@ CREATE TABLE "google_user" (
 	"locale" text
 );
 --> statement-breakpoint
-CREATE TABLE "subscription" (
+CREATE TABLE IF NOT EXISTS "subscription" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"type" "subscription_type" DEFAULT 'free' NOT NULL,
@@ -70,7 +116,7 @@ CREATE TABLE "subscription" (
 	"enabled_trial_at" timestamp
 );
 --> statement-breakpoint
-CREATE TABLE "user" (
+CREATE TABLE IF NOT EXISTS "user" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"uuid" uuid DEFAULT gen_random_uuid() NOT NULL,
 	"password" text,
@@ -90,7 +136,7 @@ CREATE TABLE "user" (
 	CONSTRAINT "user_username_unique" UNIQUE("username")
 );
 --> statement-breakpoint
-CREATE TABLE "user_chat_model" (
+CREATE TABLE IF NOT EXISTS "user_chat_model" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"model_id" integer,
@@ -98,7 +144,7 @@ CREATE TABLE "user_chat_model" (
 	"updated_at" timestamp DEFAULT now() NOT NULL
 );
 --> statement-breakpoint
-CREATE TABLE "agents" (
+CREATE TABLE IF NOT EXISTS "agents" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"creator_id" integer,
 	"name" text NOT NULL,
@@ -117,13 +163,74 @@ CREATE TABLE "agents" (
 	CONSTRAINT "agents_slug_unique" UNIQUE("slug")
 );
 --> statement-breakpoint
-ALTER TABLE "api_key" ADD CONSTRAINT "api_key_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "chat_model" ADD CONSTRAINT "chat_model_ai_model_api_id_ai_model_api_id_fk" FOREIGN KEY ("ai_model_api_id") REFERENCES "public"."ai_model_api"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "conversation" ADD CONSTRAINT "conversation_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "conversation" ADD CONSTRAINT "conversation_agent_id_agents_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id") ON DELETE set null ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "google_user" ADD CONSTRAINT "google_user_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "subscription" ADD CONSTRAINT "subscription_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user_chat_model" ADD CONSTRAINT "user_chat_model_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "user_chat_model" ADD CONSTRAINT "user_chat_model_model_id_chat_model_id_fk" FOREIGN KEY ("model_id") REFERENCES "public"."chat_model"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "agents" ADD CONSTRAINT "agents_creator_id_user_id_fk" FOREIGN KEY ("creator_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "agents" ADD CONSTRAINT "agents_chat_model_id_chat_model_id_fk" FOREIGN KEY ("chat_model_id") REFERENCES "public"."chat_model"("id") ON DELETE cascade ON UPDATE no action;
+
+-- Foreign Keys
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'api_key_user_id_user_id_fk') THEN
+        ALTER TABLE "api_key" ADD CONSTRAINT "api_key_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'chat_model_ai_model_api_id_ai_model_api_id_fk') THEN
+        ALTER TABLE "chat_model" ADD CONSTRAINT "chat_model_ai_model_api_id_ai_model_api_id_fk" FOREIGN KEY ("ai_model_api_id") REFERENCES "public"."ai_model_api"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'conversation_user_id_user_id_fk') THEN
+        ALTER TABLE "conversation" ADD CONSTRAINT "conversation_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'conversation_agent_id_agents_id_fk') THEN
+        ALTER TABLE "conversation" ADD CONSTRAINT "conversation_agent_id_agents_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id") ON DELETE set null ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'google_user_user_id_user_id_fk') THEN
+        ALTER TABLE "google_user" ADD CONSTRAINT "google_user_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'subscription_user_id_user_id_fk') THEN
+        ALTER TABLE "subscription" ADD CONSTRAINT "subscription_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_chat_model_user_id_user_id_fk') THEN
+        ALTER TABLE "user_chat_model" ADD CONSTRAINT "user_chat_model_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_chat_model_model_id_chat_model_id_fk') THEN
+        ALTER TABLE "user_chat_model" ADD CONSTRAINT "user_chat_model_model_id_chat_model_id_fk" FOREIGN KEY ("model_id") REFERENCES "public"."chat_model"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agents_creator_id_user_id_fk') THEN
+        ALTER TABLE "agents" ADD CONSTRAINT "agents_creator_id_user_id_fk" FOREIGN KEY ("creator_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
+--> statement-breakpoint
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'agents_chat_model_id_chat_model_id_fk') THEN
+        ALTER TABLE "agents" ADD CONSTRAINT "agents_chat_model_id_chat_model_id_fk" FOREIGN KEY ("chat_model_id") REFERENCES "public"."chat_model"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;

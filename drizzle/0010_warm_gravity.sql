@@ -1,4 +1,7 @@
-CREATE TABLE "sandbox_settings" (
+-- Add sandbox_settings table
+
+-- Create table if not exists
+CREATE TABLE IF NOT EXISTS "sandbox_settings" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"user_id" integer NOT NULL,
 	"enabled" boolean DEFAULT true NOT NULL,
@@ -12,4 +15,11 @@ CREATE TABLE "sandbox_settings" (
 	CONSTRAINT "sandbox_settings_user_id_unique" UNIQUE("user_id")
 );
 --> statement-breakpoint
-ALTER TABLE "sandbox_settings" ADD CONSTRAINT "sandbox_settings_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+
+-- Add foreign key constraint if not exists
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'sandbox_settings_user_id_user_id_fk') THEN
+        ALTER TABLE "sandbox_settings" ADD CONSTRAINT "sandbox_settings_user_id_user_id_fk" FOREIGN KEY ("user_id") REFERENCES "public"."user"("id") ON DELETE cascade ON UPDATE no action;
+    END IF;
+END $$;
