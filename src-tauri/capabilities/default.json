@@ -20,6 +20,8 @@
     },
     "shell:allow-kill",
     "shell:allow-stdin-write",
-    "opener:default"
+    "opener:default",
+    "dialog:default",
+    "updater:default"
   ]
 }

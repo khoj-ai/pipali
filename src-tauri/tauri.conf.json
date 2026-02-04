@@ -43,21 +43,7 @@
       "id": "main-tray"
     },
     "security": {
-      "csp": "default-src 'self' tauri: asset: ipc: http://ipc.localhost; connect-src 'self' http: ws: tauri: asset: ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline' tauri: asset:; script-src 'self' 'unsafe-inline' tauri: asset:; img-src 'self' data: blob: tauri: asset: http: https://*.googleusercontent.com https://www.gravatar.com; font-src 'self' data: tauri: asset:",
-      "capabilities": [
-        {
-          "identifier": "main",
-          "description": "Main window permissions",
-          "windows": [
-            "main"
-          ],
-          "permissions": [
-            "core:default",
-            "dialog:default",
-            "updater:default"
-          ]
-        }
-      ]
+      "csp": "default-src 'self' tauri: asset: ipc: http://ipc.localhost; connect-src 'self' http: ws: tauri: asset: ipc: http://ipc.localhost; style-src 'self' 'unsafe-inline' tauri: asset:; script-src 'self' 'unsafe-inline' tauri: asset:; img-src 'self' data: blob: tauri: asset: http: https://*.googleusercontent.com https://www.gravatar.com; font-src 'self' data: tauri: asset:"
     }
   },
   "bundle": {
