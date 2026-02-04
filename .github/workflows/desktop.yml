@@ -42,6 +42,7 @@ on:
           - all
           - macos
           - windows
+          - linux
 
 jobs:
   build-macos:
@@ -233,9 +234,9 @@ jobs:
           if-no-files-found: error
 
   build-linux:
-    if: false # Disabled for now
-    name: 🐧 Build Linux x64
+    name: 🐧 Build Linux x64${{ inputs.debug_build && ' (Debug)' || '' }}
     runs-on: ubuntu-22.04
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.platforms == 'all' || inputs.platforms == 'linux' }}
     steps:
       - name: ⬇️ Checkout Code
         uses: actions/checkout@v4
@@ -271,33 +272,45 @@ jobs:
       - name: ⤵️ Install Tauri Frontend Dependencies
         run: cd src-tauri-frontend && bun install
 
-      - name: 🔨 Build Desktop App
-        run: bun run tauri:build
+      - name: 🔨 Build Desktop App (Linux) (PR)
+        if: github.event_name == 'pull_request'
+        run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }} -- --no-updater-artifacts
+
+      - name: 🔨 Build Desktop App (Linux)
+        if: github.event_name != 'pull_request' && (startsWith(github.ref, 'refs/tags/') || github.ref == 'refs/heads/main')
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          export TAURI_SIGNING_PRIVATE_KEY="$(printf '%s' "${TAURI_SIGNING_PRIVATE_KEY:-}" | tr -d '\r\n')"
+          export TAURI_SIGNING_PRIVATE_KEY_PASSWORD="$(printf '%s' "${TAURI_SIGNING_PRIVATE_KEY_PASSWORD:-}" | tr -d '\r\n')"
+          bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
 
       - name: 📁 List Build Artifacts
         run: |
-          echo "=== Bundle directory ==="
-          ls -la src-tauri/target/release/bundle/ || true
-          echo "=== deb ==="
-          ls -la src-tauri/target/release/bundle/deb/ || true
+          BUILD_TYPE=${{ inputs.debug_build == true && 'debug' || 'release' }}
+          echo "=== Bundle directory (${BUILD_TYPE}) ==="
+          ls -la src-tauri/target/${BUILD_TYPE}/bundle/ || true
           echo "=== appimage ==="
-          ls -la src-tauri/target/release/bundle/appimage/ || true
-
-      - name: ⏫ Upload Linux .deb
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipali-${{ github.ref_name }}-linux-x64.deb
-          path: src-tauri/target/release/bundle/deb/*.deb
-          if-no-files-found: error
+          ls -la src-tauri/target/${BUILD_TYPE}/bundle/appimage/ || true
 
       - name: ⏫ Upload Linux AppImage
-        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
-          name: pipali-${{ github.ref_name }}-linux-x64.AppImage
-          path: src-tauri/target/release/bundle/appimage/*.AppImage
+          name: pipali-linux-x64${{ inputs.debug_build && '-debug' || '' }}.AppImage
+          path: src-tauri/target/${{ inputs.debug_build && 'debug' || 'release' }}/bundle/appimage/*.AppImage
           if-no-files-found: error
+
+      - name: ⏫ Upload Linux Updater Artifacts
+        if: "!inputs.debug_build && github.event_name != 'pull_request'"
+        uses: actions/upload-artifact@v4
+        with:
+          name: pipali-linux-x64-updater
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz
+            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
+          if-no-files-found: warn
 
   build-windows:
     name: 🪟 Build Windows x64${{ inputs.debug_build && ' (Debug)' || '' }}
@@ -372,9 +385,12 @@ jobs:
 
   release:
     name: 📦 Create Release
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') && !inputs.debug_build
+    if: |
+      startsWith(github.ref, 'refs/tags/') && !inputs.debug_build &&
+      !cancelled() &&
+      (needs.build-macos.result == 'success' || needs.build-linux.result == 'success' || needs.build-windows.result == 'success')
     permissions:
       contents: write
     steps:
@@ -395,7 +411,6 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/**/*.dmg
-            artifacts/**/*.deb
             artifacts/**/*.AppImage
             artifacts/pipali-windows-x64-setup.exe/*.exe
         env:
@@ -403,13 +418,13 @@ jobs:
 
   upload-r2:
     name: ☁️ Upload to Cloudflare R2
-    needs: [build-macos, build-windows]
+    needs: [build-macos, build-linux, build-windows]
     runs-on: ubuntu-latest
     if: |
       !inputs.debug_build &&
       (startsWith(github.ref, 'refs/tags/') || (github.event_name == 'workflow_dispatch' && inputs.release_version != '')) &&
       !cancelled() &&
-      (needs.build-macos.result == 'success' || needs.build-windows.result == 'success')
+      (needs.build-macos.result == 'success' || needs.build-linux.result == 'success' || needs.build-windows.result == 'success')
     steps:
       - name: ⬇️ Download All Artifacts
         uses: actions/download-artifact@v4
@@ -423,11 +438,14 @@ jobs:
           # Download page artifacts
           find artifacts -name "*.dmg" -exec cp {} "upload/Pipali-macos-arm64.dmg" \;
           find artifacts -name "*-setup.exe" -exec cp {} "upload/pipali-windows-x64-setup.exe" \;
+          find artifacts -name "*.AppImage" ! -name "*.sig" ! -name "*.tar.gz" -exec cp {} "upload/pipali-linux-x64.AppImage" \;
 
           # Updater artifacts (generated by Tauri with createUpdaterArtifacts + signing key)
           find artifacts -name "*.app.tar.gz" ! -name "*.sig" -exec cp {} "upload/Pipali-macos-arm64.app.tar.gz" \;
           find artifacts -name "*.app.tar.gz.sig" -exec cp {} "upload/Pipali-macos-arm64.app.tar.gz.sig" \;
           find artifacts -name "*.exe.sig" -exec cp {} "upload/pipali-windows-x64-setup.exe.sig" \;
+          find artifacts -name "*.AppImage.tar.gz" ! -name "*.sig" -exec cp {} "upload/pipali-linux-x64.AppImage.tar.gz" \;
+          find artifacts -name "*.AppImage.tar.gz.sig" -exec cp {} "upload/pipali-linux-x64.AppImage.tar.gz.sig" \;
 
           echo "=== Files to upload ==="
           ls -la upload/
@@ -454,7 +472,8 @@ jobs:
             "date": "${DATE}",
             "assets": {
               "macos-dmg": "releases/${TAG}/Pipali-macos-arm64.dmg",
-              "windows-exe": "releases/${TAG}/pipali-windows-x64-setup.exe"
+              "windows-exe": "releases/${TAG}/pipali-windows-x64-setup.exe",
+              "linux-appimage": "releases/${TAG}/pipali-linux-x64.AppImage"
             }
           }
           EOF
@@ -488,6 +507,11 @@ jobs:
               "windows-x86_64",
               "upload/pipali-windows-x64-setup.exe.sig",
               f"{cdn}/pipali-windows-x64-setup.exe",
+          )
+          add_platform(
+              "linux-x86_64",
+              "upload/pipali-linux-x64.AppImage.tar.gz.sig",
+              f"{cdn}/pipali-linux-x64.AppImage.tar.gz",
           )
 
           if platforms:

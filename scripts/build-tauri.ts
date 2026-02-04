@@ -509,7 +509,7 @@ async function buildTauri(debug: boolean, platform: Platform, disableUpdaterArti
     } else if (platform.startsWith("windows")) {
         bundles = ["nsis"];
     } else {
-        bundles = ["deb", "appimage"];
+        bundles = ["appimage"];
     }
 
     const args = ["tauri", "build", "--bundles", bundles.join(",")];
