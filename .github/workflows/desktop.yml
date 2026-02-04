@@ -308,8 +308,8 @@ jobs:
         with:
           name: pipali-linux-x64-updater
           path: |
-            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz
-            src-tauri/target/release/bundle/appimage/*.AppImage.tar.gz.sig
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/appimage/*.AppImage.sig
           if-no-files-found: warn
 
   build-windows:
@@ -444,8 +444,7 @@ jobs:
           find artifacts -name "*.app.tar.gz" ! -name "*.sig" -exec cp {} "upload/Pipali-macos-arm64.app.tar.gz" \;
           find artifacts -name "*.app.tar.gz.sig" -exec cp {} "upload/Pipali-macos-arm64.app.tar.gz.sig" \;
           find artifacts -name "*.exe.sig" -exec cp {} "upload/pipali-windows-x64-setup.exe.sig" \;
-          find artifacts -name "*.AppImage.tar.gz" ! -name "*.sig" -exec cp {} "upload/pipali-linux-x64.AppImage.tar.gz" \;
-          find artifacts -name "*.AppImage.tar.gz.sig" -exec cp {} "upload/pipali-linux-x64.AppImage.tar.gz.sig" \;
+          find artifacts -name "*.AppImage.sig" -exec cp {} "upload/pipali-linux-x64.AppImage.sig" \;
 
           echo "=== Files to upload ==="
           ls -la upload/
@@ -510,8 +509,8 @@ jobs:
           )
           add_platform(
               "linux-x86_64",
-              "upload/pipali-linux-x64.AppImage.tar.gz.sig",
-              f"{cdn}/pipali-linux-x64.AppImage.tar.gz",
+              "upload/pipali-linux-x64.AppImage.sig",
+              f"{cdn}/pipali-linux-x64.AppImage",
           )
 
           if platforms:
