@@ -60,15 +60,18 @@ export function truncateToolOutput(
     });
 }
 
-/** Returns a human-readable time of day based on the hour */
+/** Get time of day from hour to balance model context with context cache.
+ *  Distinguish next date after midnight from previous date night for LLM.
+ */
 function getTimeOfDay(date: Date): string {
     const hour = date.getHours();
-    if (hour >= 5 && hour < 9) return 'early morning';
-    if (hour >= 9 && hour < 12) return 'morning';
+    if (hour >= 0 && hour < 4) return 'after midnight';
+    if (hour >= 4 && hour < 8) return 'early morning';
+    if (hour >= 8 && hour < 12) return 'morning';
     if (hour >= 12 && hour < 17) return 'afternoon';
     if (hour >= 17 && hour < 21) return 'evening';
     if (hour >= 21 && hour < 24) return 'night';
-    return 'late night'; // 0-4
+    return '';
 }
 
 interface ResearchConfig {
