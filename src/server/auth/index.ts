@@ -7,7 +7,7 @@
  */
 
 import { db } from '../db';
-import { PlatformAuth, User, AiModelApi, ChatModel, WebSearchProvider, WebScraper } from '../db/schema';
+import { PlatformAuth, User, AiModelApi, ChatModel, Conversation, WebSearchProvider, WebScraper } from '../db/schema';
 import { eq, desc } from 'drizzle-orm';
 import type { AuthTokens, PlatformUserInfo, PlatformAuthCapabilities } from './types';
 import { createChildLogger } from '../logger';
@@ -515,6 +515,10 @@ export async function syncPlatformModels(): Promise<void> {
         let removedCount = 0;
         for (const existingModel of existingModels) {
             if (!platformModelNames.has(existingModel.name)) {
+                // Nullify conversation references so they fall back to user's default model
+                await db.update(Conversation)
+                    .set({ chatModelId: null })
+                    .where(eq(Conversation.chatModelId, existingModel.id));
                 await db.delete(ChatModel).where(eq(ChatModel.id, existingModel.id));
                 removedCount++;
             }
