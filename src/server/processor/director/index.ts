@@ -832,6 +832,15 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
                 source_call_id: syntheticCallId,
                 content: iteration.warning,
             }];
+            // Add synthetic function_call to raw so it round-trips correctly through conversation history
+            iteration.raw = [...(iteration.raw || []), {
+                type: 'function_call',
+                id: syntheticCallId,
+                call_id: syntheticCallId,
+                name: '_system_warning',
+                arguments: '{}',
+                status: 'completed',
+            }];
             yield iteration;
             continue;
         }
