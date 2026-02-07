@@ -411,7 +411,7 @@ jobs:
           generate_release_notes: true
           files: |
             artifacts/**/*.dmg
-            artifacts/**/*.AppImage
+            artifacts/pipali-linux-x64.AppImage/*.AppImage
             artifacts/pipali-windows-x64-setup.exe/*.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
