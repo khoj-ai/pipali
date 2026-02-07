@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Pipali",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "ai.pipali",
   "build": {
     "beforeDevCommand": "cd src-tauri-frontend && bun run dev",
