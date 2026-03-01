@@ -1,7 +1,7 @@
 import path from 'path';
 import fs from 'fs/promises';
 import { minimatch } from 'minimatch';
-import { clampInt, resolvePath, isBroadSearch, runMdfind, walkFilePaths } from './actor.utils';
+import { clampInt, resolvePath, walkFilePaths } from './actor.utils';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'list_files' });
@@ -86,19 +86,8 @@ export async function listFiles(args: ListFilesArgs): Promise<FileListResult> {
     try {
         const normalizedPath = resolvePath(searchPath);
 
-        // Try mdfind on macOS for broad paths to avoid TCC, fall back to walker
-        const mdfindResult = isBroadSearch(normalizedPath)
-            ? await listWithMdfind({
-                rootDir: normalizedPath,
-                pattern,
-                ignorePatterns: config.ignorePatterns,
-                maxResults: config.maxResults,
-                timeoutMs: config.timeoutMs,
-                includeHidden: config.includeHidden,
-                includeAppFolders: config.includeAppFolders,
-            }) : null;
-
-        const result = mdfindResult ?? await walkAndCollect({
+        // Use streaming walker with timeout + maxResults
+        const result = await walkAndCollect({
             rootDir: normalizedPath,
             pattern,
             ignorePatterns: config.ignorePatterns,
@@ -205,53 +194,6 @@ interface WalkResult {
     files: FileEntry[];
     truncated: boolean;
     timedOut: boolean;
-}
-
-/**
- * List using mdfind (macOS Spotlight) to avoid TCC. Returns null if mdfind is
- * unavailable or conditions aren't met, signaling caller to fall back to walker.
- */
-async function listWithMdfind(params: {
-    rootDir: string;
-    pattern?: string;
-    ignorePatterns: string[];
-    maxResults: number;
-    timeoutMs: number;
-    includeHidden: boolean;
-    includeAppFolders: boolean;
-}): Promise<WalkResult | null> {
-    const filePaths = await runMdfind({
-        searchPath: params.rootDir,
-        pattern: params.pattern,
-        includeHidden: params.includeHidden,
-        includeAppFolders: params.includeAppFolders,
-        timeoutMs: params.timeoutMs,
-        maxFiles: params.maxResults * 2,
-    });
-    if (!filePaths) return null;
-
-    log.debug(`mdfind returned ${filePaths.length} paths for list_files`);
-
-    // Filter out ignored paths first (cheap, no I/O)
-    const candidates = filePaths.filter(fp => !shouldIgnore(fp, params.rootDir, params.ignorePatterns));
-    const truncated = candidates.length > params.maxResults;
-    const capped = candidates.slice(0, params.maxResults);
-
-    // Stat files concurrently for mtime (mdfind already filters to files via kMDItemContentTypeTree)
-    const files = (await Promise.all(
-        capped.map(async (filePath): Promise<FileEntry | null> => {
-            try {
-                const stat = await fs.stat(filePath);
-                if (!stat.isFile()) return null;
-                return { path: filePath, mtime: stat.mtimeMs };
-            } catch {
-                return null;
-            }
-        })
-    )).filter((f): f is FileEntry => f !== null);
-
-    log.debug(`mdfind: ${files.length} files after filtering`);
-    return { files, truncated, timedOut: false };
 }
 
 async function walkAndCollect(params: {

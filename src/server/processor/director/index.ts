@@ -3,7 +3,6 @@ import type { ToolDefinition } from '../conversation/conversation';
 import { sendMessageToModel } from '../conversation/index';
 import type { ResearchIteration, ToolExecutionContext, MetricsAccumulator } from './types';
 import { listFiles, type ListFilesArgs } from '../actor/list_files';
-import { resolvePath, isBroadSearch } from '../actor/actor.utils';
 import { readFile, type ReadFileArgs } from '../actor/read_file';
 import { grepFiles, type GrepFilesArgs } from '../actor/grep_files';
 import { editFile, type EditFileArgs } from '../actor/edit_file';
@@ -294,7 +293,7 @@ REQUIRED:
                     enum: ['read-only', 'write-only', 'read-write'],
                     description: process.platform === 'win32'
                         ? 'Whether the command is read-only (no side effects, e.g., Get-ChildItem, Get-Content), write-only (creates new state without reading, e.g., New-Item, Set-Content), or read-write (reads and modifies state, e.g., Move-Item, Remove-Item, Copy-Item).'
-                        : 'Whether the command is read-only (no side effects, e.g., ls, cat, grep), write-only (creates new state without reading, e.g., mkdir, touch, echo > newfile), or read-write (reads and modifies state, e.g., sed -i, mv, rm, apt install).',
+                        : 'Whether the command is read-only (no side effects, e.g., ls, cat, grep, find), write-only (creates new state without reading, e.g., mkdir, touch, echo > newfile), or read-write (reads and modifies state, e.g., sed -i, mv, rm, apt install).',
                 },
                 execution_mode: {
                     type: 'string',
@@ -653,33 +652,6 @@ async function pickNextTool(
 }
 
 /**
- * Detect if a shell command is a `find` invocation.
- * Matches `find /path ...` at the start or after pipe/chain operators.
- */
-export function isShellFindCommand(command: string): boolean {
-    const trimmed = command.trimStart();
-    if (trimmed.startsWith('find ') || trimmed === 'find') return true;
-    // Check for find after pipe or chain operators
-    return /[|;&]\s*find\s/.test(command);
-}
-
-/**
- * Extract the search path from a `find` command (first non-option argument).
- * Returns undefined if no path can be extracted.
- */
-export function extractFindPath(command: string): string | undefined {
-    // Split on chain operators to get the segment containing `find`
-    const segments = command.split(/[|;&]+/);
-    const findSegment = segments.reverse().find(s => s.trimStart().startsWith('find '));
-    if (!findSegment) return undefined;
-    const afterFind = findSegment.trimStart().slice('find '.length).trimStart();
-    // First token is the path unless it starts with - (an option flag)
-    const firstToken = afterFind.split(/\s/)[0];
-    if (!firstToken || firstToken.startsWith('-')) return undefined;
-    return firstToken;
-}
-
-/**
  * Execute a single tool call and return the result
  */
 async function executeTool(
@@ -731,30 +703,8 @@ async function executeTool(
                 return result.compiled;
             }
             case 'shell_command': {
-                const args = toolCall.arguments as ShellCommandArgs;
-
-                // On macOS, intercept the first broad `find` command and block it with a warning.
-                // Running `find` on broad paths (~ or ~/Documents) is slow and triggers TCC permission dialogs.
-                // Narrow finds (e.g., find ~/Documents/notes/ -name "*.md") are fast and allowed through.
-                if (process.platform === 'darwin'
-                    && isShellFindCommand(args.command)
-                    && context?.shownReminders
-                    && !context.shownReminders.has('find_warned')
-                ) {
-                    const findPath = extractFindPath(args.command);
-                    const resolvedFindPath = findPath ? resolvePath(findPath) : resolvePath('~');
-                    if (isBroadSearch(resolvedFindPath)) {
-                        context.shownReminders.add('find_warned');
-                        return '[System Warning]: prefer `mdfind` over `find` for instant results and to avoid TCC permission dialogs.\n'
-                            + 'Examples: `mdfind -name "report" -onlyin ~/Documents` (find by name substring), '
-                            + '`mdfind "kMDItemFSName == \'*.py\'" -onlyin ~/projects` (find by extension), '
-                            + '`mdfind "meeting notes" -onlyin ~/` (full-text content search).\n'
-                            + 'If you still need `find`, call shell_command again with the same command.';
-                    }
-                }
-
                 const result = await shellCommand(
-                    args,
+                    toolCall.arguments as ShellCommandArgs,
                     { confirmationContext: context?.confirmation }
                 );
                 return result.compiled;
@@ -860,8 +810,6 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
     let thresholdStepCount: number | undefined = config.thresholdStepCount;
     let retryWarnings = 0;
     let lastWarning = '';
-    // Persists across iterations so one-time reminders only fire once per research run
-    const shownReminders = new Set<string>();
 
     for (let i = 0; i < config.maxIterations; i++) {
         // Check if paused before starting new iteration
@@ -990,7 +938,6 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             confirmation: config.confirmationContext,
             metricsAccumulator,
             conversationId: config.conversationId,
-            shownReminders,
         };
         iteration.toolResults = await executeToolsInParallel(iteration.toolCalls, executionContext, config.abortSignal);
 
