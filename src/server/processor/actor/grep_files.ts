@@ -2,7 +2,7 @@ import path from 'path';
 import { homedir } from 'os';
 import fs from 'fs/promises';
 import { minimatch } from 'minimatch';
-import { clampInt, extractLiteralFromRegex, getExcludedDirNamesForRootDir, isBroadSearch, resolveCaseInsensitivePath, resolvePath, walkFilePaths, runMdfind } from './actor.utils';
+import { clampInt, getExcludedDirNamesForRootDir, resolveCaseInsensitivePath, resolvePath, walkFilePaths } from './actor.utils';
 import { isSensitivePath, getSensitivePathReason } from '../../security';
 import {
     type ConfirmationContext,
@@ -101,25 +101,6 @@ function buildBinaryExcludeGlobs(): string[] {
     return Array.from(BINARY_EXTENSIONS).map(ext => `!*${ext}`);
 }
 
-
-/**
- * Extract PCRE-style inline flags like (?i), (?m), (?s) from the start of a
- * pattern and convert them to JS RegExp flags.
- */
-function extractInlineFlags(pattern: string): { cleanPattern: string; flags: string } {
-    const match = pattern.match(/^\(\?([imsu]+)\)/);
-    if (!match) return { cleanPattern: pattern, flags: '' };
-
-    const pcreFlags = match[1]!;
-    let jsFlags = '';
-    if (pcreFlags.includes('i')) jsFlags += 'i';
-    if (pcreFlags.includes('m')) jsFlags += 'm';
-    if (pcreFlags.includes('s')) jsFlags += 's';
-    if (pcreFlags.includes('u')) jsFlags += 'u';
-
-    return { cleanPattern: pattern.slice(match[0].length), flags: jsFlags };
-}
-
 /**
  * Check if a regex pattern is potentially dangerous (ReDoS).
  * Uses simple heuristics to detect nested quantifiers and other patterns
@@ -200,8 +181,7 @@ export async function grepFiles(
         // Compile the regex pattern
         let regex: RegExp;
         try {
-            const { cleanPattern, flags } = extractInlineFlags(pattern);
-            regex = new RegExp(cleanPattern, flags);
+            regex = new RegExp(pattern);
         } catch (e) {
             return {
                 query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
@@ -244,91 +224,128 @@ export async function grepFiles(
             searchPath = caseResolvedSearchPath;
         }
 
-        const resolvedPath = path.resolve(searchPath);
-        const broad = isBroadSearch(resolvedPath);
-        const rgPath = config.preferRipgrep ? Bun.which('rg') : null;
+        // Prefer ripgrep when available for speed
+        if (config.preferRipgrep) {
+            const rgPath = Bun.which('rg');
+            if (rgPath) {
+                const rgResult = await grepWithRipgrep({
+                    rgPath,
+                    pattern,
+                    searchPath,
+                    include,
+                    linesBefore: lines_before,
+                    linesAfter: lines_after,
+                    maxOutputLines: config.maxResults,
+                    timeoutMs: config.timeoutMs,
+                    includeHidden: config.includeHidden,
+                    includeAppFolders: config.includeAppFolders,
+                    followSymlinks: config.followSymlinks,
+                    respectIgnore: config.respectIgnore,
+                });
 
-        // For broad paths (~ or one level deep), prefer mdfind to avoid TCC dialogs.
-        // For narrow paths, prefer ripgrep for speed and .gitignore support.
-        const strategies = broad
-            ? [tryMdfind, rgPath ? tryRipgrep : null, tryWalker]
-            : [rgPath ? tryRipgrep : null, tryMdfind, tryWalker];
+                if (rgResult.outputLines.length > 0) {
+                    let compiled = rgResult.outputLines.join('\n');
+                    if (rgResult.truncated) {
+                        compiled += `\n\n... ${rgResult.outputLines.length} results found (showing first ${config.maxResults}). Use stricter regex or path to narrow down results.`;
+                    } else if (rgResult.timedOut) {
+                        compiled += `\n\n... Search timed out after ${config.timeoutMs}ms. Use stricter regex or path to narrow down results.`;
+                    }
 
-        let noFiles = false;
-        for (const strategy of strategies) {
-            if (!strategy) continue;
-            const result = await strategy();
-            if (result === 'no-files') { noFiles = true; continue; }
-            if (!result) continue;
-            log.info(`Used ${strategy.name} of ${strategies.map(s => s?.name)} to search successfully`)
-            return formatGrepResult(result, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults);
+                    return {
+                        query: generateQuery(
+                            rgResult.outputLines.length,
+                            rgResult.matchedFiles.size,
+                            searchPathArg,
+                            pattern,
+                            include,
+                            lines_before,
+                            lines_after,
+                            config.maxResults,
+                            rgResult.truncated || rgResult.timedOut
+                        ),
+                        file: searchPathArg,
+                        uri: searchPathArg,
+                        compiled,
+                    };
+                }
+
+                // If no output, distinguish "no files" vs "no matches".
+                const state = await getSearchPathState(searchPath);
+                if (state.kind === 'missing' || state.kind === 'empty-directory') {
+                    return {
+                        query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                        file: searchPathArg,
+                        uri: searchPathArg,
+                        compiled: 'No files found in specified path.',
+                    };
+                }
+
+                return {
+                    query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                    file: searchPathArg,
+                    uri: searchPathArg,
+                    compiled: 'No matches found.',
+                };
+            }
+        }
+
+        // Fallback: stream-walk files and scan line-by-line
+        const fallback = await grepWithFallbackWalker({
+            regex,
+            pattern,
+            searchPath,
+            pathPrefix: searchPathArg,
+            include,
+            linesBefore: lines_before,
+            linesAfter: lines_after,
+            maxOutputLines: config.maxResults,
+            timeoutMs: config.timeoutMs,
+            includeHidden: config.includeHidden,
+            includeAppFolders: config.includeAppFolders,
+            followSymlinks: config.followSymlinks,
+        });
+
+        if (fallback.noFiles) {
+            return {
+                query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                file: searchPathArg,
+                uri: searchPathArg,
+                compiled: 'No files found in specified path.',
+            };
+        }
+
+        if (fallback.outputLines.length === 0) {
+            return {
+                query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+                file: searchPathArg,
+                uri: searchPathArg,
+                compiled: 'No matches found.',
+            };
+        }
+
+        let compiled = fallback.outputLines.join('\n');
+        if (fallback.truncated) {
+            compiled += `\n\n... ${fallback.outputLines.length} results found (showing first ${config.maxResults}). Use stricter regex or path to narrow down results.`;
+        } else if (fallback.timedOut) {
+            compiled += `\n\n... Search timed out after ${config.timeoutMs}ms. Use stricter regex or path to narrow down results.`;
         }
 
         return {
-            query: generateQuery(0, 0, searchPathArg, pattern, include, lines_before, lines_after, config.maxResults),
+            query: generateQuery(
+                fallback.outputLines.length,
+                fallback.matchedFiles.size,
+                searchPathArg,
+                pattern,
+                include,
+                lines_before,
+                lines_after,
+                config.maxResults,
+                fallback.truncated || fallback.timedOut
+            ),
             file: searchPathArg,
             uri: searchPathArg,
-            compiled: noFiles ? 'No files found in specified path.' : 'No matches found.',
+            compiled,
         };
-
-        // --- strategy functions (closures over local scope) ---
-
-        async function tryMdfind(): Promise<GrepStrategyResult | 'no-files' | null> {
-            const mdfindResult = await grepWithMdfind({
-                regex,
-                pattern,
-                searchPath,
-                pathPrefix: searchPathArg,
-                include,
-                linesBefore: lines_before,
-                linesAfter: lines_after,
-                maxOutputLines: config.maxResults,
-                timeoutMs: config.timeoutMs,
-                includeHidden: config.includeHidden,
-                includeAppFolders: config.includeAppFolders,
-            });
-            if (!mdfindResult || mdfindResult.outputLines.length === 0) return null;
-            return mdfindResult;
-        }
-
-        async function tryRipgrep(): Promise<GrepStrategyResult | 'no-files' | null> {
-            const rgResult = await grepWithRipgrep({
-                rgPath: rgPath!,
-                pattern,
-                searchPath,
-                include,
-                linesBefore: lines_before,
-                linesAfter: lines_after,
-                maxOutputLines: config.maxResults,
-                timeoutMs: config.timeoutMs,
-                includeHidden: config.includeHidden,
-                includeAppFolders: config.includeAppFolders,
-                followSymlinks: config.followSymlinks,
-                respectIgnore: config.respectIgnore,
-            });
-            if (rgResult.outputLines.length === 0) return null;
-            return rgResult;
-        }
-
-        async function tryWalker(): Promise<GrepStrategyResult | 'no-files' | null> {
-            const fallback = await grepWithFallbackWalker({
-                regex,
-                pattern,
-                searchPath,
-                pathPrefix: searchPathArg,
-                include,
-                linesBefore: lines_before,
-                linesAfter: lines_after,
-                maxOutputLines: config.maxResults,
-                timeoutMs: config.timeoutMs,
-                includeHidden: config.includeHidden,
-                includeAppFolders: config.includeAppFolders,
-                followSymlinks: config.followSymlinks,
-            });
-            if (fallback.noFiles) return 'no-files';
-            if (fallback.outputLines.length === 0) return null;
-            return fallback;
-        }
     } catch (error) {
         const errorMsg = `Error using grep files tool: ${error instanceof Error ? error.message : String(error)}`;
         log.error({ err: error }, errorMsg);
@@ -382,54 +399,28 @@ function generateQuery(
     return query;
 }
 
-interface GrepStrategyResult {
-    outputLines: string[];
-    matchedFiles: Set<string>;
-    truncated: boolean;
-    timedOut: boolean;
-}
+type SearchPathState =
+    | { kind: 'missing' }
+    | { kind: 'empty-directory' }
+    | { kind: 'non-empty-or-non-directory' }
+    | { kind: 'not-accessible' };
 
-function formatGrepResult(
-    result: GrepStrategyResult,
-    searchPathArg: string,
-    pattern: string,
-    include: string | undefined,
-    linesBefore: number,
-    linesAfter: number,
-    maxResults: number,
-): GrepResult {
-    if (result.outputLines.length === 0) {
-        return {
-            query: generateQuery(0, 0, searchPathArg, pattern, include, linesBefore, linesAfter, maxResults),
-            file: searchPathArg,
-            uri: searchPathArg,
-            compiled: 'No matches found.',
-        };
+async function getSearchPathState(searchPath: string): Promise<SearchPathState> {
+    try {
+        const stat = await fs.stat(searchPath);
+        if (!stat.isDirectory()) {
+            return { kind: 'non-empty-or-non-directory' };
+        }
+
+        try {
+            const entries = await fs.readdir(searchPath);
+            return entries.length === 0 ? { kind: 'empty-directory' } : { kind: 'non-empty-or-non-directory' };
+        } catch {
+            return { kind: 'not-accessible' };
+        }
+    } catch {
+        return { kind: 'missing' };
     }
-
-    let compiled = result.outputLines.join('\n');
-    if (result.truncated) {
-        compiled += `\n\n... ${result.outputLines.length} results found (showing first ${maxResults}). Use stricter regex or path to narrow down results.`;
-    } else if (result.timedOut) {
-        compiled += `\n\n... Search timed out. Use stricter regex or path to narrow down results.`;
-    }
-
-    return {
-        query: generateQuery(
-            result.outputLines.length,
-            result.matchedFiles.size,
-            searchPathArg,
-            pattern,
-            include,
-            linesBefore,
-            linesAfter,
-            maxResults,
-            result.truncated || result.timedOut,
-        ),
-        file: searchPathArg,
-        uri: searchPathArg,
-        compiled,
-    };
 }
 
 function buildRipgrepGlobExcludes(excludedDirNames: Set<string>): string[] {
@@ -629,102 +620,6 @@ async function readStreamToString(stream: ReadableStream<Uint8Array> | null, max
         out += decoder.decode(value, { stream: true });
     }
     return out;
-}
-
-/**
- * Use mdfind to find candidate files matching the include pattern, then grep them.
- * Returns null if mdfind can't be used, signaling caller to fall back to walker.
- */
-async function grepWithMdfind(params: {
-    regex: RegExp;
-    pattern: string;
-    searchPath: string;
-    pathPrefix: string;
-    include?: string;
-    linesBefore: number;
-    linesAfter: number;
-    maxOutputLines: number;
-    timeoutMs: number;
-    includeHidden: boolean;
-    includeAppFolders: boolean;
-}): Promise<{
-    outputLines: string[];
-    matchedFiles: Set<string>;
-    truncated: boolean;
-    timedOut: boolean;
-} | null> {
-    const contentFilter = extractLiteralFromRegex(params.pattern);
-    // Without include or content filter, mdfind would list every file — skip it
-    if (!params.include && !contentFilter) return null;
-
-    const filePaths = await runMdfind({
-        searchPath: params.searchPath,
-        pattern: params.include,
-        contentFilter: contentFilter ?? undefined,
-        includeHidden: params.includeHidden,
-        includeAppFolders: params.includeAppFolders,
-        timeoutMs: params.timeoutMs,
-        maxFiles: params.maxOutputLines * 10,
-    });
-    if (!filePaths) return null;
-
-    log.debug(`mdfind returned ${filePaths.length} candidate files for grep`);
-
-    const outputLines: string[] = [];
-    const matchedFiles = new Set<string>();
-    let truncated = false;
-    let timedOut = false;
-    const start = Date.now();
-    const maxFileSizeBytes = 10 * 1024 * 1024;
-
-    for (const filePath of filePaths) {
-        if (isBinaryFile(filePath)) continue;
-        if (Date.now() - start > params.timeoutMs) { timedOut = true; break; }
-        if (outputLines.length >= params.maxOutputLines) { truncated = true; break; }
-
-        try {
-            const stat = await fs.stat(filePath);
-            if (!stat.isFile() || stat.size > maxFileSizeBytes) continue;
-
-            const file = Bun.file(filePath);
-
-            // Quick binary sniff
-            try {
-                const head = await file.slice(0, 1024).arrayBuffer();
-                if (new Uint8Array(head).includes(0)) continue;
-            } catch { /* ignore */ }
-
-            const content = await file.text();
-            const lines = content.split('\n');
-            let fileHasMatch = false;
-
-            for (let i = 0; i < lines.length && outputLines.length < params.maxOutputLines; i++) {
-                if (Date.now() - start > params.timeoutMs) { timedOut = true; break; }
-
-                const line = lines[i] ?? '';
-                if (params.regex.test(line)) {
-                    if (!fileHasMatch) { matchedFiles.add(filePath); fileHasMatch = true; }
-
-                    const startIdx = Math.max(0, i - params.linesBefore);
-                    for (let j = startIdx; j < i && outputLines.length < params.maxOutputLines; j++) {
-                        outputLines.push(`${filePath}:${j + 1}-${lines[j] ?? ''}`);
-                    }
-                    outputLines.push(`${filePath}:${i + 1}:${line}`);
-                    const endIdx = Math.min(lines.length, i + params.linesAfter + 1);
-                    for (let j = i + 1; j < endIdx && outputLines.length < params.maxOutputLines; j++) {
-                        outputLines.push(`${filePath}:${j + 1}-${lines[j] ?? ''}`);
-                    }
-                    if (params.linesBefore > 0 || params.linesAfter > 0) {
-                        outputLines.push('--');
-                    }
-                }
-            }
-        } catch {
-            continue;
-        }
-    }
-
-    return { outputLines, matchedFiles, truncated, timedOut };
 }
 
 async function grepWithFallbackWalker(params: {

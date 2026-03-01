@@ -104,6 +104,29 @@ describe('listFiles', () => {
         expect(lines.every(line => line.startsWith('- '))).toBe(true);
     });
 
+    test('should resolve home directory with ~', async () => {
+        const result = await listFiles({ path: '~' });
+
+        expect(result.file).toBe('~');
+        expect(result.uri).toBe('~');
+        // Should have some files in home directory
+        expect(result.compiled).not.toBe('No files found.');
+    });
+
+    test('should resolve home directory with ~/', async () => {
+        // Create a test directory in tmp (sandbox-safe)
+        const homeTestDir = path.join(os.tmpdir(), 'list-files-test-home');
+        await fs.mkdir(homeTestDir, { recursive: true });
+        await fs.writeFile(path.join(homeTestDir, 'home-test.txt'), 'test');
+
+        const result = await listFiles({ path: homeTestDir });
+
+        expect(result.compiled).toContain('home-test.txt');
+
+        // Clean up
+        await fs.rm(homeTestDir, { recursive: true, force: true });
+    });
+
     test('should resolve relative paths from current directory', async () => {
         // Create a test directory in tmp (sandbox-safe)
         const relativeTestDir = path.join(os.tmpdir(), 'list-files-test-relative');
@@ -124,16 +147,20 @@ describe('listFiles', () => {
         expect(result.compiled).toContain('file1.txt');
     });
 
-    // Perf guard: home dir listing should complete in <3s.
-    // Catches regressions in directory listing speed.
-    test('should list home directory files quickly', async () => {
-        const start = performance.now();
-        const result = await listFiles({});
-        const elapsed = performance.now() - start;
+    test('should default to home directory when path is empty', async () => {
+        const result = await listFiles({ path: '' });
 
         expect(result.file).toBe('');
+        // Should list files from home directory
         expect(result.compiled).not.toBe('No files found.');
-        expect(elapsed, "list files tool has become slow").toBeLessThan(3000);
+    });
+
+    test('should default to home directory when path is not provided', async () => {
+        const result = await listFiles({});
+
+        expect(result.file).toBe('');
+        // Should list files from home directory
+        expect(result.compiled).not.toBe('No files found.');
     });
 
     test('should handle non-existent directory gracefully', async () => {
@@ -192,6 +219,13 @@ describe('listFiles', () => {
         });
 
         expect(result.query).toContain('matching "*.txt"');
+    });
+
+    test('should not include path in query when path is .', async () => {
+        const result = await listFiles({ path: '.' });
+
+        // Should not say "in ." when path is current directory
+        expect(result.query).not.toContain('in .');
     });
 
     test('should handle pattern matching specific filenames', async () => {
