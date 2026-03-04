@@ -986,9 +986,26 @@ const App = () => {
                     reasoning,
                     status,
                     toolCategories,
+                    isPinned: conv?.isPinned,
+                    onTogglePin: () => pinConversation(convId, !conv?.isPinned),
                 });
             }
         });
+
+        // Add pinned conversations that aren't already shown as active tasks
+        const activeIds = new Set(activeTasks.map(t => t.conversationId));
+        for (const conv of conversations) {
+            if (conv.isPinned && !activeIds.has(conv.id)) {
+                activeTasks.push({
+                    conversationId: conv.id,
+                    title: conv.title || 'Untitled',
+                    reasoning: conv.preview || undefined,
+                    status: 'pinned',
+                    isPinned: true,
+                    onTogglePin: () => pinConversation(conv.id, false),
+                });
+            }
+        }
 
         return activeTasks;
     };
@@ -1101,6 +1118,21 @@ const App = () => {
             console.error("Failed to rename conversation", e);
         }
         return false;
+    };
+
+    const pinConversation = async (id: string, isPinned: boolean) => {
+        try {
+            const res = await apiFetch(`/api/conversations/${id}/pin`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ isPinned }),
+            });
+            if (res.ok) {
+                setConversations(prev => prev.map(c => c.id === id ? { ...c, isPinned } : c));
+            }
+        } catch (e) {
+            console.error("Failed to pin conversation", e);
+        }
     };
 
     const deleteConversation = async (id: string, e: React.MouseEvent) => {
@@ -1390,6 +1422,7 @@ const App = () => {
                     onDeleteConversation={deleteConversation}
                     onExportConversation={exportConversationAsATIF}
                     onRenameConversation={renameConversation}
+                    onPinConversation={pinConversation}
                     onGoToSkills={goToSkillsPage}
                     onGoToAutomations={goToAutomationsPage}
                     onGoToMcpTools={goToMcpToolsPage}

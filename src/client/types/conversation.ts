@@ -10,6 +10,7 @@ export type ConversationSummary = {
     updatedAt: string;
     isActive?: boolean;
     isAutomation?: boolean;
+    isPinned?: boolean;
     latestReasoning?: string;
     matchSnippet?: string;
 };

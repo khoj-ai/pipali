@@ -1,7 +1,7 @@
 // Sidebar with conversation list
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Loader2, MessageSquare, AlertCircle, CheckCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Hammer, Settings, User, LogOut, Shield, Sun, Moon, Monitor, Pencil } from 'lucide-react';
+import { Loader2, MessageSquare, AlertCircle, CheckCircle, Plus, MoreVertical, Download, Trash2, ChevronRight, Search, X, Zap, Clock, Hammer, Settings, User, LogOut, Shield, Sun, Moon, Monitor, Pencil, Pin, PinOff } from 'lucide-react';
 import type { ConversationSummary, ConversationState, ConfirmationRequest, AuthStatus, BillingAlert } from '../../types';
 import { useTheme } from '../../hooks';
 import { BillingAlertBanner } from '../billing';
@@ -55,6 +55,7 @@ interface SidebarProps {
     onDeleteConversation: (id: string, e: React.MouseEvent) => void;
     onExportConversation: (id: string) => void;
     onRenameConversation: (id: string, title: string) => Promise<boolean>;
+    onPinConversation: (id: string, isPinned: boolean) => void;
     onGoToSkills?: () => void;
     onGoToAutomations?: () => void;
     onGoToMcpTools?: () => void;
@@ -80,6 +81,7 @@ export function Sidebar({
     onDeleteConversation,
     onExportConversation,
     onRenameConversation,
+    onPinConversation,
     onGoToSkills,
     onGoToAutomations,
     onGoToMcpTools,
@@ -456,6 +458,21 @@ export function Sidebar({
                             >
                                 <Pencil size={14} />
                                 <span>Rename</span>
+                            </button>
+
+                            <button
+                                title={conv.isPinned ? 'Unpin from Home' : 'Pin to Home'}
+                                className="conversation-menu-item"
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    setOpenConversationMenuId(null);
+                                    setOpenMenuContext(null);
+                                    onPinConversation(conv.id, !conv.isPinned);
+                                }}
+                                role="menuitem"
+                            >
+                                {conv.isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+                                <span>{conv.isPinned ? 'Unpin' : 'Pin'}</span>
                             </button>
 
                             <button

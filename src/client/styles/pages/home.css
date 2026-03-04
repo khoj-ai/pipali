@@ -197,10 +197,52 @@
     margin-top: auto;
     padding-top: 8px;
     border-top: 1px solid var(--color-border-subtle);
+}
+
+/* Pinned task card */
+.task-status-icon.pinned {
     color: var(--color-text-muted);
 }
 
-.view-details {
-    font-size: 12px;
+.task-status-text.pinned {
     color: var(--color-text-muted);
+}
+
+.task-pin-btn {
+    background: none;
+    border: none;
+    padding: 4px;
+    cursor: pointer;
+    color: var(--color-text-muted);
+    border-radius: var(--radius-sm);
+    display: flex;
+    align-items: center;
+    transition: color var(--transition), background var(--transition);
+    opacity: 0;
+}
+
+.task-card:hover .task-pin-btn {
+    opacity: 1;
+}
+
+.task-pin-btn:hover {
+    color: var(--color-text);
+    background: var(--color-bg-muted);
+}
+
+.task-pin-btn .pin-off-icon {
+    display: none;
+}
+
+.task-pin-btn.active {
+    opacity: 1;
+    color: var(--color-accent);
+}
+
+.task-pin-btn.active:hover .pin-icon {
+    display: none;
+}
+
+.task-pin-btn.active:hover .pin-off-icon {
+    display: block;
 }

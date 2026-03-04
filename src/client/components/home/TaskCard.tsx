@@ -1,7 +1,7 @@
 // Individual task card for home page gallery
 
 import React from 'react';
-import { Loader2, AlertCircle, CheckCircle, ChevronRight, Globe, FileSearch, Pencil, Terminal, Wrench } from 'lucide-react';
+import { Loader2, AlertCircle, CheckCircle, Globe, FileSearch, Pencil, Terminal, Wrench, Pin, PinOff } from 'lucide-react';
 import type { ActiveTask, TaskStatus } from '../../types';
 import type { ToolCategory } from '../../utils/formatting';
 
@@ -20,6 +20,7 @@ const statusConfig: Record<TaskStatus, { label: string; className: string; Icon:
     needs_input: { label: 'Needs Input', className: 'needs-input', Icon: AlertCircle },
     completed: { label: 'Completed', className: 'completed', Icon: CheckCircle },
     stopped: { label: 'Stopped', className: 'stopped', Icon: AlertCircle },
+    pinned: { label: 'Pinned', className: 'pinned', Icon: Pin },
 };
 
 interface TaskCardProps {
@@ -58,11 +59,11 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
                         {CATEGORY_ORDER
                             .filter(cat => task.toolCategories![cat])
                             .map(cat => {
-                                const Icon = CATEGORY_ICONS[cat];
+                                const CatIcon = CATEGORY_ICONS[cat];
                                 return (
                                     <span key={cat} className="trail-group">
                                         <span className={`trail-icon trail-icon--${cat}`}>
-                                            <Icon size={10} />
+                                            <CatIcon size={10} />
                                         </span>
                                         <span className="trail-group-count">{task.toolCategories![cat]}</span>
                                     </span>
@@ -80,8 +81,20 @@ export function TaskCard({ task, onClick }: TaskCardProps) {
             )}
 
             <div className="task-card-footer">
-                <span className="view-details">View details</span>
-                <ChevronRight size={14} />
+                {task.onTogglePin && (
+                    <button
+                        className={`task-pin-btn ${task.isPinned ? 'active' : ''}`}
+                        onClick={(e) => {
+                            e.stopPropagation();
+                            task.onTogglePin!();
+                        }}
+                        aria-label={task.isPinned ? 'Unpin from home' : 'Pin to home'}
+                        title={task.isPinned ? 'Unpin from home' : 'Pin to home'}
+                    >
+                        <PinOff size={14} className="pin-off-icon" />
+                        <Pin size={14} className="pin-icon" />
+                    </button>
+                )}
             </div>
         </div>
     );

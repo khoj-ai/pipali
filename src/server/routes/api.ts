@@ -185,6 +185,7 @@ api.get('/conversations', async (c) => {
         updatedAt: Conversation.updatedAt,
         trajectory: Conversation.trajectory,
         automationId: Conversation.automationId,
+        isPinned: Conversation.isPinned,
     })
     .from(Conversation)
     .where(whereClause)
@@ -252,6 +253,7 @@ api.get('/conversations', async (c) => {
             updatedAt: conv.updatedAt,
             isActive,
             isAutomation: !!conv.automationId,
+            isPinned: conv.isPinned,
             latestReasoning,
             ...(matchSnippet !== undefined && { matchSnippet }),
         };
@@ -302,6 +304,23 @@ api.put('/conversations/:conversationId/title', async (c) => {
         await db.update(Automation).set({ name: automationName }).where(eq(Automation.id, conv.automationId));
     }
 
+    return c.json({ success: true });
+});
+
+// Toggle pin status for a conversation
+api.put('/conversations/:conversationId/pin', async (c) => {
+    const conversationId = c.req.param('conversationId');
+    try {
+        z.uuid().parse(conversationId);
+    } catch (e) {
+        return c.json({ error: 'Invalid conversation ID' }, 400);
+    }
+    const body = await c.req.json();
+    const isPinned = body.isPinned;
+    if (typeof isPinned !== 'boolean') {
+        return c.json({ error: 'isPinned must be a boolean' }, 400);
+    }
+    await db.update(Conversation).set({ isPinned }).where(eq(Conversation.id, conversationId));
     return c.json({ success: true });
 });
 

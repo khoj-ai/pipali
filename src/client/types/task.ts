@@ -2,7 +2,7 @@
 
 import type { ToolCategory } from '../utils/formatting';
 
-export type TaskStatus = 'running' | 'needs_input' | 'completed' | 'stopped';
+export type TaskStatus = 'running' | 'needs_input' | 'completed' | 'stopped' | 'pinned';
 
 export type ActiveTask = {
     conversationId: string;
@@ -10,4 +10,6 @@ export type ActiveTask = {
     reasoning?: string;      // Latest step/thought
     status: TaskStatus;
     toolCategories?: Partial<Record<ToolCategory, number>>;
+    isPinned?: boolean;
+    onTogglePin?: () => void;
 };
