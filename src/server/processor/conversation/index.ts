@@ -3,6 +3,7 @@ import { User, type ChatModelWithApi } from '../../db/schema';
 import { type ToolDefinition, type ChatMessage, type ResponseWithThought } from './conversation';
 import { generateChatmlMessagesWithContext } from './utils';
 import { sendMessageToGpt } from './openai';
+import { sendMessageViaChatCompletions } from './openai/chat-completions';
 import type { ATIFTrajectory } from './atif/atif.types';
 import { withTokenRefresh, PlatformAuthError } from '../../http/platform-fetch';
 import { createChildLogger } from '../../logger';
@@ -107,11 +108,19 @@ export async function sendMessageToModel(
 
     // For non-platform providers, route based on model type
     if (aiModelType === 'openai') {
+        // Determine API path: Responses API (OpenAI direct) vs Chat Completions (Ollama, LM Studio, etc.)
+        // The useResponsesApi flag on the ChatModel row controls this:
+        //   - true  → OpenAI Responses API (client.responses.stream)
+        //   - false → Chat Completions API (client.chat.completions.create)
+        const useResponsesApi = chatModelWithApi.chatModel.useResponsesApi;
+        const sendFn = useResponsesApi ? sendMessageToGpt : sendMessageViaChatCompletions;
+        log.info({ model: modelName, provider: aiModelApiName, useResponsesApi }, 'Routing to API');
+
         try {
-            const response = await sendMessageToGpt(
+            const response = await sendFn(
                 messages,
                 chatModelWithApi.chatModel.name,
-                chatModelWithApi.aiModelApi?.apiKey,
+                chatModelWithApi.aiModelApi?.apiKey ?? undefined,
                 chatModelWithApi.aiModelApi?.apiBaseUrl,
                 tools,
                 toolChoice,

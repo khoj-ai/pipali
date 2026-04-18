@@ -519,6 +519,185 @@ api.put('/user/model', zValidator('json', selectModelSchema), async (c) => {
     return c.json({ success: true, modelId });
 });
 
+// ---------------------------------------------------------------------------
+// Custom Model Provider Management (Ollama, LM Studio, vLLM, etc.)
+// ---------------------------------------------------------------------------
+
+const customModelSchema = z.object({
+    providerName: z.string().min(1).max(64),
+    baseUrl: z.string().url(),
+    apiKey: z.string().optional(),
+    modelName: z.string().min(1).max(128),
+    friendlyName: z.string().min(1).max(128).optional(),
+    visionEnabled: z.boolean().default(false),
+});
+
+// Register a custom/local model provider
+api.post('/models/custom', zValidator('json', customModelSchema), async (c) => {
+    const { providerName, baseUrl, apiKey, modelName, friendlyName, visionEnabled } = c.req.valid('json');
+
+    log.info({ providerName, baseUrl, modelName }, 'Registering custom model provider');
+
+    try {
+        // Check if provider with same name already exists
+        const [existingProvider] = await db.select().from(AiModelApi).where(eq(AiModelApi.name, providerName));
+        let providerId: number;
+
+        if (existingProvider) {
+            // Reuse existing provider — just add a new model under it
+            providerId = existingProvider.id;
+            log.info({ providerName }, 'Reusing existing provider');
+        } else {
+            // Create new provider
+            const [newProvider] = await db.insert(AiModelApi).values({
+                name: providerName,
+                apiKey: apiKey || null,
+                apiBaseUrl: baseUrl,
+            }).returning();
+
+            if (!newProvider) {
+                return c.json({ error: 'Failed to create provider' }, 500);
+            }
+            providerId = newProvider.id;
+        }
+
+        // Check if model already exists under this provider
+        const [existingModel] = await db.select().from(ChatModel)
+            .where(and(eq(ChatModel.name, modelName), eq(ChatModel.aiModelApiId, providerId)));
+
+        if (existingModel) {
+            return c.json({ error: `Model "${modelName}" already registered under "${providerName}"` }, 409);
+        }
+
+        // Create the chat model entry
+        // modelType = 'openai' because Ollama exposes an OpenAI-compatible API
+        // useResponsesApi = false to route through Chat Completions API instead of Responses API
+        const [newModel] = await db.insert(ChatModel).values({
+            name: modelName,
+            friendlyName: friendlyName || modelName,
+            modelType: 'openai',
+            visionEnabled: visionEnabled,
+            useResponsesApi: false,  // ← The key architectural switch
+            aiModelApiId: providerId,
+        }).returning();
+
+        log.info({ modelId: newModel?.id, modelName, providerName }, 'Custom model registered');
+
+        return c.json({
+            success: true,
+            model: {
+                id: newModel?.id,
+                name: modelName,
+                friendlyName: friendlyName || modelName,
+                providerName,
+                baseUrl,
+            },
+        });
+    } catch (error) {
+        log.error({ err: error }, 'Failed to register custom model');
+        return c.json({ error: error instanceof Error ? error.message : 'Failed to register model' }, 500);
+    }
+});
+
+// Delete a custom model
+api.delete('/models/custom/:id', async (c) => {
+    const modelId = parseInt(c.req.param('id'), 10);
+    if (isNaN(modelId)) {
+        return c.json({ error: 'Invalid model ID' }, 400);
+    }
+
+    try {
+        // Verify the model exists and is a custom (non-Responses-API) model
+        const [model] = await db.select().from(ChatModel).where(eq(ChatModel.id, modelId));
+        if (!model) {
+            return c.json({ error: 'Model not found' }, 404);
+        }
+
+        // Only allow deletion of custom models (useResponsesApi = false with a non-Pipali provider)
+        if (model.useResponsesApi) {
+            return c.json({ error: 'Cannot delete platform models' }, 403);
+        }
+
+        // Delete the model
+        await db.delete(ChatModel).where(eq(ChatModel.id, modelId));
+
+        // Clean up orphaned provider (if no other models reference it)
+        if (model.aiModelApiId) {
+            const remainingModels = await db.select({ id: ChatModel.id })
+                .from(ChatModel)
+                .where(eq(ChatModel.aiModelApiId, model.aiModelApiId));
+
+            if (remainingModels.length === 0) {
+                await db.delete(AiModelApi).where(eq(AiModelApi.id, model.aiModelApiId));
+                log.info({ providerId: model.aiModelApiId }, 'Cleaned up orphaned provider');
+            }
+        }
+
+        log.info({ modelId }, 'Custom model deleted');
+        return c.json({ success: true });
+    } catch (error) {
+        log.error({ err: error }, 'Failed to delete custom model');
+        return c.json({ error: 'Failed to delete model' }, 500);
+    }
+});
+
+// Auto-discover models from an Ollama (or OpenAI-compatible) server
+api.get('/models/discover', async (c) => {
+    const baseUrl = c.req.query('baseUrl');
+    if (!baseUrl) {
+        return c.json({ error: 'Missing baseUrl query parameter' }, 400);
+    }
+
+    log.info({ baseUrl }, 'Discovering models');
+
+    try {
+        // Try Ollama's native API first: GET /api/tags
+        const ollamaUrl = baseUrl.replace(/\/v1\/?$/, ''); // Strip /v1 suffix if present
+        const response = await fetch(`${ollamaUrl}/api/tags`, {
+            signal: AbortSignal.timeout(5000),
+        });
+
+        if (response.ok) {
+            const data = await response.json() as { models?: Array<{ name: string; size: number; modified_at: string; details?: { family: string; parameter_size: string } }> };
+            const models = (data.models || []).map(m => ({
+                name: m.name,
+                size: m.size,
+                modifiedAt: m.modified_at,
+                family: m.details?.family,
+                parameterSize: m.details?.parameter_size,
+            }));
+
+            log.info({ modelCount: models.length }, 'Discovered Ollama models');
+            return c.json({ provider: 'ollama', models });
+        }
+
+        // Fallback: Try OpenAI-compatible GET /v1/models
+        const openaiUrl = baseUrl.endsWith('/v1') ? baseUrl : `${baseUrl}/v1`;
+        const fallbackResponse = await fetch(`${openaiUrl}/models`, {
+            signal: AbortSignal.timeout(5000),
+        });
+
+        if (fallbackResponse.ok) {
+            const data = await fallbackResponse.json() as { data?: Array<{ id: string; owned_by?: string }> };
+            const models = (data.data || []).map(m => ({
+                name: m.id,
+                ownedBy: m.owned_by,
+            }));
+
+            log.info({ modelCount: models.length }, 'Discovered OpenAI-compatible models');
+            return c.json({ provider: 'openai-compatible', models });
+        }
+
+        return c.json({ error: 'Could not discover models. Make sure the server is running.' }, 502);
+    } catch (error: any) {
+        if (error?.name === 'AbortError' || error?.code === 'ECONNREFUSED') {
+            return c.json({ error: `Could not connect to ${baseUrl}. Make sure Ollama is running.` }, 502);
+        }
+        log.error({ err: error }, 'Model discovery failed');
+        return c.json({ error: 'Model discovery failed' }, 500);
+    }
+});
+
 // Get user context (bio, location, instructions)
 api.get('/user/context', async (c) => {
     try {

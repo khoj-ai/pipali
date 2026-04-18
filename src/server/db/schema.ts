@@ -137,7 +137,7 @@ export const Subscription = pgTable('subscription', {
 export const AiModelApi = pgTable('ai_model_api', {
     id: serial('id').primaryKey(),
     name: text('name').notNull(),
-    apiKey: text('api_key').notNull(),
+    apiKey: text('api_key'),
     apiBaseUrl: text('api_base_url'),
     ...dbBaseModel,
 });
