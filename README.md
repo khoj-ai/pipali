@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/khoj-ai-pipali-badge.png)](https://mseep.ai/app/khoj-ai-pipali)
+
 # <img src="https://pipali.ai/icons/pipali_64.png" width="28" height="28" alt="Pipali logo" /> Pipali (Beta)
 
 [![Download Pipali](https://img.shields.io/badge/Download_Pipali-%E2%86%93-1a1a1a?style=for-the-badge&labelColor=1a1a1a&color=525252)](https://pipali.ai/download)
