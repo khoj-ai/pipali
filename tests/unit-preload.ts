@@ -39,6 +39,7 @@ mock.module(dbSchemaModule, () => {
         McpServer: { $inferSelect: {} },
         Automation: { $inferSelect: {} },
         AutomationExecution: { $inferSelect: {} },
+        PendingConfirmation: { $inferSelect: {} },
         // Sandbox settings table with column references
         SandboxSettings: {
             id: 'id',

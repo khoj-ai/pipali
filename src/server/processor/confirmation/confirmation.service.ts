@@ -15,6 +15,7 @@ import {
     type ConfirmationResponseAttachment,
     CONFIRMATION_OPTIONS,
     createStandardConfirmationOptions,
+    isApprovalOptionId,
 } from './confirmation.types';
 
 /**
@@ -172,8 +173,7 @@ export function formatConfirmationAttachmentBlock(attachments?: ConfirmationResp
 export function processConfirmationResponse(
     response: ConfirmationResponse
 ): ConfirmationResult {
-    const approved = response.selectedOptionId === CONFIRMATION_OPTIONS.YES ||
-        response.selectedOptionId === CONFIRMATION_OPTIONS.YES_DONT_ASK;
+    const approved = isApprovalOptionId(response.selectedOptionId);
 
     const skipFutureConfirmations = response.selectedOptionId === CONFIRMATION_OPTIONS.YES_DONT_ASK;
 

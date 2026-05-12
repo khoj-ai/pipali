@@ -21,6 +21,7 @@ import {
     type TriggerConfig,
     type TriggerEventData,
 } from '../automation';
+import { validateConfirmationResponseSemantics } from '../processor/confirmation';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'automations' });
@@ -113,6 +114,11 @@ automations.post('/confirmations/:id/respond', zValidator('json', confirmationRe
     }
 
     const data = c.req.valid('json');
+
+    const semantic = validateConfirmationResponseSemantics(data);
+    if (!semantic.valid) {
+        return c.json({ error: semantic.reason }, 400);
+    }
 
     const success = await respondToConfirmation(id, {
         requestId: id,

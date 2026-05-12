@@ -117,7 +117,13 @@ export interface ConfirmationResponse {
     };
     /** Whether user chose to persist this preference */
     persistPreference?: boolean;
-    /** File attachments included with the user's response */
+    /**
+     * File attachments included with the user's response.
+     * Only valid on denial paths (NO / GUIDANCE) and on operation-specific
+     * options like ask_user's choices. Approval options (YES / YES_DONT_ASK)
+     * must not carry attachments — `validateConfirmationResponseSemantics`
+     * enforces this at the transport boundary.
+     */
     attachments?: ConfirmationResponseAttachment[];
     /** Timestamp of response */
     timestamp: string;
@@ -139,6 +145,34 @@ export const CONFIRMATION_OPTIONS = {
     NO: 'no',
     GUIDANCE: 'guidance',  // User provided alternative instructions (implicitly declines)
 } as const;
+
+/**
+ * True iff the option ID represents an approval of the operation.
+ * Used to enforce that attachments are not paired with approvals — the
+ * downstream prompt builder only surfaces attachments on the denial side.
+ */
+export function isApprovalOptionId(optionId: string): boolean {
+    return optionId === CONFIRMATION_OPTIONS.YES
+        || optionId === CONFIRMATION_OPTIONS.YES_DONT_ASK;
+}
+
+/**
+ * Validate semantic constraints on a confirmation response that the Zod
+ * shape schema cannot express (cross-field rules). Today this only enforces
+ * the attachments-on-approval rule.
+ */
+export function validateConfirmationResponseSemantics(
+    response: Pick<ConfirmationResponse, 'selectedOptionId' | 'attachments'>,
+): { valid: true } | { valid: false; reason: string } {
+    const attachments = response.attachments ?? [];
+    if (isApprovalOptionId(response.selectedOptionId) && attachments.length > 0) {
+        return {
+            valid: false,
+            reason: 'Attachments are not allowed on approval responses; attach files only with denial/guidance.',
+        };
+    }
+    return { valid: true };
+}
 
 /**
  * Create standard 3-option confirmation (Yes, Yes and don't ask again, No)

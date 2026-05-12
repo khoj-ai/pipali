@@ -13,7 +13,7 @@ import type { TriggerEventData } from '../types';
 import type { ConfirmationContext } from '../../processor/confirmation';
 import { createEmptyPreferences } from '../../processor/confirmation';
 import type { ConfirmationRequest, ConfirmationResponse } from '../../processor/confirmation/confirmation.types';
-import { createStandardConfirmationOptions } from '../../processor/confirmation/confirmation.types';
+import { createStandardConfirmationOptions, isApprovalOptionId } from '../../processor/confirmation/confirmation.types';
 import { getOrCreateBus } from '../../events/conversation-event-bus';
 import { executeRun } from '../../events/run-executor';
 import { createChildLogger } from '../../logger';
@@ -505,7 +505,7 @@ export async function respondToConfirmation(
     }
 
     // Determine status based on response
-    const isApproved = response.selectedOptionId === 'yes' || response.selectedOptionId === 'yes_dont_ask';
+    const isApproved = isApprovalOptionId(response.selectedOptionId);
     const hasGuidance = response.selectedOptionId === 'guidance';
     const confirmationStatus = isApproved || hasGuidance ? 'approved' : 'denied';
 
