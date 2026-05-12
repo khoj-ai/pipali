@@ -37,14 +37,14 @@ export const ForkCommandHandler: Command<ForkCommand> = {
         // Get user
         const user = await ctx.getUser();
         if (!user) {
-            ctx.sendError('User not found');
+            ctx.sendError('User not found', sourceConversationId, runId);
             return;
         }
 
         if (chatModelId !== undefined) {
             const selectedModel = await getChatModelById(chatModelId);
             if (!selectedModel) {
-                ctx.sendError('Selected chat model not found');
+                ctx.sendError('Selected chat model not found', sourceConversationId, runId);
                 return;
             }
         }

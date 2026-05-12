@@ -51,6 +51,38 @@ function send(ws: ServerWebSocket<WebSocketData>, conversationId: string, messag
     ws.send(JSON.stringify({ ...message, conversationId }));
 }
 
+/**
+ * Build a CommandContext from a WS connection.
+ *
+ * Exported so the sendError behavior can be exercised directly in unit tests
+ * without spinning up the full WS handler. The arguments are the bits of
+ * per-connection state each command needs.
+ */
+export function createCommandContext(params: {
+    ws: ServerWebSocket<WebSocketData>;
+    sessions: Map<string, Session>;
+    subscriptions: Map<string, () => void>;
+    getUser: () => Promise<typeof User.$inferSelect | null>;
+}) {
+    const { ws, sessions, subscriptions, getUser } = params;
+    return {
+        ws,
+        getSessions: () => sessions,
+        getUser,
+        send: (msg: Record<string, unknown>, conversationId: string) => send(ws, conversationId, msg),
+        sendError: (error: string, conversationId?: string, runId?: string) => {
+            log.warn({ error, conversationId, runId }, 'Command error');
+            if (conversationId && runId) {
+                send(ws, conversationId, { type: 'run_stopped', runId, reason: 'error', error });
+            }
+        },
+        addSubscription: (conversationId: string, unsubscribe: () => void) => {
+            subscriptions.get(conversationId)?.();
+            subscriptions.set(conversationId, unsubscribe);
+        },
+    };
+}
+
 async function handleClientMessage(
     ws: ServerWebSocket<WebSocketData>,
     rawMessage: string,
@@ -65,20 +97,12 @@ async function handleClientMessage(
         return;
     }
 
-    const ctx = {
+    const ctx = createCommandContext({
         ws,
-        getSessions: () => connCtx.sessions,
+        sessions: connCtx.sessions,
+        subscriptions: connCtx.subscriptions,
         getUser,
-        send: (msg: Record<string, unknown>, conversationId: string) => send(ws, conversationId, msg),
-        sendError: (error: string, conversationId?: string) => {
-            log.warn({ error, conversationId }, 'Command error');
-        },
-        addSubscription: (conversationId: string, unsubscribe: () => void) => {
-            // Clean up any existing subscription for this conversation
-            connCtx.subscriptions.get(conversationId)?.();
-            connCtx.subscriptions.set(conversationId, unsubscribe);
-        },
-    };
+    });
 
     switch (message.type) {
         case 'message':

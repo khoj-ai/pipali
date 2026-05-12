@@ -31,8 +31,14 @@ export interface CommandContext {
     getUser: () => Promise<typeof User.$inferSelect | null>;
     /** Send message to client */
     send: (message: Record<string, unknown>, conversationId: string) => void;
-    /** Send error to client */
-    sendError: (error: string, conversationId?: string) => void;
+    /**
+     * Send error to client.
+     *
+     * When both `conversationId` and `runId` are provided, a
+     * `run_stopped { reason: 'error' }` frame is emitted so the client can
+     * clear its optimistic state. Otherwise the error is only logged.
+     */
+    sendError: (error: string, conversationId?: string, runId?: string) => void;
     /** Track a bus subscription for cleanup on disconnect */
     addSubscription: (conversationId: string, unsubscribe: () => void) => void;
 }

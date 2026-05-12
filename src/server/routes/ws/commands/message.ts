@@ -51,7 +51,7 @@ export const MessageCommandHandler: Command<MessageCommand> = {
                 if (chatModelId !== undefined) {
                     const selectedModel = await getChatModelById(chatModelId);
                     if (!selectedModel) {
-                        ctx.sendError('Selected chat model not found', conversationId);
+                        ctx.sendError('Selected chat model not found', conversationId, runId);
                         return;
                     }
                     await db.update(Conversation).set({ chatModelId }).where(eq(Conversation.id, conversationId));
@@ -75,7 +75,7 @@ export const MessageCommandHandler: Command<MessageCommand> = {
         // No active run — start a new one
         const user = await ctx.getUser();
         if (!user) {
-            ctx.sendError('User not found');
+            ctx.sendError('User not found', conversationId, runId);
             return;
         }
 
@@ -89,7 +89,7 @@ export const MessageCommandHandler: Command<MessageCommand> = {
             if (chatModelId !== undefined) {
                 chatModelWithApi = await getChatModelById(chatModelId);
                 if (!chatModelWithApi) {
-                    ctx.sendError('Selected chat model not found', conversationId);
+                    ctx.sendError('Selected chat model not found', conversationId, runId);
                     return;
                 }
                 if (conversation) {
@@ -110,7 +110,7 @@ export const MessageCommandHandler: Command<MessageCommand> = {
             if (chatModelId !== undefined) {
                 chatModelWithApi = await getChatModelById(chatModelId);
                 if (!chatModelWithApi) {
-                    ctx.sendError('Selected chat model not found');
+                    ctx.sendError('Selected chat model not found', undefined, runId);
                     return;
                 }
             } else {
@@ -135,7 +135,7 @@ export const MessageCommandHandler: Command<MessageCommand> = {
         }
 
         if (!conversation) {
-            ctx.sendError('Failed to create or find conversation');
+            ctx.sendError('Failed to create or find conversation', conversationId, runId);
             return;
         }
 
