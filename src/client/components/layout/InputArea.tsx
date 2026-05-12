@@ -9,6 +9,7 @@ import { formatFileSize } from '../../utils/formatting';
 import { localImageSrc } from '../../utils/markdown';
 import { getApiBaseUrl } from '../../utils/api';
 import { isTauri } from '../../utils/tauri';
+import { resolveInputSubmitAction } from '../../utils/input-submit';
 import { useTranslation } from 'react-i18next';
 
 interface InputAreaProps {
@@ -129,12 +130,19 @@ export function InputArea({
 
             <div className="input-container">
                 <form onSubmit={(e) => {
-                    // When confirmation is pending, send as guidance instead of new message
-                    // This handles mobile where users tap the send button instead of pressing Enter
-                    if (pendingConfirmation && (input.trim() || hasFiles)) {
+                    const action = resolveInputSubmitAction({
+                        pendingConfirmation: !!pendingConfirmation,
+                        inputTrimmed: input.trim(),
+                        hasFiles,
+                    });
+                    if (action.kind === 'guidance') {
                         e.preventDefault();
-                        onConfirmationRespond('guidance', input.trim() || undefined);
+                        onConfirmationRespond('guidance', action.text);
                         onInputChange('');
+                        return;
+                    }
+                    if (action.kind === 'consume') {
+                        e.preventDefault();
                         return;
                     }
                     onSubmit(e);
@@ -182,12 +190,25 @@ export function InputArea({
                             }
                         }}
                         onKeyDown={(e) => {
-                            // When confirmation is pending, Enter sends guidance
-                            if (pendingConfirmation && e.key === 'Enter' && !e.shiftKey && (input.trim() || hasFiles)) {
-                                e.preventDefault();
-                                onConfirmationRespond('guidance', input.trim() || undefined);
-                                onInputChange('');
-                                return;
+                            // When confirmation is pending, Enter resolves it
+                            // (guidance + text/files, or a no-op while we wait
+                            // for the user to type or click an option button).
+                            if (pendingConfirmation && e.key === 'Enter' && !e.shiftKey) {
+                                const action = resolveInputSubmitAction({
+                                    pendingConfirmation: true,
+                                    inputTrimmed: input.trim(),
+                                    hasFiles,
+                                });
+                                if (action.kind === 'guidance') {
+                                    e.preventDefault();
+                                    onConfirmationRespond('guidance', action.text);
+                                    onInputChange('');
+                                    return;
+                                }
+                                if (action.kind === 'consume') {
+                                    e.preventDefault();
+                                    return;
+                                }
                             }
                             // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux): background task
                             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !e.shiftKey) {
