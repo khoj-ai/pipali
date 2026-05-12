@@ -10,6 +10,7 @@ import type { ClientMessage, ConfirmationResponseCommand } from '../message-type
 import { getBus } from '../../../events/conversation-event-bus';
 import { handleConfirmationResponse } from '../confirmation-manager';
 import { createChildLogger } from '../../../logger';
+import { confirmationResponseSchema } from '../../../processor/confirmation';
 
 const log = createChildLogger({ component: 'confirmation-response' });
 
@@ -19,7 +20,19 @@ export const ConfirmationResponseHandler: Command<ConfirmationResponseCommand> =
     },
 
     async execute(ctx: CommandContext, message: ConfirmationResponseCommand): Promise<void> {
-        const { conversationId, runId, data: response } = message;
+        const { conversationId, runId, data: rawResponse } = message;
+
+        const parsed = confirmationResponseSchema.safeParse(rawResponse);
+        if (!parsed.success) {
+            log.warn({
+                conversationId,
+                runId,
+                issues: parsed.error.issues,
+            }, 'Confirmation response failed schema validation');
+            ctx.sendError('Invalid confirmation response payload', conversationId);
+            return;
+        }
+        const response = parsed.data;
 
         const bus = getBus(conversationId);
         if (!bus?.activeRun) {

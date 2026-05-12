@@ -7,3 +7,4 @@
 
 export * from './confirmation.types';
 export * from './confirmation.service';
+export * from './confirmation.schema';

@@ -21,6 +21,7 @@ import {
     type TriggerConfig,
     type TriggerEventData,
 } from '../automation';
+import { confirmationResponseBodySchema } from '../processor/confirmation';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'automations' });
@@ -58,15 +59,7 @@ const createAutomationSchema = z.object({
     maxExecutionsPerHour: z.number().min(1).optional(),
 });
 
-const confirmationResponseSchema = z.object({
-    selectedOptionId: z.string(),
-    persistPreference: z.boolean().optional(),
-    guidance: z.string().optional(),
-    attachments: z.array(z.object({
-        path: z.string(),
-        name: z.string().optional(),
-    })).optional(),
-});
+const confirmationResponseSchema = confirmationResponseBodySchema;
 
 // ============== STATIC ROUTES (must come before /:id routes) ==============
 
