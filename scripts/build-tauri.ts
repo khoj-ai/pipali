@@ -575,6 +575,178 @@ async function cleanupTemp() {
     await fs.rm(path.join(DIST_DIR, "_temp_uv"), { recursive: true, force: true });
 }
 
+/**
+ * Pre-stage a patched linuxdeploy-plugin-gtk.sh in Tauri's tools cache.
+ *
+ * Tauri 2's AppImage bundler unconditionally invokes `linuxdeploy --plugin gtk`
+ * (see tauri-apps/tauri crates/tauri-bundler/src/bundle/linux/appimage/linuxdeploy.rs)
+ * and downloads the upstream GTK plugin from tauri-apps/linuxdeploy-plugin-gtk if
+ * none is cached. The upstream version has no protection for fully-static
+ * binaries — and uv (musl-static Rust) lives in AppDir/usr/bin/. Linuxdeploy
+ * crashes with std::runtime_error when `ldd uv` exits non-zero, surfacing as
+ * `failed to run linuxdeploy` (khoj-ai/pipali#1). Our vendored plugin adds an
+ * `ldd`-based shelter that moves static binaries out before linuxdeploy scans
+ * usr/bin/, then restores them.
+ *
+ * Note: this protects against the *build-time* crash. The runtime bun SIGSEGV
+ * from rpath rewriting is fixed separately by repackAppImageWithPristineSidecars
+ * below.
+ */
+async function installPatchedGtkPlugin() {
+    const cacheDir = path.join(process.env.HOME || "/root", ".cache", "tauri");
+    await fs.mkdir(cacheDir, { recursive: true });
+    const src = path.join(ROOT_DIR, "scripts", "linux", "linuxdeploy-plugin-gtk.sh");
+    const dest = path.join(cacheDir, "linuxdeploy-plugin-gtk.sh");
+    await fs.copyFile(src, dest);
+    await fs.chmod(dest, 0o755);
+    console.log("✅ Installed patched GTK plugin (prevents linuxdeploy crash on static uv)");
+}
+
+/**
+ * Repack the produced AppImage with pristine sidecar binaries (bun, uv, uvx).
+ *
+ * Even with the GTK plugin patch above keeping linuxdeploy from crashing, the
+ * bundle linuxdeploy produces still rewrites every AppDir/usr/bin/* binary's
+ * rpath to $ORIGIN and bundles its library deps. Bun is dynamically linked, so
+ * the rewritten rpath makes it load the wrong libc at runtime — sidecar
+ * SIGSEGVs on launch, app hangs on the splash screen (khoj-ai/pipali#14).
+ * uv/uvx get the same treatment silently. The GTK plugin's shelter does not
+ * save bun: it only moves binaries where `ldd` exits non-zero (fully static)
+ * out of linuxdeploy's path, and bun is dynamically linked, so `ldd` succeeds
+ * and bun is never sheltered.
+ *
+ * Fix: after Tauri produces the AppImage, extract it, overwrite each sidecar
+ * with the pristine source binary from src-tauri/binaries/, repack with
+ * appimagetool, and verify bun actually runs before declaring success. If the
+ * original AppImage was signed by Tauri (a sibling .sig file exists), re-sign
+ * the repacked AppImage with the same key so the auto-updater accepts it.
+ */
+const APPIMAGETOOL_ARCH: Partial<Record<Platform, string>> = {
+    "linux-x64": "x86_64",
+    "linux-arm64": "aarch64",
+};
+
+async function repackAppImageWithPristineSidecars(debug: boolean, platform: Platform) {
+    const targetTriple = TARGET_TRIPLE_MAP[platform];
+    const appimagetoolArch = APPIMAGETOOL_ARCH[platform];
+    if (!appimagetoolArch) throw new Error(`No appimagetool arch mapping for ${platform}`);
+
+    const buildType = debug ? "debug" : "release";
+    const appimageDir = path.join(ROOT_DIR, "src-tauri", "target", buildType, "bundle", "appimage");
+    const entries = await fs.readdir(appimageDir);
+    const appimageName = entries.find((e) => e.endsWith(".AppImage"));
+    if (!appimageName) throw new Error(`No .AppImage found in ${appimageDir}`);
+    const appimagePath = path.join(appimageDir, appimageName);
+    const sigPath = `${appimagePath}.sig`;
+
+    // Captured before repack: a sibling .sig means Tauri signed the original,
+    // so we must re-sign the repacked AppImage to keep the updater signature
+    // valid. Checking for the file is more reliable than guessing from env/flags.
+    const originalWasSigned = await fs
+        .access(sigPath)
+        .then(() => true)
+        .catch(() => false);
+
+    console.log("");
+    console.log("🔧 Repacking AppImage with pristine sidecar binaries...");
+    console.log(`   AppImage: ${appimagePath}`);
+
+    // Cache appimagetool next to Tauri's other build tooling
+    const cacheDir = path.join(process.env.HOME || "/root", ".cache", "tauri");
+    await fs.mkdir(cacheDir, { recursive: true });
+    const appimagetool = path.join(cacheDir, `appimagetool-${appimagetoolArch}.AppImage`);
+    try {
+        await fs.access(appimagetool);
+    } catch {
+        const url = `https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${appimagetoolArch}.AppImage`;
+        console.log(`   Downloading appimagetool from ${url}`);
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error(`Failed to download appimagetool: HTTP ${resp.status}`);
+        await Bun.write(appimagetool, resp);
+        await fs.chmod(appimagetool, 0o755);
+    }
+
+    const scratch = await fs.mkdtemp(path.join(appimageDir, "repack-"));
+    const extractRoot = path.join(scratch, "squashfs-root");
+
+    const extractProc = Bun.spawn([appimagePath, "--appimage-extract"], {
+        cwd: scratch,
+        stdout: "ignore",
+        stderr: "inherit",
+    });
+    if ((await extractProc.exited) !== 0) throw new Error("AppImage extraction failed");
+
+    const sidecars = ["bun", "uv", "uvx"];
+    for (const name of sidecars) {
+        const src = path.join(ROOT_DIR, "src-tauri", "binaries", `${name}-${targetTriple}`);
+        const dst = path.join(extractRoot, "usr", "bin", name);
+        await fs.copyFile(src, dst);
+        await fs.chmod(dst, 0o755);
+        console.log(`   Restored pristine ${name}`);
+    }
+
+    // Without this verify step the build could regress to silently shipping a
+    // corrupted bun again — the original symptom only surfaces at app launch.
+    const verifyProc = Bun.spawn([path.join(extractRoot, "usr", "bin", "bun"), "--version"], {
+        stdout: "pipe",
+        stderr: "pipe",
+    });
+    const verifyOut = (await new Response(verifyProc.stdout).text()).trim();
+    if ((await verifyProc.exited) !== 0) throw new Error("Pristine bun failed to run after restore");
+    console.log(`   ✓ Verified bun --version: ${verifyOut}`);
+
+    const repackedTmp = path.join(scratch, appimageName);
+    const repackProc = Bun.spawn([appimagetool, extractRoot, repackedTmp], {
+        env: { ...process.env, ARCH: appimagetoolArch },
+        stdout: "inherit",
+        stderr: "inherit",
+    });
+    if ((await repackProc.exited) !== 0) throw new Error("AppImage repack failed");
+    await fs.rename(repackedTmp, appimagePath);
+    await fs.chmod(appimagePath, 0o755);
+
+    // The original .sig (if any) is now stale — repacked bytes won't verify
+    // against it. Drop it; we may write a fresh one below.
+    await fs.rm(sigPath, { force: true });
+
+    if (originalWasSigned) {
+        // The build env supplied a signing key (Tauri produced a .sig), so the
+        // auto-updater relies on a valid signature. Re-sign the repacked AppImage.
+        // The workflow exports TAURI_SIGNING_PRIVATE_KEY{,_PASSWORD} (the Tauri 2
+        // build-time names), but the `tauri signer sign` subcommand reads
+        // TAURI_PRIVATE_KEY{,_PASSWORD} (the legacy names). Bridge them in the
+        // child env rather than passing the key on argv, so the secret doesn't
+        // leak into process listings.
+        const signingKey = process.env.TAURI_SIGNING_PRIVATE_KEY;
+        if (!signingKey) {
+            throw new Error(
+                "Original AppImage was signed but TAURI_SIGNING_PRIVATE_KEY is unset; " +
+                "cannot re-sign repacked AppImage and auto-updates would fail."
+            );
+        }
+        const signEnv: Record<string, string> = {
+            ...(process.env as Record<string, string>),
+            TAURI_PRIVATE_KEY: signingKey,
+        };
+        const signingPassword = process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD;
+        if (signingPassword) signEnv.TAURI_PRIVATE_KEY_PASSWORD = signingPassword;
+
+        console.log("   Re-signing repacked AppImage...");
+        const signProc = Bun.spawn(["bunx", "tauri", "signer", "sign", appimagePath], {
+            cwd: ROOT_DIR,
+            env: signEnv,
+            stdout: "inherit",
+            stderr: "inherit",
+        });
+        if ((await signProc.exited) !== 0) throw new Error("Re-signing AppImage failed");
+        await fs.access(sigPath); // signer must have produced a fresh .sig
+        console.log("   ✓ Re-signed AppImage");
+    }
+
+    await fs.rm(scratch, { recursive: true, force: true });
+    console.log("✅ AppImage repacked with pristine sidecars");
+}
+
 async function buildTauri(debug: boolean, platform: Platform, disableUpdaterArtifacts: boolean) {
     console.log(`🚀 Building Tauri app (${debug ? "debug" : "release"})...`);
 
@@ -591,19 +763,8 @@ async function buildTauri(debug: boolean, platform: Platform, disableUpdaterArti
         bundles = ["appimage"];
     }
 
-    // On Linux, pre-place a patched GTK plugin in Tauri's cache so it uses ours
-    // instead of downloading the upstream version. The patch moves statically-linked
-    // binaries (like bun) out of AppDir/usr/bin/ before linuxdeploy scans them,
-    // avoiding a crash caused by `ldd` failing on static binaries.
-    // See: scripts/linux/linuxdeploy-plugin-gtk.sh for details.
     if (platform.startsWith("linux")) {
-        const cacheDir = path.join(process.env.HOME || "/root", ".cache", "tauri");
-        await fs.mkdir(cacheDir, { recursive: true });
-        const src = path.join(ROOT_DIR, "scripts", "linux", "linuxdeploy-plugin-gtk.sh");
-        const dest = path.join(cacheDir, "linuxdeploy-plugin-gtk.sh");
-        await fs.copyFile(src, dest);
-        await fs.chmod(dest, 0o755);
-        console.log("✅ Installed patched GTK plugin to handle static binaries");
+        await installPatchedGtkPlugin();
     }
 
     const args = ["tauri", "build", "--bundles", bundles.join(",")];
@@ -623,6 +784,10 @@ async function buildTauri(debug: boolean, platform: Platform, disableUpdaterArti
     const exitCode = await proc.exited;
     if (exitCode !== 0) {
         throw new Error(`Tauri build failed with exit code ${exitCode}`);
+    }
+
+    if (platform.startsWith("linux")) {
+        await repackAppImageWithPristineSidecars(debug, platform);
     }
 
     // Re-sign macOS debug builds with correct bundle identifier and entitlements.
