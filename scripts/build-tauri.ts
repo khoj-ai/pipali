@@ -607,6 +607,63 @@ async function installPatchedGtkPlugin() {
 }
 
 /**
+ * Strip the build host's Wayland core libraries from the extracted AppDir.
+ *
+ * The linuxdeploy build Tauri's bundler uses deploys libwayland-client and
+ * libwayland-server from the build host into AppDir/usr/lib. At runtime the
+ * AppImage's AppRun wrapper prepends AppDir/usr/lib to LD_LIBRARY_PATH for the
+ * whole process tree, so the host's Mesa libEGL — which links both libraries
+ * and is correctly NOT bundled, like libGL/libgbm/libdrm — resolves those
+ * SONAMEs to the bundled copies instead of the host's own. When the target
+ * distro's Mesa was built against a newer libwayland than the build host's
+ * (wayland 1.20 on our ubuntu-22.04 CI), symbol resolution fails, no EGL
+ * display can be created, and WebKitWebProcess aborts with
+ * `Could not create default EGL display: EGL_BAD_PARAMETER` — a blank white
+ * window while the backend keeps running (khoj-ai/pipali#21). The canonical
+ * AppImage excludelist mandates leaving libwayland-client system-provided:
+ * "New version of Mesa has some dependency issues with libwayland-client if
+ * it is bundled". Any host that can render the app already ships both libs,
+ * because host Mesa's libEGL itself links them.
+ *
+ * libwayland-cursor and libwayland-egl deliberately stay bundled: the bundled
+ * libgdk-3 needs them at load time (stripping them would add a new host
+ * package requirement), and they only call the wayland client library's
+ * stable, additive public ABI, so they work fine against the host's copy.
+ */
+const BUILD_HOST_WAYLAND_LIB_PREFIXES = ["libwayland-client.so", "libwayland-server.so"];
+
+async function stripBundledWaylandLibs(extractRoot: string) {
+    const removed: string[] = [];
+
+    async function walk(dir: string) {
+        // Directory may not exist in this AppDir layout (e.g. usr/lib64)
+        const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => null);
+        if (!entries) return;
+        for (const entry of entries) {
+            const entryPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                // usr/lib/Pipali holds the app's own resources, never linuxdeploy libs
+                if (entry.name === "Pipali") continue;
+                await walk(entryPath);
+            } else if (BUILD_HOST_WAYLAND_LIB_PREFIXES.some((prefix) => entry.name.startsWith(prefix))) {
+                await fs.rm(entryPath, { force: true });
+                removed.push(path.relative(extractRoot, entryPath));
+            }
+        }
+    }
+
+    await walk(path.join(extractRoot, "usr", "lib"));
+    await walk(path.join(extractRoot, "usr", "lib64"));
+
+    if (removed.length === 0) {
+        console.log("   No bundled Wayland core libraries found to strip");
+    }
+    for (const lib of removed) {
+        console.log(`   Stripped bundled ${lib} (host provides it, see khoj-ai/pipali#21)`);
+    }
+}
+
+/**
  * Repack the produced AppImage with pristine sidecar binaries (bun, uv, uvx).
  *
  * Even with the GTK plugin patch above keeping linuxdeploy from crashing, the
@@ -688,6 +745,8 @@ async function repackAppImageWithPristineSidecars(debug: boolean, platform: Plat
         await fs.chmod(dst, 0o755);
         console.log(`   Restored pristine ${name}`);
     }
+
+    await stripBundledWaylandLibs(extractRoot);
 
     // Without this verify step the build could regress to silently shipping a
     // corrupted bun again — the original symptom only surfaces at app launch.
