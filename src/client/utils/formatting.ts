@@ -1,6 +1,6 @@
 // Formatting utilities for tool names, arguments, and display
 
-import { CONVERSATION_HEADER } from '../../shared';
+import { CONVERSATION_HEADER, PIPALI_MEMORY_RELATIVE_DIR } from '../../shared';
 import { resolveUidLabel } from './snapshotParser';
 
 /** Format bytes to a human-readable file size string. */
@@ -80,13 +80,30 @@ export function formatToolArgs(toolName: string, args: any): string {
     }
 }
 
-/**
- * Extract filename from path
- */
+/** Normalize path separators for platform-independent display parsing. */
+function normalizePathSeparators(path: string): string {
+    return path.replace(/\\/g, '/');
+}
+
+/** Extract filename from path. */
 export function getFileName(path: string): string {
     if (!path) return '';
-    const parts = path.split('/');
+    const parts = normalizePathSeparators(path).split('/');
     return parts[parts.length - 1] || path;
+}
+
+const MEMORY_FILE_TOOLS = new Set(['view_file', 'edit_file', 'write_file']);
+
+/** Whether a file tool is operating on Pipali's persistent memory store. */
+function isMemoryFileToolCall(toolName: string, args: any): boolean {
+    if (!MEMORY_FILE_TOOLS.has(toolName) || !args || typeof args !== 'object') return false;
+
+    const filePath = toolName === 'view_file' ? args.path : args.file_path;
+    if (typeof filePath !== 'string') return false;
+
+    const normalized = normalizePathSeparators(filePath).replace(/\/+/g, '/');
+    return normalized.endsWith('.md')
+        && `/${normalized}`.includes(`/${PIPALI_MEMORY_RELATIVE_DIR}/`);
 }
 
 /**
@@ -267,7 +284,7 @@ export interface DelegationToolText {
  * Returns [basename, folder] where folder has ~/ prefix removed.
  */
 function splitPath(fullPath: string): [string, string] {
-    const shortened = shortenHomePath(fullPath);
+    const shortened = shortenHomePath(normalizePathSeparators(fullPath));
     const lastSlash = shortened.lastIndexOf('/');
     if (lastSlash <= 0) return [shortened, ''];
     const basename = shortened.slice(lastSlash + 1);
@@ -302,13 +319,19 @@ export function formatToolArgsRich(
                 const limitStr = args.limit ? `${args.offset + args.limit}` : '';
                 text += ` (lines ${[offsetStr, limitStr].filter(Boolean).join('-')})`;
             }
-            return { text, secondary: folder ? `in ${folder}` : undefined, url: `file://${args.path}`, hoverText: args.path };
+            const secondary = isMemoryFileToolCall(toolName, args)
+                ? 'in memories'
+                : folder ? `in ${folder}` : undefined;
+            return { text, secondary, url: `file://${args.path}`, hoverText: args.path };
         }
         case 'edit_file':
         case 'write_file': {
             if (!args.file_path) return null;
             const [basename, folder] = splitPath(args.file_path);
-            return { text: basename, secondary: folder ? `in ${folder}` : undefined, url: `file://${args.file_path}`, hoverText: args.file_path };
+            const secondary = isMemoryFileToolCall(toolName, args)
+                ? 'in memories'
+                : folder ? `in ${folder}` : undefined;
+            return { text: basename, secondary, url: `file://${args.file_path}`, hoverText: args.file_path };
         }
         case 'list_files': {
             if (!args.path) return null;

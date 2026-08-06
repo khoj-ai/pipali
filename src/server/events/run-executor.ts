@@ -15,6 +15,7 @@ import { PlatformAuthError } from '../http/platform-fetch';
 import { atifConversationService, type ConversationRole } from '../processor/conversation/atif/atif.service';
 import { buildSystemPrompt } from '../processor/director';
 import { loadUserContext } from '../user-context';
+import { loadCatalogue } from '../memory';
 import { isFirstRunEasterEgg, maxIterations as defaultMaxIterations } from '../utils';
 import { setSessionActive, setSessionInactive, updateSessionReasoning } from '../sessions';
 import { createConfirmationCallback } from '../routes/ws/confirmation-manager';
@@ -82,6 +83,7 @@ function ensureUniqueRunId(
 async function ensureSystemPromptPersisted(
     conversationId: string,
     userId: number,
+    conversationRole: ConversationRole,
     userMessage?: string,
 ): Promise<string | undefined> {
     const conversation = await atifConversationService.getConversation(conversationId);
@@ -107,6 +109,9 @@ async function ensureSystemPromptPersisted(
         userContext: userContext.instructions,
         provideUpdatesPreamble,
         isFirstEverConversation,
+        conversationRole,
+        // Only reached for a conversation without a system prompt, so this is its baseline
+        memoryCatalogue: await loadCatalogue(),
         now,
     });
 
@@ -186,7 +191,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
 
         let systemPromptOverride: string | undefined;
         try {
-            systemPromptOverride = await ensureSystemPromptPersisted(conversationId, user.id, userMessage);
+            systemPromptOverride = await ensureSystemPromptPersisted(conversationId, user.id, conversationRole, userMessage);
         } catch (error) {
             log.error({ err: error, conversationId }, 'Failed to persist system prompt');
         }

@@ -9,6 +9,7 @@ import { initializeDatabase } from "./init";
 import { getMigrationsFolder } from "./utils";
 import { loadSkills, installBuiltinSkills } from "./skills";
 import { initializeUserContext } from "./user-context";
+import { initializeMemory } from "./memory";
 import { handleChatUpgrade, websocketHandler, type WebSocketData } from "./routes/ws";
 import {
     IS_COMPILED_BINARY,
@@ -247,6 +248,9 @@ async function main() {
     }
     await initializeUserContext(userInfo);
 
+    // Create the memory directory so the agent can write memories without checking first
+    await initializeMemory();
+
     // Initialize sandbox runtime (for secure shell command execution)
     await initializeSandbox();
 
@@ -283,86 +287,86 @@ async function main() {
         log.info("Skipping frontend build (bundled server resources).");
     }
 
-  // Disable development mode (hot reload) in test mode or compiled binary
-  // This prevents Bun from restarting the server when files change during tests
-  const isDevelopmentMode = !IS_COMPILED_BINARY && process.env.PIPALI_TEST_MODE !== 'true';
+    // Disable development mode (hot reload) in test mode or compiled binary
+    // This prevents Bun from restarting the server when files change during tests
+    const isDevelopmentMode = !IS_COMPILED_BINARY && process.env.PIPALI_TEST_MODE !== 'true';
 
-  // Paths for quieter logging (e.g frequent polling endpoints)
-  const QUIETER_PATHS = new Set(['/api/automations/confirmations/pending']);
+    // Paths for quieter logging (e.g frequent polling endpoints)
+    const QUIETER_PATHS = new Set(['/api/automations/confirmations/pending']);
 
-  const server = Bun.serve<WebSocketData, any>({
-    async fetch(req, server) {
-        const url = new URL(req.url);
-        if (QUIETER_PATHS.has(url.pathname)) {
-            log.debug(`[${req.method}] ${url.pathname}`);
-        } else {
-            log.info(`[${req.method}] ${url.pathname}`);
-        }
+    const server = Bun.serve<WebSocketData, any>({
+        async fetch(req, server) {
+            const url = new URL(req.url);
+            if (QUIETER_PATHS.has(url.pathname)) {
+                log.debug(`[${req.method}] ${url.pathname}`);
+            } else {
+                log.info(`[${req.method}] ${url.pathname}`);
+            }
 
-        // WebSocket
-        if (url.pathname === "/ws/chat") {
-            return handleChatUpgrade(req, server);
-        }
+            // WebSocket
+            if (url.pathname === "/ws/chat") {
+                return handleChatUpgrade(req, server);
+            }
 
-        // API
-        if (url.pathname.startsWith("/api")) {
-            const res = await api.fetch(req, server);
+            // API
+            if (url.pathname.startsWith("/api")) {
+                const res = await api.fetch(req, server);
+                return res;
+            }
+
+            // Static and frontend routes
+            const res = await app.fetch(req, server);
             return res;
-        }
+        },
+        websocket: websocketHandler,
+        hostname: config.host,
+        port: config.port,
+        development: isDevelopmentMode,
+    });
 
-        // Static and frontend routes
-        const res = await app.fetch(req, server);
-        return res;
-    },
-    websocket: websocketHandler,
-    hostname: config.host,
-    port: config.port,
-    development: isDevelopmentMode,
-  });
+    setServer(server);
 
-  setServer(server);
+    log.info(`Server listening on http://${config.host}:${server.port}`);
 
-  log.info(`Server listening on http://${config.host}:${server.port}`);
-
-  // Log auth status (authentication is now handled via the frontend login page)
-  if (!config.anon && !alreadyAuthenticated) {
-      log.info('🔐 Authentication required - sign in via the web interface');
-      log.info(`   Platform: ${config.platformUrl}`);
-  }
-
-  // Graceful shutdown handlers to prevent database corruption
-  let shutdownStarted = false;
-  const shutdown = async (signal: string) => {
-    if (shutdownStarted) return;
-    shutdownStarted = true;
-
-    log.info(`\nReceived ${signal}, shutting down gracefully...`);
-
-    const forceExitTimer = setTimeout(() => {
-      log.error('Graceful shutdown timed out, forcing exit.');
-      process.exit(1);
-    }, 8_000);
-
-    try {
-      server.stop();
-      killAllBackgroundProcesses();
-      await stopAutomationSystem();
-      stopMcpRetrySweep();
-      await closeMcpClients();
-      await shutdownSandbox();
-      await shutdownPlatformTransport();
-      await closeDatabase();
-      log.info('Shutdown complete.');
-      process.exit(0);
-    } finally {
-      clearTimeout(forceExitTimer);
+    // Log auth status (authentication is now handled via the frontend login page)
+    if (!config.anon && !alreadyAuthenticated) {
+        log.info('🔐 Authentication required - sign in via the web interface');
+        log.info(`   Platform: ${config.platformUrl}`);
     }
-  };
 
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGHUP', () => void shutdown('SIGHUP'));
-  process.on('SIGQUIT', () => void shutdown('SIGQUIT'));
+    // Graceful shutdown handlers to prevent database corruption
+    let shutdownStarted = false;
+    const shutdown = async (signal: string) => {
+        if (shutdownStarted) return;
+        shutdownStarted = true;
+
+        log.info(`\nReceived ${signal}, shutting down gracefully...`);
+
+        const forceExitTimer = setTimeout(() => {
+            log.error('Graceful shutdown timed out, forcing exit.');
+            process.exit(1);
+        }, 8_000);
+
+        try {
+            server.stop();
+            killAllBackgroundProcesses();
+            await stopAutomationSystem();
+            stopMcpRetrySweep();
+            await closeMcpClients();
+            await shutdownSandbox();
+            await shutdownPlatformTransport();
+            await closeDatabase();
+            log.info('Shutdown complete.');
+            process.exit(0);
+        } finally {
+            clearTimeout(forceExitTimer);
+        }
+    };
+
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+    process.on('SIGHUP', () => void shutdown('SIGHUP'));
+    process.on('SIGQUIT', () => void shutdown('SIGQUIT'));
 }
 
 main();

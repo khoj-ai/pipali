@@ -20,6 +20,7 @@ import { atifConversationService, type ConversationRole } from './conversation/a
 import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
+import { catalogueState, catalogueUpdateExtra, formatCatalogueUpdate, loadCatalogue } from '../memory';
 import { resolveMcpInventoryContext } from './actor/search_tools';
 import { getMcpToolDefinitions } from './mcp';
 import type { ResearchIteration } from './director/types';
@@ -139,6 +140,32 @@ export async function* runResearchWithConversation(
     // Check if this is a new conversation (no system prompt yet) or existing
     const isNewConversation = !trajectory.steps.some(s => s.source === 'system');
 
+    // The system prompt lists the catalogue as it stood when the conversation began and
+    // never changes after, so it stays cacheable and cannot claim a memory exists before
+    // the agent deleted it. Anything that moved since - this agent, another conversation,
+    // the user's own editor - arrives here as a step, in the order it happened.
+    const currentCatalogue = await loadCatalogue();
+    const seenCatalogue = catalogueState(trajectory.steps);
+    const memoryCatalogue = seenCatalogue.inPrompt ?? currentCatalogue;
+
+    if (seenCatalogue.shown !== undefined) {
+        const update = formatCatalogueUpdate(seenCatalogue.shown, currentCatalogue);
+        if (update) {
+            const updateStep = await atifConversationService.addStep(
+                conversationId,
+                'system',
+                update,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                undefined,
+                catalogueUpdateExtra(currentCatalogue),
+            );
+            trajectory.steps.push(updateStep);
+        }
+    }
+
     // Tool schemas are rebuilt every iteration but the inventory naming them is
     // frozen in the system prompt, so announce what has changed since. Non-fatal:
     // an unreachable MCP server must not cost the user their turn.
@@ -211,6 +238,7 @@ export async function* runResearchWithConversation(
         username: userContext.name,
         location: userContext.location,
         userContext: userContext.instructions,
+        memoryCatalogue,
         user,
         systemPrompt,
         abortSignal,

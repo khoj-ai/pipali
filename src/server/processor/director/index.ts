@@ -31,6 +31,7 @@ import { getFunctionCallName } from '../conversation/openai/utils';
 import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
+import { formatMemoryForPrompt, loadCatalogue } from '../../memory';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFStep, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
 import { addMetrics } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
@@ -134,6 +135,8 @@ interface ResearchConfig {
     location?: string;
     username?: string;
     userContext?: string;
+    /** Catalogue the conversation's system prompt lists, frozen at conversation start */
+    memoryCatalogue?: string;
     user?: typeof User.$inferSelect;
     /** Optional system prompt override (persisted at run start) */
     systemPrompt?: string;
@@ -191,6 +194,9 @@ export async function buildSystemPrompt(args: {
     userContext?: string;
     provideUpdatesPreamble?: string;
     isFirstEverConversation?: boolean;
+    conversationRole?: ConversationRole;
+    /** Catalogue to list, frozen at conversation start by the caller. Live changes arrive as steps. */
+    memoryCatalogue?: string;
     now?: Date;
 }): Promise<string> {
     const now = args.now ?? new Date();
@@ -203,6 +209,10 @@ export async function buildSystemPrompt(args: {
         ? `\n- ${args.provideUpdatesPreamble}`
         : '';
 
+    const memoryContext = formatMemoryForPrompt(args.memoryCatalogue ?? '', {
+        canWrite: args.conversationRole !== 'delegated',
+    });
+
     const skillsContext = formatSkillsForPrompt(getLoadedSkills().filter(s => s.visible));
 
     const mcpContext = await buildMcpContext();
@@ -213,6 +223,7 @@ export async function buildSystemPrompt(args: {
 
     return prompts.director.format({
         user_context: userContext,
+        memory_context: memoryContext,
         skills_context: skillsContext,
         mcp_context: mcpContext,
         first_conversation_context: firstConversationContext,
@@ -753,6 +764,8 @@ async function pickNextTool(
         username,
         userContext,
         isFirstEverConversation: config.isFirstEverConversation,
+        conversationRole: config.conversationRole,
+        memoryCatalogue: config.memoryCatalogue,
         now,
     });
 
@@ -1001,14 +1014,14 @@ async function executeTool(
             case 'edit_file': {
                 const result = await editFile(
                     toolCall.arguments as EditFileArgs,
-                    { confirmationContext: context?.confirmation }
+                    { confirmationContext: context?.confirmation, conversationId: context?.conversationId }
                 );
                 return result.compiled;
             }
             case 'write_file': {
                 const result = await writeFile(
                     toolCall.arguments as WriteFileArgs,
-                    { confirmationContext: context?.confirmation }
+                    { confirmationContext: context?.confirmation, conversationId: context?.conversationId }
                 );
                 return result.compiled;
             }
