@@ -49,6 +49,12 @@ mock.module(dbSchemaModule, () => {
     return {
         // Basic tables
         User: { $inferSelect: {} },
+        MemorySettings: {
+            id: 'id',
+            userId: 'userId',
+            memoriesEnabled: 'memoriesEnabled',
+            $inferSelect: {},
+        },
         AiModelApi: { $inferSelect: {} },
         ChatModel: { $inferSelect: {} },
         UserChatModel: { $inferSelect: {} },

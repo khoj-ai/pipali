@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../../utils/api';
 import { SUPPORTED_LANGUAGES } from '../../i18n';
 import { PathListEditor } from './PathListEditor';
+import { MemorySettingsSection } from './MemorySettingsSection';
 import { useVoiceSettings } from '../../hooks/useVoiceSettings';
 
 type SettingsTab = 'profile' | 'permissions';
@@ -62,7 +63,6 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
     const [error, setError] = useState<string | null>(null);
-
     // Voice feature flag (beta, per-device). Session mode lives in the chat-input menu.
     const { enabled: voiceFeatureEnabled, setEnabled: setVoiceEnabled } = useVoiceSettings();
 
@@ -367,6 +367,8 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                                 <span>{sandboxError}</span>
                             </div>
                         )}
+
+                        <MemorySettingsSection />
 
                         {/* Voice mode (beta) — gates all voice UI and the mic session */}
                         <div className="settings-section">

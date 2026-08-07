@@ -12,6 +12,10 @@ import {
     catalogueState,
     catalogueUpdateExtra,
     formatCatalogueUpdate,
+    listMemories,
+    getMemory,
+    deleteMemory,
+    deleteAllMemories,
 } from '../../src/server/memory';
 import { parseFrontmatter } from '../../src/server/frontmatter';
 import { writeFile } from '../../src/server/processor/actor/write_file';
@@ -191,6 +195,61 @@ The fact itself.`;
                 'middle.md (feedback): Stamped in between',
                 'oldest.md: Stamped longest ago',
             ].join('\n'));
+        });
+    });
+
+    describe('memory management', () => {
+        test('lists, reads, and deletes only direct memory files', async () => {
+            const managementDir = path.join(os.tmpdir(), 'memory-management-tests');
+            const outsideMemory = path.join(os.tmpdir(), 'memory-management-outside.md');
+            await fs.rm(managementDir, { recursive: true, force: true });
+            await fs.mkdir(path.join(managementDir, 'nested'), { recursive: true });
+
+            try {
+                await Bun.write(
+                    path.join(managementDir, 'newest.md'),
+                    '---\ndescription: Most recent memory\ntype: project\nmodified: 2026-02-01T00:00:00.000Z\n---\n\nNewest body.\n',
+                );
+                await Bun.write(
+                    path.join(managementDir, 'oldest.md'),
+                    '---\ndescription: Older memory\nmodified: 2026-01-01T00:00:00.000Z\n---\n\nOlder body.\n',
+                );
+                const malformed = path.join(managementDir, 'malformed.md');
+                await Bun.write(malformed, 'Visible even without frontmatter.\n');
+                await fs.utimes(malformed, new Date('2025-01-01T00:00:00Z'), new Date('2025-01-01T00:00:00Z'));
+                await Bun.write(path.join(managementDir, 'notes.txt'), 'Not a memory.\n');
+                await Bun.write(path.join(managementDir, 'nested', 'hidden.md'), 'Nested memory.\n');
+                await Bun.write(outsideMemory, 'Outside memory.\n');
+
+                await withMemoryDir(managementDir, async () => {
+                    expect((await listMemories()).map(memory => memory.file)).toEqual([
+                        'newest.md',
+                        'oldest.md',
+                        'malformed.md',
+                    ]);
+
+                    expect(await getMemory('newest.md')).toMatchObject({
+                        file: 'newest.md',
+                        description: 'Most recent memory',
+                        type: 'project',
+                        content: 'Newest body.',
+                    });
+                    expect((await getMemory('malformed.md'))?.content).toBe('Visible even without frontmatter.\n');
+
+                    expect(await getMemory('../memory-management-outside.md')).toBeUndefined();
+                    expect(await deleteMemory('../memory-management-outside.md')).toBe(false);
+                    expect(await Bun.file(outsideMemory).exists()).toBe(true);
+
+                    expect(await deleteMemory('oldest.md')).toBe(true);
+                    expect(await deleteAllMemories()).toBe(2);
+                    expect(await listMemories()).toEqual([]);
+                    expect(await Bun.file(path.join(managementDir, 'notes.txt')).exists()).toBe(true);
+                    expect(await Bun.file(path.join(managementDir, 'nested', 'hidden.md')).exists()).toBe(true);
+                });
+            } finally {
+                await fs.rm(managementDir, { recursive: true, force: true });
+                await fs.rm(outsideMemory, { force: true });
+            }
         });
     });
 

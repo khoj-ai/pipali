@@ -20,6 +20,7 @@ import { atifConversationService, type ConversationRole } from './conversation/a
 import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
+import { loadMemorySettings } from '../memory/settings';
 import { catalogueState, catalogueUpdateExtra, formatCatalogueUpdate, loadCatalogue } from '../memory';
 import { resolveMcpInventoryContext } from './actor/search_tools';
 import { getMcpToolDefinitions } from './mcp';
@@ -140,21 +141,23 @@ export async function* runResearchWithConversation(
     // Check if this is a new conversation (no system prompt yet) or existing
     const isNewConversation = !trajectory.steps.some(s => s.source === 'system');
 
-    // The system prompt lists the catalogue as it stood when the conversation began and
-    // never changes after, so it stays cacheable and cannot claim a memory exists before
-    // the agent deleted it. Anything that moved since - this agent, another conversation,
-    // the user's own editor - arrives here as a step, in the order it happened.
-    const currentCatalogue = await loadCatalogue();
-    const seenCatalogue = catalogueState(trajectory.steps);
-    const memoryCatalogue = seenCatalogue.inPrompt ?? currentCatalogue;
+    const { memoriesEnabled } = await loadMemorySettings(user.id);
+    let memoryCatalogue: string | undefined;
 
-    if (seenCatalogue.shown !== undefined) {
-        const update = formatCatalogueUpdate(seenCatalogue.shown, currentCatalogue);
-        if (update) {
-            const updateStep = await atifConversationService.addStep(
+    if (memoriesEnabled) {
+        // The system prompt lists the catalogue as it stood when the conversation began and
+        // never changes after, so it stays cacheable and cannot claim a memory exists before
+        // the agent deleted it. Anything that moved since - this agent, another conversation,
+        // the user's own editor - arrives here as a step, in the order it happened.
+        const currentCatalogue = await loadCatalogue();
+        const seenCatalogue = catalogueState(trajectory.steps);
+        memoryCatalogue = seenCatalogue.inPrompt ?? seenCatalogue.shown ?? currentCatalogue;
+
+        if (seenCatalogue.shown === undefined && !isNewConversation) {
+            const enabledStep = await atifConversationService.addStep(
                 conversationId,
                 'system',
-                update,
+                '# Memory enabled',
                 undefined,
                 undefined,
                 undefined,
@@ -162,7 +165,23 @@ export async function* runResearchWithConversation(
                 undefined,
                 catalogueUpdateExtra(currentCatalogue),
             );
-            trajectory.steps.push(updateStep);
+            trajectory.steps.push(enabledStep);
+        } else if (seenCatalogue.shown !== undefined) {
+            const update = formatCatalogueUpdate(seenCatalogue.shown, currentCatalogue);
+            if (update) {
+                const updateStep = await atifConversationService.addStep(
+                    conversationId,
+                    'system',
+                    update,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    undefined,
+                    catalogueUpdateExtra(currentCatalogue),
+                );
+                trajectory.steps.push(updateStep);
+            }
         }
     }
 
@@ -239,6 +258,7 @@ export async function* runResearchWithConversation(
         location: userContext.location,
         userContext: userContext.instructions,
         memoryCatalogue,
+        memoriesEnabled,
         user,
         systemPrompt,
         abortSignal,

@@ -117,6 +117,20 @@ describe('truncateToolOutput', () => {
 });
 
 describe('buildSystemPrompt', () => {
+    test('keeps memories on by default and removes the entire memory surface when disabled', async () => {
+        const catalogue = 'prefers-short-answers.md (feedback): Prefer concise answers';
+        const enabled = await buildSystemPrompt({ memoryCatalogue: catalogue });
+        const disabled = await buildSystemPrompt({ memoryCatalogue: catalogue, memoriesEnabled: false });
+
+        expect(enabled).toContain('persistent file-based memory');
+        expect(enabled).toContain(catalogue);
+        expect(enabled).toContain('write fact files');
+        expect(disabled).not.toContain('persistent file-based memory');
+        expect(disabled).not.toContain(catalogue);
+        expect(disabled).not.toContain('write fact files');
+        expect(disabled).not.toContain('<memory_catalogue>');
+    });
+
     test('should include first conversation instructions when isFirstEverConversation is true', async () => {
         const prompt = await buildSystemPrompt({
             isFirstEverConversation: true,

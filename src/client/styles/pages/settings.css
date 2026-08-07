@@ -136,6 +136,223 @@
     line-height: 1.5;
 }
 
+.memory-manager {
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--color-border);
+}
+
+.memory-manager-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 8px;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.memory-manager-toggle {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    gap: 5px;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+}
+
+.memory-manager-toggle svg {
+    flex-shrink: 0;
+    transition: transform var(--transition);
+}
+
+.memory-manager-toggle svg.expanded {
+    transform: rotate(180deg);
+}
+
+.memory-delete-all,
+.memory-delete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 4px 6px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-muted);
+    font: inherit;
+    cursor: pointer;
+}
+
+.memory-delete-all:hover:not(:disabled),
+.memory-delete:hover:not(:disabled) {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+}
+
+.memory-list {
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+}
+
+.memory-item + .memory-item {
+    border-top: 1px solid var(--color-border);
+}
+
+.memory-item-row {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+    padding: 4px 6px 4px 8px;
+}
+
+.memory-expand {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    min-width: 0;
+    gap: 7px;
+    padding: 4px 0;
+    border: 0;
+    background: transparent;
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.memory-expand > svg {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    transition: transform var(--transition);
+}
+
+.memory-expand > svg.expanded {
+    transform: rotate(180deg);
+}
+
+.memory-item-labels {
+    display: flex;
+    flex: 1;
+    min-width: 0;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.memory-item-description,
+.memory-item-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.memory-item-description {
+    color: var(--color-text);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.memory-item-meta {
+    color: var(--color-text-muted);
+    font-size: 11px;
+}
+
+.memory-delete {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+}
+
+.memory-delete:disabled,
+.memory-delete-confirm button:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+.memory-content {
+    max-height: 220px;
+    overflow: auto;
+    margin: 0;
+    padding: 10px 12px;
+    border-top: 1px solid var(--color-border);
+    background: var(--color-bg-muted);
+    color: var(--color-text-secondary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+}
+
+.memory-delete-confirm {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    padding: 7px 8px;
+    border: 1px solid var(--color-error-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+    font-size: 12px;
+}
+
+.memory-item .memory-delete-confirm {
+    border-width: 1px 0 0;
+    border-radius: 0;
+}
+
+.memory-delete-confirm span {
+    margin-right: auto;
+}
+
+.memory-delete-confirm button {
+    display: inline-flex;
+    align-items: center;
+    min-height: 26px;
+    padding: 3px 8px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    color: var(--color-text);
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.memory-delete-confirm button.danger {
+    border-color: var(--color-error);
+    background: var(--color-error);
+    color: white;
+}
+
+.memory-manager-empty,
+.memory-manager-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 8px;
+    border: 1px dashed var(--color-border);
+    border-radius: var(--radius-md);
+    color: var(--color-text-muted);
+    font-size: 12px;
+}
+
+.memory-manager-error {
+    justify-content: flex-start;
+    min-height: 0;
+    margin-bottom: 8px;
+    border-color: var(--color-error-border);
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+}
+
 /* Form */
 .settings-form {
     display: flex;

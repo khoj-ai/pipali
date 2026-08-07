@@ -9,7 +9,7 @@
 
 import path from 'path';
 import os from 'os';
-import { mkdir, readdir } from 'fs/promises';
+import { lstat, mkdir, readdir, unlink } from 'fs/promises';
 import { parseFrontmatter } from '../frontmatter';
 import { createChildLogger } from '../logger';
 import { PIPALI_MEMORY_RELATIVE_DIR } from '../../shared';
@@ -31,6 +31,17 @@ const CATALOGUE_BLOCK = /<memory_catalogue>\n([\s\S]*?)\n<\/memory_catalogue>/;
 const CATALOGUE_KEY = 'memory_catalogue';
 
 export const MEMORY_UPDATE_KIND = 'memory_update';
+
+export interface MemorySummary {
+    file: string;
+    description?: string;
+    type?: string;
+    modified: string;
+}
+
+export interface StoredMemory extends MemorySummary {
+    content: string;
+}
 
 /** Stated once, so the system prompt and a rejected write cannot teach different formats */
 const MEMORY_FRONTMATTER = `---
@@ -91,6 +102,102 @@ export function isMemoryFile(absolutePath: string): boolean {
         return false;
     }
     return relative.endsWith('.md');
+}
+
+function isMemoryName(file: string): boolean {
+    return file === path.basename(file) && file.endsWith('.md');
+}
+
+async function readStoredMemory(file: string): Promise<StoredMemory | undefined> {
+    if (!isMemoryName(file)) return undefined;
+
+    const memoryPath = path.join(getMemoryDir(), file);
+    try {
+        if (!(await lstat(memoryPath)).isFile()) return undefined;
+
+        const handle = Bun.file(memoryPath);
+        const raw = await handle.text();
+        const parsed = parseFrontmatter(raw);
+        const stampedModified = Date.parse(parsed?.fields.modified ?? '');
+        const modified = Number.isNaN(stampedModified)
+            ? new Date(handle.lastModified).toISOString()
+            : new Date(stampedModified).toISOString();
+
+        return {
+            file,
+            description: parsed?.fields.description || undefined,
+            type: parsed?.fields.type || undefined,
+            modified,
+            content: parsed?.body ?? raw,
+        };
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            log.warn({ err, file }, 'Failed to read memory');
+        }
+        return undefined;
+    }
+}
+
+/** List direct memory files newest-first without loading their bodies into the response. */
+export async function listMemories(): Promise<MemorySummary[]> {
+    let entries;
+    try {
+        entries = await readdir(getMemoryDir(), { withFileTypes: true });
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+            log.error({ err }, 'Failed to list memories');
+        }
+        return [];
+    }
+
+    const memories = await Promise.all(
+        entries
+            .filter(entry => entry.isFile() && isMemoryName(entry.name))
+            .map(entry => readStoredMemory(entry.name)),
+    );
+
+    return memories
+        .filter((memory): memory is StoredMemory => memory !== undefined)
+        .sort((a, b) => Date.parse(b.modified) - Date.parse(a.modified) || a.file.localeCompare(b.file))
+        .map(({ content: _, ...summary }) => summary);
+}
+
+/** Read one direct memory file. Invalid paths and missing files are indistinguishable. */
+export async function getMemory(file: string): Promise<StoredMemory | undefined> {
+    return readStoredMemory(file);
+}
+
+/** Delete one direct memory file, returning false when it is invalid or no longer exists. */
+export async function deleteMemory(file: string): Promise<boolean> {
+    if (!isMemoryName(file)) return false;
+
+    const memoryPath = path.join(getMemoryDir(), file);
+    try {
+        if (!(await lstat(memoryPath)).isFile()) return false;
+        await unlink(memoryPath);
+        return true;
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return false;
+        throw err;
+    }
+}
+
+/** Delete every direct memory file while preserving the directory and unrelated files. */
+export async function deleteAllMemories(): Promise<number> {
+    let entries;
+    try {
+        entries = await readdir(getMemoryDir(), { withFileTypes: true });
+    } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+        throw err;
+    }
+
+    const deleted = await Promise.all(
+        entries
+            .filter(entry => entry.isFile() && isMemoryName(entry.name))
+            .map(entry => deleteMemory(entry.name)),
+    );
+    return deleted.filter(Boolean).length;
 }
 
 /**

@@ -15,6 +15,7 @@ import { PlatformAuthError } from '../http/platform-fetch';
 import { atifConversationService, type ConversationRole } from '../processor/conversation/atif/atif.service';
 import { buildSystemPrompt } from '../processor/director';
 import { loadUserContext } from '../user-context';
+import { loadMemorySettings } from '../memory/settings';
 import { loadCatalogue } from '../memory';
 import { isFirstRunEasterEgg, maxIterations as defaultMaxIterations } from '../utils';
 import { setSessionActive, setSessionInactive, updateSessionReasoning } from '../sessions';
@@ -99,6 +100,7 @@ async function ensureSystemPromptPersisted(
         : undefined;
 
     const userContext = await loadUserContext();
+    const { memoriesEnabled } = await loadMemorySettings(userId);
     const now = new Date();
     const systemPrompt = await buildSystemPrompt({
         currentDate: now.toLocaleDateString('en-CA'),
@@ -111,7 +113,8 @@ async function ensureSystemPromptPersisted(
         isFirstEverConversation,
         conversationRole,
         // Only reached for a conversation without a system prompt, so this is its baseline
-        memoryCatalogue: await loadCatalogue(),
+        memoryCatalogue: memoriesEnabled ? await loadCatalogue() : undefined,
+        memoriesEnabled,
         now,
     });
 
