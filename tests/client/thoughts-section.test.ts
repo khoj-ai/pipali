@@ -205,4 +205,12 @@ describe('file tool formatting', () => {
             });
         }
     });
+
+    test('extracts and shortens ordinary file locations across platforms', () => {
+        expect(formatToolArgsRich('view_file', { path: '/work/notes.md' })?.secondary).toBe('in /work');
+        expect(formatToolArgsRich('view_file', { path: 'C:\\Users\\alex\\Documents\\notes.md' })).toMatchObject({
+            text: 'notes.md',
+            secondary: 'in Documents',
+        });
+    });
 });

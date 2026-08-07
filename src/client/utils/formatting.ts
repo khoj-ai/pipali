@@ -284,7 +284,7 @@ export interface DelegationToolText {
  * Returns [basename, folder] where folder has ~/ prefix removed.
  */
 function splitPath(fullPath: string): [string, string] {
-    const shortened = shortenHomePath(normalizePathSeparators(fullPath));
+    const shortened = shortenHomePath(fullPath);
     const lastSlash = shortened.lastIndexOf('/');
     if (lastSlash <= 0) return [shortened, ''];
     const basename = shortened.slice(lastSlash + 1);
@@ -502,7 +502,11 @@ export function formatToolArgsRich(
  * Shorten home directory path for display
  */
 export function shortenHomePath(path: string | undefined): string {
-    return path?.replace(/^\/Users\/[^/]+/, '~') || '~';
+    if (!path) return '~';
+    return normalizePathSeparators(path).replace(
+        /^(?:[a-zA-Z]:\/Users|\/(?:Users|home))\/[^/]+/,
+        '~',
+    );
 }
 
 // UUID generator that works in non-secure contexts (e.g., HTTP on non-localhost)
