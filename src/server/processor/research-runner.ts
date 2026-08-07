@@ -21,7 +21,7 @@ import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
 import { loadMemorySettings } from '../memory/settings';
-import { catalogueState, catalogueUpdateExtra, formatCatalogueUpdate, loadCatalogue } from '../memory';
+import { resolveMemoryContext } from '../memory';
 import { resolveMcpInventoryContext } from './actor/search_tools';
 import { getMcpToolDefinitions } from './mcp';
 import type { ResearchIteration } from './director/types';
@@ -141,49 +141,13 @@ export async function* runResearchWithConversation(
     // Check if this is a new conversation (no system prompt yet) or existing
     const isNewConversation = !trajectory.steps.some(s => s.source === 'system');
 
+    // Add memory context to trajectory
     const { memoriesEnabled } = await loadMemorySettings(user.id);
-    let memoryCatalogue: string | undefined;
-
-    if (memoriesEnabled) {
-        // The system prompt lists the catalogue as it stood when the conversation began and
-        // never changes after, so it stays cacheable and cannot claim a memory exists before
-        // the agent deleted it. Anything that moved since - this agent, another conversation,
-        // the user's own editor - arrives here as a step, in the order it happened.
-        const currentCatalogue = await loadCatalogue();
-        const seenCatalogue = catalogueState(trajectory.steps);
-        memoryCatalogue = seenCatalogue.inPrompt ?? seenCatalogue.shown ?? currentCatalogue;
-
-        if (seenCatalogue.shown === undefined && !isNewConversation) {
-            const enabledStep = await atifConversationService.addStep(
-                conversationId,
-                'system',
-                '# Memory enabled',
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                undefined,
-                catalogueUpdateExtra(currentCatalogue),
-            );
-            trajectory.steps.push(enabledStep);
-        } else if (seenCatalogue.shown !== undefined) {
-            const update = formatCatalogueUpdate(seenCatalogue.shown, currentCatalogue);
-            if (update) {
-                const updateStep = await atifConversationService.addStep(
-                    conversationId,
-                    'system',
-                    update,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    undefined,
-                    catalogueUpdateExtra(currentCatalogue),
-                );
-                trajectory.steps.push(updateStep);
-            }
-        }
-    }
+    const { memoryCatalogue, systemSteps } = await resolveMemoryContext({
+        steps: trajectory.steps,
+        memoriesEnabled,
+        isNewConversation,
+    });
 
     // Tool schemas are rebuilt every iteration but the inventory naming them is
     // frozen in the system prompt, so announce what has changed since. Non-fatal:
@@ -199,7 +163,7 @@ export async function* runResearchWithConversation(
         log.warn({ err: error, conversationId }, 'Failed to resolve MCP tool inventory changes');
     }
 
-    for (const step of mcpSteps) {
+    for (const step of [...systemSteps, ...mcpSteps]) {
         const persistedStep = await atifConversationService.addStep(
             conversationId,
             'system',

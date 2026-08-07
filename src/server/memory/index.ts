@@ -31,6 +31,11 @@ const CATALOGUE_BLOCK = /<memory_catalogue>\n([\s\S]*?)\n<\/memory_catalogue>/;
 const CATALOGUE_KEY = 'memory_catalogue';
 
 export const MEMORY_UPDATE_KIND = 'memory_update';
+export const MEMORY_STATE_KIND = 'memory_state';
+
+export const MEMORY_PAUSED_MESSAGE = `# Memory paused
+
+Memory is paused for this session. Do not read or write memories, and do not reference previously loaded memory content.`;
 
 export interface MemorySummary {
     file: string;
@@ -59,6 +64,21 @@ interface CatalogueStep {
     source: string;
     message?: string;
     extra?: Record<string, unknown>;
+    tool_calls?: Array<{
+        function_name: string;
+        arguments: Record<string, unknown>;
+    }>;
+}
+
+/**
+ * Memory prompt context and system steps needed to sync a conversation with the current memory state.
+ */
+interface MemoryContextPlan {
+    memoryCatalogue?: string;
+    systemSteps: Array<{
+        message: string;
+        extra: Record<string, unknown>;
+    }>;
 }
 
 export function getMemoryDir(): string {
@@ -324,6 +344,61 @@ export function catalogueState(steps: CatalogueStep[]): { inPrompt?: string; sho
     return { inPrompt, shown };
 }
 
+const MEMORY_FILE_TOOL_PATHS: Record<string, string> = {
+    view_file: 'path',
+    edit_file: 'file_path',
+    write_file: 'file_path',
+};
+
+/** Whether this conversation used a file tool against persistent memory. */
+export function hasMemoryInteraction(steps: CatalogueStep[]): boolean {
+    return steps.some(step => step.tool_calls?.some(toolCall => {
+        const pathKey = MEMORY_FILE_TOOL_PATHS[toolCall.function_name];
+        if (!pathKey) return false;
+
+        const filePath = toolCall.arguments[pathKey];
+        if (typeof filePath !== 'string') return false;
+
+        const absolutePath = filePath.startsWith('~/')
+            ? path.join(os.homedir(), filePath.slice(2))
+            : path.isAbsolute(filePath)
+                ? filePath
+                : path.resolve(os.homedir(), filePath);
+        return isMemoryFile(absolutePath);
+    }) ?? false);
+}
+
+/** Memory state established by the conversation prompt and later transition steps. */
+export function memoryState(steps: CatalogueStep[]): boolean | undefined {
+    let state: boolean | undefined;
+
+    for (const step of steps) {
+        if (step.source !== 'system') continue;
+
+        if (step.extra?.kind === MEMORY_STATE_KIND && typeof step.extra.memory_enabled === 'boolean') {
+            state = step.extra.memory_enabled;
+        } else if (step.message?.trim() === '# Memory enabled') {
+            state = true;
+        } else if (extractCatalogue(step.message ?? '') !== undefined) {
+            state ??= true;
+        }
+    }
+
+    return state;
+}
+
+export function shouldPauseMemory(steps: CatalogueStep[]): boolean {
+    return hasMemoryInteraction(steps) && memoryState(steps) !== false;
+}
+
+export function memoryStateExtra(enabled: boolean, catalogue?: string): Record<string, unknown> {
+    return {
+        kind: MEMORY_STATE_KIND,
+        memory_enabled: enabled,
+        ...(catalogue === undefined ? {} : { [CATALOGUE_KEY]: catalogue }),
+    };
+}
+
 /** Metadata for an update step, so a later turn can read back what it announced */
 export function catalogueUpdateExtra(catalogue: string): Record<string, unknown> {
     return { kind: MEMORY_UPDATE_KIND, [CATALOGUE_KEY]: catalogue };
@@ -460,4 +535,55 @@ if asked to remember something like that, ask what was non-obvious about it and 
     }
 
     return sections.join('\n\n');
+}
+
+export async function resolveMemoryContext(args: {
+    steps: CatalogueStep[],
+    memoriesEnabled: boolean,
+    isNewConversation: boolean
+}): Promise<MemoryContextPlan> {
+    const {steps, memoriesEnabled, isNewConversation} = args;
+
+    // If memory is disabled
+    if (!memoriesEnabled) {
+        // Add memory paused instruction to existing conversations that accessed memory
+        return {
+            systemSteps: !isNewConversation && shouldPauseMemory(steps) ? [{
+                message: MEMORY_PAUSED_MESSAGE,
+                extra: memoryStateExtra(false),
+            }] : [],
+        };
+    }
+
+    const currentCatalogue = await loadCatalogue();
+    const seenCatalogue = catalogueState(steps);
+    const priorState = memoryState(steps);
+    const systemSteps: MemoryContextPlan['systemSteps'] = [];
+
+    // Resume a paused conversation, or introduce memory to an existing conversation that has never seen it.
+    if (priorState === false || (seenCatalogue.shown === undefined && !isNewConversation)) {
+        systemSteps.push({
+            message: '# Memory enabled',
+            extra: memoryStateExtra(
+                true,
+                // Preserve previously shown catalogue until any following update is persisted.
+                seenCatalogue.shown == undefined ? currentCatalogue : undefined),
+        });
+    }
+
+    // Announce catalogue changes in order after the conversation's last known memory state.
+    if (seenCatalogue.shown !== undefined) {
+        const update = formatCatalogueUpdate(seenCatalogue.shown, currentCatalogue);
+        if (update) {
+            systemSteps.push({
+                message: update,
+                extra: catalogueUpdateExtra(currentCatalogue),
+            });
+        }
+    }
+
+    return {
+        memoryCatalogue: seenCatalogue.inPrompt ?? seenCatalogue.shown ?? currentCatalogue,
+        systemSteps,
+    }
 }

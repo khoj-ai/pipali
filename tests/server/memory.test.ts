@@ -1,4 +1,4 @@
-import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
+import { test, expect, describe, beforeAll, beforeEach, afterAll } from 'bun:test';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
@@ -12,6 +12,12 @@ import {
     catalogueState,
     catalogueUpdateExtra,
     formatCatalogueUpdate,
+    hasMemoryInteraction,
+    memoryState,
+    memoryStateExtra,
+    shouldPauseMemory,
+    resolveMemoryContext,
+    MEMORY_PAUSED_MESSAGE,
     listMemories,
     getMemory,
     deleteMemory,
@@ -111,6 +117,190 @@ The fact itself.`;
 
         test('reports nothing for a conversation that has never seen memory', () => {
             expect(catalogueState([{ source: 'user', message: 'hi' }])).toEqual({});
+        });
+    });
+
+    describe('conversation memory state', () => {
+        test('recognizes file tools that interacted with a memory', async () => {
+            const memoryPath = path.join(testDir, 'a-fact.md');
+            for (const [functionName, args] of [
+                ['view_file', { path: memoryPath }],
+                ['edit_file', { file_path: memoryPath }],
+                ['write_file', { file_path: memoryPath }],
+            ] as const) {
+                expect(hasMemoryInteraction([{
+                    source: 'agent',
+                    tool_calls: [{ function_name: functionName, arguments: args }],
+                }])).toBe(true);
+            }
+
+            await expect(withMemoryDir(path.join(os.homedir(), '.pipali', 'memory'), async () =>
+                hasMemoryInteraction([{
+                    source: 'agent',
+                    tool_calls: [{
+                        function_name: 'view_file',
+                        arguments: { path: '~/.pipali/memory/a-fact.md' },
+                    }],
+                }]),
+            )).resolves.toBe(true);
+            expect(hasMemoryInteraction([{
+                source: 'agent',
+                tool_calls: [{
+                    function_name: 'view_file',
+                    arguments: { path: path.join(testDir, '..', 'notes.md') },
+                }],
+            }])).toBe(false);
+        });
+
+        test('tracks explicit pause and resume boundaries', () => {
+            const resumedCatalogue = 'a-fact.md (resource): The first fact';
+            const steps = [
+                { source: 'system', message: formatMemoryForPrompt('') },
+                { source: 'system', message: '# Memory paused', extra: memoryStateExtra(false) },
+            ];
+
+            expect(memoryState(steps)).toBe(false);
+
+            steps.push({
+                source: 'system',
+                message: '# Memory enabled',
+                extra: memoryStateExtra(true, resumedCatalogue),
+            });
+            expect(memoryState(steps)).toBe(true);
+            expect(catalogueState(steps).shown).toBe(resumedCatalogue);
+        });
+
+        test('pauses only once after a conversation interacted with memory', () => {
+            const interaction = {
+                source: 'agent',
+                tool_calls: [{
+                    function_name: 'write_file',
+                    arguments: { file_path: path.join(testDir, 'a-fact.md') },
+                }],
+            };
+
+            expect(shouldPauseMemory([
+                { source: 'system', message: formatMemoryForPrompt('') },
+            ])).toBe(false);
+            expect(shouldPauseMemory([interaction])).toBe(true);
+            expect(shouldPauseMemory([
+                interaction,
+                { source: 'system', message: '# Memory paused', extra: memoryStateExtra(false) },
+            ])).toBe(false);
+        });
+    });
+
+    describe('memory context plan', () => {
+        const contextDir = path.join(os.tmpdir(), 'memory-context-tests');
+
+        beforeEach(async () => {
+            await fs.rm(contextDir, { recursive: true, force: true });
+            await fs.mkdir(contextDir, { recursive: true });
+        });
+
+        afterAll(async () => {
+            await fs.rm(contextDir, { recursive: true, force: true });
+        });
+
+        test('pauses an existing conversation with memory interaction only once', async () => {
+            await withMemoryDir(contextDir, async () => {
+                const steps = [
+                    { source: 'system', message: formatMemoryForPrompt('') },
+                    {
+                        source: 'agent',
+                        tool_calls: [{
+                            function_name: 'view_file',
+                            arguments: { path: path.join(contextDir, 'a-fact.md') },
+                        }],
+                    },
+                ];
+
+                const first = await resolveMemoryContext({
+                    steps,
+                    memoriesEnabled: false,
+                    isNewConversation: false,
+                });
+                expect(first).toEqual({
+                    systemSteps: [{
+                        message: MEMORY_PAUSED_MESSAGE,
+                        extra: memoryStateExtra(false),
+                    }],
+                });
+
+                const pausedStep = first.systemSteps[0]!;
+                const second = await resolveMemoryContext({
+                    steps: [...steps, { source: 'system', ...pausedStep }],
+                    memoriesEnabled: false,
+                    isNewConversation: false,
+                });
+                expect(second.systemSteps).toEqual([]);
+            });
+        });
+
+        test('introduces memory to an existing conversation but not a new one', async () => {
+            await withMemoryDir(contextDir, async () => {
+                const currentCatalogue = await loadCatalogue();
+                const newConversation = await resolveMemoryContext({
+                    steps: [],
+                    memoriesEnabled: true,
+                    isNewConversation: true,
+                });
+                expect(newConversation).toEqual({
+                    memoryCatalogue: currentCatalogue,
+                    systemSteps: [],
+                });
+
+                const existingConversation = await resolveMemoryContext({
+                    steps: [{ source: 'system', message: 'You are Pipali.' }],
+                    memoriesEnabled: true,
+                    isNewConversation: false,
+                });
+                expect(existingConversation).toEqual({
+                    memoryCatalogue: currentCatalogue,
+                    systemSteps: [{
+                        message: '# Memory enabled',
+                        extra: memoryStateExtra(true, currentCatalogue),
+                    }],
+                });
+            });
+        });
+
+        test('retries a catalogue update if only the preceding enabled step persisted', async () => {
+            await withMemoryDir(contextDir, async () => {
+                const oldCatalogue = 'a-fact.md (feedback): The old wording';
+                await Bun.write(
+                    path.join(contextDir, 'a-fact.md'),
+                    '---\ndescription: The new wording\ntype: feedback\nmodified: 2026-08-07T00:00:00.000Z\n---\n\nBody.\n',
+                );
+                const currentCatalogue = await loadCatalogue();
+                const steps = [
+                    { source: 'system', message: formatMemoryForPrompt(oldCatalogue) },
+                    { source: 'system', message: MEMORY_PAUSED_MESSAGE, extra: memoryStateExtra(false) },
+                ];
+
+                const first = await resolveMemoryContext({
+                    steps,
+                    memoriesEnabled: true,
+                    isNewConversation: false,
+                });
+                expect(first.memoryCatalogue).toBe(oldCatalogue);
+                expect(first.systemSteps).toHaveLength(2);
+
+                const enabledStep = first.systemSteps[0]!;
+                const updateStep = first.systemSteps[1]!;
+                expect(enabledStep.message).toBe('# Memory enabled');
+                expect(enabledStep.extra.memory_catalogue).toBeUndefined();
+                expect(updateStep.message).toContain('Rewritten:\na-fact.md: The new wording');
+                expect(updateStep.extra.memory_catalogue).toBe(currentCatalogue);
+
+                const retry = await resolveMemoryContext({
+                    steps: [...steps, { source: 'system', ...enabledStep }],
+                    memoriesEnabled: true,
+                    isNewConversation: false,
+                });
+                expect(retry.systemSteps).toHaveLength(1);
+                expect(retry.systemSteps[0]?.message).toContain('Rewritten:\na-fact.md: The new wording');
+            });
         });
     });
 
