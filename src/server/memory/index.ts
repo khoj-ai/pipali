@@ -254,14 +254,21 @@ export function formatCatalogueEntry(memory: Pick<MemorySummary, 'file' | 'type'
         : `${memory.file}: ${memory.description}`;
 }
 
+interface CatalogueEntry {
+    file: string;
+    modified: number;
+    line: string;
+}
+
 /**
- * Build the catalogue from the frontmatter of every memory on disk, one line each,
- * most recently changed first.
+ * Every memory on disk that can appear in a catalogue, most recently changed first.
  *
  * Derived rather than maintained, so a memory cannot go missing from the catalogue
- * and the catalogue cannot point at a memory that is gone.
+ * and the catalogue cannot point at a memory that is gone. Kept separate from
+ * rendering so a caller needing to know which memories exist - not just which ones
+ * fit in the prompt - gets both from one pass over the directory.
  */
-export async function loadCatalogue(): Promise<string> {
+async function catalogueEntries(): Promise<CatalogueEntry[]> {
     const memoryDir = getMemoryDir();
     let files: string[];
     try {
@@ -270,7 +277,7 @@ export async function loadCatalogue(): Promise<string> {
         if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
             log.error({ err }, 'Failed to list memory directory');
         }
-        return '';
+        return [];
     }
 
     const memories = files.filter(file => isMemoryFile(path.join(memoryDir, file)));
@@ -296,6 +303,7 @@ export async function loadCatalogue(): Promise<string> {
             }
 
             return {
+                file,
                 modified,
                 line: formatCatalogueEntry({ file, type: parsed.fields.type, description }),
             };
@@ -305,16 +313,42 @@ export async function loadCatalogue(): Promise<string> {
         }
     }));
 
-    const catalogue = entries
-        .filter((entry): entry is NonNullable<typeof entry> => entry !== undefined)
-        .sort((a, b) => b.modified - a.modified || a.line.localeCompare(b.line))
-        .map(entry => entry.line)
-        .join('\n');
+    return entries
+        .filter((entry): entry is CatalogueEntry => entry !== undefined)
+        .sort((a, b) => b.modified - a.modified || a.line.localeCompare(b.line));
+}
 
-    if (Buffer.byteLength(catalogue, 'utf-8') > CATALOGUE_MAX_BYTES) {
-        log.warn({ max: CATALOGUE_MAX_BYTES, count: memories.length }, 'Memory catalogue is over budget, it needs consolidating');
+/**
+ * Render entries into the catalogue, stopping at the size budget.
+ *
+ * Newest first, so what falls off the end is what has gone longest without being
+ * touched. The remainder is announced rather than dropped in silence - those
+ * memories are still on disk and still readable, they just are not worth the
+ * prompt space every request.
+ */
+function renderCatalogue(entries: CatalogueEntry[]): string {
+    const lines: string[] = [];
+    let bytes = 0;
+
+    for (const entry of entries) {
+        const size = Buffer.byteLength(entry.line, 'utf-8') + 1;
+        if (bytes + size > CATALOGUE_MAX_BYTES) break;
+        lines.push(entry.line);
+        bytes += size;
     }
-    return catalogue;
+
+    const omitted = entries.length - lines.length;
+    if (omitted > 0) {
+        log.info({ omitted, listed: lines.length }, 'Memory catalogue is over budget, listing the most recently changed');
+        // Carries no `<file>: ` prefix, so CATALOGUE_ENTRY cannot read it back as a memory
+        lines.push(`(${omitted} older ${omitted === 1 ? 'memory is' : 'memories are'} not listed here - read ${getMemoryDir()} to see the rest)`);
+    }
+
+    return lines.join('\n');
+}
+
+export async function loadCatalogue(): Promise<string> {
+    return renderCatalogue(await catalogueEntries());
 }
 
 /**
@@ -476,14 +510,19 @@ export function catalogueUpdateExtra(catalogue: string): Record<string, unknown>
  * Compares the file on disk against what this conversation was told, so it is
  * works across whoever did the change - current agent, a parallel conversation,
  * the consolidation pass, or the user in their editor.
+ *
+ * `onDisk` names every memory that exists, which is more than the catalogue lists
+ * once it is over budget. Without it a memory pushed below the budget by newer
+ * writes reads as a deletion, and the conversation stops trusting a live memory.
  */
-export function formatCatalogueUpdate(shown: string, current: string): string | undefined {
+export function formatCatalogueUpdate(shown: string, current: string, onDisk?: Iterable<string>): string | undefined {
     if (shown === current) {
         return undefined;
     }
 
     const shownEntries = parseCatalogue(shown);
     const currentEntries = parseCatalogue(current);
+    const existing = onDisk && new Set(onDisk);
 
     const added: string[] = [];
     const rewritten: string[] = [];
@@ -495,7 +534,8 @@ export function formatCatalogueUpdate(shown: string, current: string): string | 
             rewritten.push(`${file}: ${description}`);
         }
     }
-    const deleted = [...shownEntries.keys()].filter(file => !currentEntries.has(file));
+    const deleted = [...shownEntries.keys()]
+        .filter(file => !currentEntries.has(file) && !existing?.has(file));
 
     if (!added.length && !rewritten.length && !deleted.length) {
         return undefined;
@@ -621,7 +661,8 @@ export async function resolveMemoryContext(args: {
         };
     }
 
-    const currentCatalogue = await loadCatalogue();
+    const entries = await catalogueEntries();
+    const currentCatalogue = renderCatalogue(entries);
     const seenCatalogue = catalogueState(steps);
     const priorState = memoryState(steps);
     const systemSteps: MemoryContextPlan['systemSteps'] = [];
@@ -639,7 +680,7 @@ export async function resolveMemoryContext(args: {
 
     // Announce catalogue changes in order after the conversation's last known memory state.
     if (seenCatalogue.shown !== undefined) {
-        const update = formatCatalogueUpdate(seenCatalogue.shown, currentCatalogue);
+        const update = formatCatalogueUpdate(seenCatalogue.shown, currentCatalogue, entries.map(entry => entry.file));
         if (update) {
             systemSteps.push({
                 message: update,

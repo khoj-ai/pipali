@@ -344,6 +344,47 @@ The fact itself.`;
                 expect(update).not.toContain('kept.md');
             });
         });
+
+        test('a memory pushed below the size budget is dropped from the listing, not reported deleted', async () => {
+            const budgetDir = path.join(os.tmpdir(), 'memory-budget-tests');
+            await fs.rm(budgetDir, { recursive: true, force: true });
+            await fs.mkdir(budgetDir, { recursive: true });
+
+            // Descriptions heavy enough that nine of these overrun CATALOGUE_MAX_BYTES
+            const bulky = (day: number) => Bun.write(
+                path.join(budgetDir, `bulky-${day}.md`),
+                `---\ndescription: ${`Memory ${day} `.padEnd(3000, 'x')}\ntype: project\n`
+                + `modified: 2026-03-0${day}T00:00:00.000Z\n---\n\nBody.\n`,
+            );
+
+            try {
+                await withMemoryDir(budgetDir, async () => {
+                    for (let day = 1; day <= 8; day++) await bulky(day);
+                    const frozen = extractCatalogue(formatMemoryForPrompt(await loadCatalogue()))!;
+                    expect(frozen).toContain('bulky-1.md');
+
+                    // A newer memory forces the oldest out of the listing - off the prompt, not off the disk
+                    await bulky(9);
+                    const { systemSteps } = await resolveMemoryContext({
+                        steps: [{ source: 'system', message: formatMemoryForPrompt(frozen) }],
+                        memoriesEnabled: true,
+                        isNewConversation: false,
+                    });
+
+                    expect(systemSteps).toHaveLength(1);
+                    expect(systemSteps[0]!.message).toContain('Added:\nbulky-9.md');
+                    expect(systemSteps[0]!.message).not.toContain('Deleted');
+
+                    const current = systemSteps[0]!.extra.memory_catalogue as string;
+                    expect(current.split('\n')).toHaveLength(9); // eight listed, then the tally
+                    expect(current).not.toContain('bulky-1.md');
+                    expect(current).toContain('not listed here');
+                    expect(await getMemory('bulky-1.md')).toBeDefined();
+                });
+            } finally {
+                await fs.rm(budgetDir, { recursive: true, force: true });
+            }
+        });
     });
 
     describe('loadCatalogue', () => {
