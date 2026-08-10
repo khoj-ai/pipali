@@ -21,7 +21,8 @@ import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
 import { loadMemorySettings } from '../memory/settings';
-import { resolveMemoryContext } from '../memory';
+import { memoryPathsExtra, resolveMemoryContext, surfacedMemories, MEMORY_RECALL_KIND } from '../memory';
+import { recallMemories } from '../memory/recall';
 import { resolveMcpInventoryContext } from './actor/search_tools';
 import { getMcpToolDefinitions } from './mcp';
 import type { ResearchIteration } from './director/types';
@@ -199,6 +200,38 @@ export async function* runResearchWithConversation(
         }
     }
 
+    // Proactively recall memories relevant to the user's message, injected as a
+    // persisted system step after the user turn - appended, kept for the life of
+    // the conversation, each memory at most once (memory-architecture.md §5).
+    let pendingRecallStep: { message: string; extra: Record<string, unknown> } | undefined;
+    if (memoriesEnabled) {
+        const lastUserMessage = trajectory.steps.findLast(
+            s => s.source === 'user' && s.extra?.is_compaction !== true)?.message;
+        if (lastUserMessage) {
+            const recall = await recallMemories(lastUserMessage, surfacedMemories(trajectory.steps));
+            if (recall && isNewConversation) {
+                // The system prompt is not persisted yet; a recall step persisted now
+                // would precede it and read as part of the base prompt on later turns.
+                // Hold it in memory and persist it once the user turn is.
+                addStepToTrajectory(trajectory, 'system', recall.message).extra = recall.extra;
+                pendingRecallStep = recall;
+            } else if (recall) {
+                const recallStep = await atifConversationService.addStep(
+                    conversationId,
+                    'system',
+                    recall.message,
+                    undefined, // no metrics
+                    undefined, // no tool calls
+                    undefined, // no observation
+                    undefined, // no reasoning
+                    undefined, // no raw
+                    recall.extra,
+                );
+                trajectory.steps.push(recallStep);
+            }
+        }
+    }
+
     let finalResponse = '';
     let finalThought: ResearchIteration['thought'];
     let finalMetrics: ResearchIteration['metrics'];
@@ -262,6 +295,26 @@ export async function* runResearchWithConversation(
                 if (onUserMessagePersisted) {
                     onUserMessagePersisted(userStep.step_id);
                 }
+            }
+
+            // Persist the recall step held back until the turn it follows existed
+            if (pendingRecallStep) {
+                const recallStep = await atifConversationService.addStep(
+                    conversationId,
+                    'system',
+                    pendingRecallStep.message,
+                    undefined, // no metrics
+                    undefined, // no tool calls
+                    undefined, // no observation
+                    undefined, // no reasoning
+                    undefined, // no raw
+                    pendingRecallStep.extra,
+                );
+                const recallIndex = trajectory.steps.findLastIndex(s => s.extra?.kind === MEMORY_RECALL_KIND);
+                if (recallIndex >= 0) {
+                    trajectory.steps[recallIndex] = recallStep;
+                }
+                pendingRecallStep = undefined;
             }
             systemPromptPersisted = true;
         }
@@ -349,6 +402,8 @@ export async function* runResearchWithConversation(
                 { results: iteration.toolResults },
                 iteration.thought,
                 iteration.raw,
+                // A memory the model opened or wrote is in context, so recall skips it
+                memoryPathsExtra(iteration.toolCalls),
             );
             trajectory.steps.push(agentStep);
 

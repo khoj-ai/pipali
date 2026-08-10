@@ -90,7 +90,9 @@
         "delegationModel": "to {{tier}} model",
         "delegationBackground": "in background",
         "waitForTasks": "on {{tasks}}",
-        "noRunInProgress": "No run was in progress."
+        "noRunInProgress": "No run was in progress.",
+        "recalledMemories_one": "Recalled {{count}} memory.",
+        "recalledMemories_other": "Recalled {{count}} memories."
     },
     "voice": {
         "beta": "Beta",

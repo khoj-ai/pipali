@@ -32,6 +32,13 @@ const CATALOGUE_KEY = 'memory_catalogue';
 
 export const MEMORY_UPDATE_KIND = 'memory_update';
 export const MEMORY_STATE_KIND = 'memory_state';
+export const MEMORY_RECALL_KIND = 'memory_recall';
+
+/** Carried on a recall or file tool step: which memories it put into the conversation */
+const MEMORY_PATHS_KEY = 'memory_paths';
+
+/** Past this an injected body stops informing and starts crowding out the conversation */
+const RECALL_BODY_MAX_CHARS = 8_000;
 
 export const MEMORY_PAUSED_MESSAGE = `# Memory paused
 
@@ -240,6 +247,13 @@ ${MEMORY_FRONTMATTER}
 <the fact>`;
 }
 
+/** The catalogue's one-line shape - also what the recall selector reads */
+export function formatCatalogueEntry(memory: Pick<MemorySummary, 'file' | 'type' | 'description'>): string {
+    return memory.type
+        ? `${memory.file} (${memory.type}): ${memory.description}`
+        : `${memory.file}: ${memory.description}`;
+}
+
 /**
  * Build the catalogue from the frontmatter of every memory on disk, one line each,
  * most recently changed first.
@@ -281,10 +295,9 @@ export async function loadCatalogue(): Promise<string> {
                 await stampModified(memoryPath, content, modified);
             }
 
-            const type = parsed.fields.type;
             return {
                 modified,
-                line: type ? `${file} (${type}): ${description}` : `${file}: ${description}`,
+                line: formatCatalogueEntry({ file, type: parsed.fields.type, description }),
             };
         } catch (err) {
             log.warn({ err, file }, 'Skipping unreadable memory');
@@ -344,28 +357,81 @@ export function catalogueState(steps: CatalogueStep[]): { inPrompt?: string; sho
     return { inPrompt, shown };
 }
 
+/**
+ * Which memories this conversation already holds, via auto recall or file access.
+ *
+ * Derived so the set cannot drift from what is actually in context.
+ * If compaction drops a memory holding step, it becomes auto-recall eligible again.
+ */
+export function surfacedMemories(steps: CatalogueStep[]): Set<string> {
+    return new Set(steps.flatMap(step => {
+        const paths = step.extra?.[MEMORY_PATHS_KEY];
+        return Array.isArray(paths) ? paths.filter((file): file is string => typeof file === 'string') : [];
+    }));
+}
+
+/** Render recalled memories as one system step, holding their bodies and identities. */
+export function formatMemoryRecall(memories: StoredMemory[]): { message: string; extra: Record<string, unknown> } {
+    const memoryDir = getMemoryDir();
+    const bodies = memories.map(memory => {
+        const content = memory.content.length > RECALL_BODY_MAX_CHARS
+            ? `${memory.content.slice(0, RECALL_BODY_MAX_CHARS)}\n[truncated - view the file for the rest]`
+            : memory.content;
+        return `Memory: ${path.join(memoryDir, memory.file)}\n\n${content}`;
+    });
+
+    return {
+        message: `# Memory recalled
+Retrieved for possible relevance - use only if it actually applies to what the user asked.
+
+${bodies.join('\n\n')}`,
+        extra: { kind: MEMORY_RECALL_KIND, [MEMORY_PATHS_KEY]: memories.map(memory => memory.file) },
+    };
+}
+
 const MEMORY_FILE_TOOL_PATHS: Record<string, string> = {
     view_file: 'path',
     edit_file: 'file_path',
     write_file: 'file_path',
 };
 
-/** Whether this conversation used a file tool against persistent memory. */
+type MemoryToolCall = { function_name: string; arguments: Record<string, unknown> };
+
+/** The memory a file tool call put in context, or undefined if it touched something else. */
+function memoryFileTouched(toolCall: MemoryToolCall): string | undefined {
+    const pathKey = MEMORY_FILE_TOOL_PATHS[toolCall.function_name];
+    if (!pathKey) return undefined;
+
+    const filePath = toolCall.arguments[pathKey];
+    if (typeof filePath !== 'string') return undefined;
+
+    const absolutePath = filePath.startsWith('~/')
+        ? path.join(os.homedir(), filePath.slice(2))
+        : path.isAbsolute(filePath)
+            ? filePath
+            : path.resolve(os.homedir(), filePath);
+    return isMemoryFile(absolutePath) ? path.basename(absolutePath) : undefined;
+}
+
+/** Whether memory content reached this conversation, through a file tool or proactive recall. */
 export function hasMemoryInteraction(steps: CatalogueStep[]): boolean {
-    return steps.some(step => step.tool_calls?.some(toolCall => {
-        const pathKey = MEMORY_FILE_TOOL_PATHS[toolCall.function_name];
-        if (!pathKey) return false;
+    return steps.some(step => step.extra?.kind === MEMORY_RECALL_KIND
+        || (step.tool_calls?.some(toolCall => memoryFileTouched(toolCall) !== undefined) ?? false));
+}
 
-        const filePath = toolCall.arguments[pathKey];
-        if (typeof filePath !== 'string') return false;
-
-        const absolutePath = filePath.startsWith('~/')
-            ? path.join(os.homedir(), filePath.slice(2))
-            : path.isAbsolute(filePath)
-                ? filePath
-                : path.resolve(os.homedir(), filePath);
-        return isMemoryFile(absolutePath);
-    }) ?? false);
+/**
+ * Tag an agent step with the memories its tool calls put in context, or undefined
+ * for a step that touched none.
+ *
+ * Recall skips what the conversation already holds, and a memory the model opened or
+ * wrote itself should be skipped. Stamped here to avoid need to read out of tool args
+ * later, so the surfaced set stays a lookup on one field.
+ */
+export function memoryPathsExtra(toolCalls: MemoryToolCall[] | undefined): Record<string, unknown> | undefined {
+    const files = [...new Set(toolCalls
+        ?.map(memoryFileTouched)
+        .filter((file): file is string => file !== undefined))];
+    return files.length > 0 ? { [MEMORY_PATHS_KEY]: files } : undefined;
 }
 
 /** Memory state established by the conversation prompt and later transition steps. */

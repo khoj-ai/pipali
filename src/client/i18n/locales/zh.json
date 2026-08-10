@@ -90,7 +90,9 @@
         "delegationModel": "交给{{tier}}模型",
         "delegationBackground": "在后台",
         "waitForTasks": "等待{{tasks}}",
-        "noRunInProgress": "没有正在运行的任务。"
+        "noRunInProgress": "没有正在运行的任务。",
+        "recalledMemories_one": "已调用 {{count}} 条记忆。",
+        "recalledMemories_other": "已调用 {{count}} 条记忆。"
     },
     "home": {
         "greetings": {

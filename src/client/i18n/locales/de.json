@@ -90,7 +90,9 @@
         "delegationModel": "an das Modell {{tier}}",
         "delegationBackground": "im Hintergrund",
         "waitForTasks": "auf {{tasks}}",
-        "noRunInProgress": "Es wurde keine Aufgabe ausgeführt."
+        "noRunInProgress": "Es wurde keine Aufgabe ausgeführt.",
+        "recalledMemories_one": "{{count}} Erinnerung abgerufen.",
+        "recalledMemories_other": "{{count}} Erinnerungen abgerufen."
     },
     "home": {
         "greetings": {

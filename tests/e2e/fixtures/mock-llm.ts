@@ -912,6 +912,29 @@ export function stopBackgroundCommandScenario(): MockScenario {
 }
 
 /**
+ * Answers the memory selector's query. Only fires when a memory file exists,
+ * since an empty memory directory never reaches the selector.
+ */
+export function memoryRecallSelectorScenario(): MockScenario {
+    return {
+        name: 'memory-recall-selector',
+        queryPattern: '<memory_catalogue>',
+        iterations: [],
+        finalResponse: '{"selected_memories": ["favorite-editor.md"]}',
+    };
+}
+
+/** The user turn whose message the selector scenario recalls a memory for */
+export function memoryRecallUserScenario(): MockScenario {
+    return {
+        name: 'memory-recall-user',
+        queryPattern: 'what code editor do I prefer',
+        iterations: [],
+        finalResponse: 'You prefer the Helix editor.',
+    };
+}
+
+/**
  * Default scenarios used in tests
  */
 export const defaultMockScenarios: MockScenario[] = [
@@ -943,6 +966,10 @@ export const defaultMockScenarios: MockScenario[] = [
     backgroundUpdateMidRunScenario(),
     backgroundUpdateDuringFinalResponseScenario(),
     delegateAndStopScenario(),
+    memoryRecallUserScenario(),
+    // Last, so selector queries match here before the user-message scenario,
+    // whose pattern also appears inside the selector query
+    memoryRecallSelectorScenario(),
 ];
 
 /**

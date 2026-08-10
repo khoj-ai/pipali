@@ -31,7 +31,7 @@ import { getFunctionCallName } from '../conversation/openai/utils';
 import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
-import { formatMemoryForPrompt } from '../../memory';
+import { formatMemoryForPrompt, MEMORY_RECALL_KIND } from '../../memory';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFStep, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
 import { addMetrics } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
@@ -775,8 +775,10 @@ async function pickNextTool(
         now,
     });
 
-    // Check if this is the first agent iteration
-    const hasSystemStep = config.chatHistory.steps.some(s => s.source === 'system');
+    // Check if this is the first agent iteration. Auxiliary system steps like a
+    // recalled memory can precede the base system prompt in a new conversation.
+    const hasSystemStep = config.chatHistory.steps.some(
+        s => s.source === 'system' && s.extra?.kind !== MEMORY_RECALL_KIND);
     const isFirstIteration = !hasSystemStep;
 
     // Inject iteration warning when at 90%+ of max iterations
