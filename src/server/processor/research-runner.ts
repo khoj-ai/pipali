@@ -20,6 +20,8 @@ import { atifConversationService, type ConversationRole } from './conversation/a
 import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
+import { resolveMcpInventoryContext } from './actor/search_tools';
+import { getMcpToolDefinitions } from './mcp';
 import type { ResearchIteration } from './director/types';
 import type { ConfirmationContext } from './confirmation';
 import { createChildLogger } from '../logger';
@@ -130,6 +132,35 @@ export async function* runResearchWithConversation(
 
     // Check if this is a new conversation (no system prompt yet) or existing
     const isNewConversation = !trajectory.steps.some(s => s.source === 'system');
+
+    // Tool schemas are rebuilt every iteration but the inventory naming them is
+    // frozen in the system prompt, so announce what has changed since. Non-fatal:
+    // an unreachable MCP server must not cost the user their turn.
+    let mcpSteps: Array<{ message: string; extra: Record<string, unknown> }> = [];
+    try {
+        mcpSteps = resolveMcpInventoryContext({
+            steps: trajectory.steps,
+            mcpTools: await getMcpToolDefinitions(),
+            isNewConversation,
+        }).systemSteps;
+    } catch (error) {
+        log.warn({ err: error, conversationId }, 'Failed to resolve MCP tool inventory changes');
+    }
+
+    for (const step of mcpSteps) {
+        const persistedStep = await atifConversationService.addStep(
+            conversationId,
+            'system',
+            step.message,
+            undefined, // no metrics
+            undefined, // no tool calls
+            undefined, // no observation
+            undefined, // no reasoning
+            undefined, // no raw
+            step.extra
+        )
+        trajectory.steps.push(persistedStep);
+    }
 
     // For existing conversations, persist user message immediately.
     // For new conversations, we add to in-memory first, then persist after system prompt.

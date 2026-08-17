@@ -6,8 +6,12 @@ import {
     applyToolDeferral,
     applyProviderToolSearch,
     shouldDeferMcpTools,
+    resolveMcpInventoryContext,
+    mcpInventoryState,
+    MCP_INVENTORY_KIND,
     MCP_TOOL_DEFER_THRESHOLD,
     SEARCH_TOOLS_TOOL_NAME,
+    type InventoryStep,
 } from '../../src/server/processor/actor/search_tools';
 import { toOpenaiTools, getFunctionCallName } from '../../src/server/processor/conversation/openai/utils';
 import type { ToolDefinition } from '../../src/server/processor/conversation/conversation';
@@ -216,14 +220,6 @@ describe('buildMcpInventoryForPrompt', () => {
         expect(inventory).toContain('- slack: send_message');
     });
 
-    test('tells the model a listed tool exists even when search misses it', () => {
-        expect(buildMcpInventoryForPrompt(DEFERRING_TOOLS)).toContain('exists even if a search does not return it');
-    });
-
-    test('is empty when no MCP tools are connected', () => {
-        expect(buildMcpInventoryForPrompt([])).toBe('');
-    });
-
     /**
      * Below the threshold every tool schema is already in context and
      * applyToolDeferral advertises no search tool, so an inventory promising
@@ -232,6 +228,7 @@ describe('buildMcpInventoryForPrompt', () => {
     test('is empty below the deferral threshold, where nothing is hidden and no search tool exists', () => {
         expect(applyToolDeferral(TOOLS, new Set())).toEqual(TOOLS);
         expect(buildMcpInventoryForPrompt(TOOLS)).toBe('');
+        expect(buildMcpInventoryForPrompt([])).toBe('');
     });
 
     test('carries names only, never schemas or descriptions', () => {
@@ -242,8 +239,8 @@ describe('buildMcpInventoryForPrompt', () => {
 
     /**
      * Guards the token cost of the inventory, which every request above the
-     * threshold pays. Measured with o200k_base: an 81-token fixed preamble plus
-     * ~3.5 tokens per tool at realistic name lengths, so ~360 tokens for an
+     * threshold pays. Measured with o200k_base: a ~40-token fixed preamble plus
+     * ~3.5 tokens per tool at realistic name lengths, so ~320 tokens for an
      * 80-tool install. The marginal cost below is in characters, which tracks
      * tokens closely here and needs no tokenizer dependency.
      */
@@ -253,6 +250,162 @@ describe('buildMcpInventoryForPrompt', () => {
         );
         const perTool = (buildMcpInventoryForPrompt(install(120)).length - buildMcpInventoryForPrompt(install(60)).length) / 60;
         expect(perTool).toBeLessThan(30);
+    });
+
+    /**
+     * The two leads must stay distinct. Collapsing them into one shared string is
+     * the tempting DRY refactor and it reintroduces the bug whichever way it lands:
+     * a prompt claiming a currency it does not have, or a mid-conversation refresh
+     * dating itself to a moment it does not describe.
+     */
+    test('dates the prompt inventory to conversation start and a refresh to now', () => {
+        const dating = 'on conversation start'
+        const prompt = buildMcpInventoryForPrompt(DEFERRING_TOOLS);
+        const refresh = resolveMcpInventoryContext({
+            steps: [{ source: 'system', message: 'You are Pipali.' }],
+            mcpTools: DEFERRING_TOOLS,
+            isNewConversation: false,
+        }).systemSteps[0]!.message;
+
+        // Identical index recovered from both, so the dating is the only difference
+        expect(mcpInventoryState([{ source: 'system', message: refresh }]))
+            .toBe(mcpInventoryState([{ source: 'system', message: prompt }]));
+        expect(prompt).toContain(dating);
+        expect(refresh).not.toContain(dating);
+    });
+});
+
+describe('resolveMcpInventoryContext', () => {
+    /** One turn of the research runner: resolve, then append what it returned */
+    function runTurn(steps: InventoryStep[], mcpTools: ToolDefinition[], isNewConversation = false): InventoryStep[] {
+        const { systemSteps } = resolveMcpInventoryContext({ steps, mcpTools, isNewConversation });
+        return [...steps, ...systemSteps.map(step => ({ source: 'system', ...step }))];
+    }
+
+    /** A conversation whose persisted system prompt froze this tool set */
+    function startedWith(mcpTools: ToolDefinition[]): InventoryStep[] {
+        return [{ source: 'system', message: `You are Pipali.\n\n${buildMcpInventoryForPrompt(mcpTools)}` }];
+    }
+
+    const added = (server: string, count: number) =>
+        Array.from({ length: count }, (_, i) => makeTool(server, `action_${i}`, `${server} action ${i}`));
+
+    test('announces a server connected while already above the threshold', () => {
+        const steps = startedWith(DEFERRING_TOOLS);
+        const withPosthog = [...DEFERRING_TOOLS, ...added('posthog', 4)];
+
+        const { systemSteps } = resolveMcpInventoryContext({ steps, mcpTools: withPosthog, isNewConversation: false });
+
+        expect(systemSteps).toHaveLength(1);
+        expect(systemSteps[0]?.message).toContain('External Tools changed');
+        expect(systemSteps[0]?.message).toContain('- posthog: action_0, action_1, action_2, action_3');
+        // A delta, not a re-listing of everything already in the prompt
+        expect(systemSteps[0]?.message).not.toContain('list_pull_requests');
+    });
+
+    test('appends the full inventory when the threshold is crossed from below', () => {
+        const steps = startedWith(TOOLS);
+        expect(mcpInventoryState(steps)).toBeUndefined();
+
+        const { systemSteps } = resolveMcpInventoryContext({
+            steps,
+            mcpTools: [...TOOLS, ...added('posthog', 28)],
+            isNewConversation: false,
+        });
+
+        expect(systemSteps).toHaveLength(1);
+        // Nothing to delta against, so the whole set is listed, tagged for readback
+        expect(systemSteps[0]?.message).toContain('<connected_tools>');
+        expect(systemSteps[0]?.message).toContain('- github: create_issue, list_pull_requests, merge_pull_request');
+        expect(systemSteps[0]?.message).toContain('- posthog: action_0');
+        expect(systemSteps[0]?.extra?.['kind']).toBe(MCP_INVENTORY_KIND);
+    });
+
+    test('announces a removed server so the frozen inventory stops being trusted', () => {
+        const withStripe = [...DEFERRING_TOOLS, ...added('stripe', 3)];
+        const { systemSteps } = resolveMcpInventoryContext({
+            steps: startedWith(withStripe),
+            mcpTools: DEFERRING_TOOLS,
+            isNewConversation: false,
+        });
+
+        expect(systemSteps).toHaveLength(1);
+        expect(systemSteps[0]?.message).toContain('Disconnected');
+        expect(systemSteps[0]?.message).toContain('- stripe: action_0, action_1, action_2');
+    });
+
+    /**
+     * Removals must be announced even when losing them drops the conversation back
+     * under the threshold: the prompt's inventory is still in context either way,
+     * and gating this on the threshold would leave it advertising tools that are gone.
+     */
+    test('announces removals that drop the conversation back below the threshold', () => {
+        const { systemSteps } = resolveMcpInventoryContext({
+            steps: startedWith(DEFERRING_TOOLS),
+            mcpTools: TOOLS,
+            isNewConversation: false,
+        });
+
+        expect(systemSteps).toHaveLength(1);
+        expect(systemSteps[0]?.message).toContain('Disconnected');
+        expect(systemSteps[0]?.message).toContain('- notion: page_action_0');
+    });
+
+    test('appends nothing on later turns once the change has been announced', () => {
+        const withPosthog = [...DEFERRING_TOOLS, ...added('posthog', 4)];
+
+        const afterFirst = runTurn(startedWith(DEFERRING_TOOLS), withPosthog);
+        expect(afterFirst).toHaveLength(2);
+
+        // Same tool set on the next two turns: the appended step is now the known state
+        const afterSecond = runTurn(afterFirst, withPosthog);
+        expect(afterSecond).toHaveLength(2);
+        expect(resolveMcpInventoryContext({ steps: afterSecond, mcpTools: withPosthog, isNewConversation: false }).systemSteps).toEqual([]);
+    });
+
+    test('appends nothing when only the order of connected servers changes', () => {
+        const steps = startedWith(DEFERRING_TOOLS);
+        const reordered = [...DEFERRING_TOOLS].reverse();
+
+        expect(buildMcpInventoryForPrompt(reordered)).not.toBe(buildMcpInventoryForPrompt(DEFERRING_TOOLS));
+        expect(resolveMcpInventoryContext({ steps, mcpTools: reordered, isNewConversation: false }).systemSteps).toEqual([]);
+    });
+
+    test('appends nothing while the conversation stays below the threshold', () => {
+        const steps = startedWith(TOOLS);
+        const stillFew = [...TOOLS, ...added('posthog', 3)];
+
+        expect(resolveMcpInventoryContext({ steps, mcpTools: stillFew, isNewConversation: false }).systemSteps).toEqual([]);
+    });
+
+    test('appends nothing to a new conversation, whose prompt is current by construction', () => {
+        const { systemSteps } = resolveMcpInventoryContext({
+            steps: [],
+            mcpTools: DEFERRING_TOOLS,
+            isNewConversation: true,
+        });
+        expect(systemSteps).toEqual([]);
+    });
+
+    /**
+     * After a crossing, the appended inventory is the only record of the tool set -
+     * the prompt has none. The next change must diff against it, or the conversation
+     * re-announces the entire set in full every time anything changes again.
+     */
+    test('diffs against the appended inventory once the threshold has been crossed', () => {
+        const afterCrossing = [...TOOLS, ...added('posthog', 28)];
+        const crossed = runTurn(startedWith(TOOLS), afterCrossing);
+
+        const { systemSteps } = resolveMcpInventoryContext({
+            steps: crossed,
+            mcpTools: [...afterCrossing, ...added('stripe', 2)],
+            isNewConversation: false,
+        });
+
+        expect(systemSteps[0]?.message).toContain('- stripe: action_0, action_1');
+        // A delta against what was appended, not a second full listing
+        expect(systemSteps[0]?.message).not.toContain('<connected_tools>');
+        expect(systemSteps[0]?.message).not.toContain('- posthog: action_0');
     });
 });
 

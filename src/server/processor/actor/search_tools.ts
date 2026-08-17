@@ -53,7 +53,7 @@ export interface SearchToolsResult {
 }
 
 /** Group namespaced tool names by server into a compact one-line-per-server index */
-function buildToolIndex(mcpTools: ToolDefinition[]): string {
+function buildToolIndex(mcpTools: Array<{ name: string }>): string {
     const byServer = new Map<string, string[]>();
     for (const tool of mcpTools) {
         const parsed = parseNamespacedToolName(tool.name);
@@ -65,6 +65,33 @@ function buildToolIndex(mcpTools: ToolDefinition[]): string {
     return Array.from(byServer.entries())
         .map(([server, names]) => `- ${server}: ${names.join(', ')}`)
         .join('\n');
+}
+
+/** Recovers the tool index a persisted system prompt or inventory step carried */
+const CONNECTED_TOOLS_BLOCK = /<connected_tools>\n([\s\S]*?)\n<\/connected_tools>/;
+
+/** Carried on an inventory step so the tool set it announced can be read back */
+const MCP_TOOLS_KEY = 'mcp_tools';
+
+export const MCP_INVENTORY_KIND = 'mcp_inventory';
+
+/**
+ * One writer for both emitters, as the <connected_tools> tags are a contract with
+ * mcpInventoryState rather than formatting. A persisted system prompt's copy is
+ * the only record of what a conversation was first told, recovered by parsing the
+ * block back out. Only the lead differs, since the prompt and a mid-conversation
+ * refresh take their snapshot at different moments.
+ */
+function renderInventory(lead: string, index: string): string {
+    const INVENTORY_GUIDANCE = `Use tool search to load the ones you need.`;
+
+    return `
+# External Tools
+${lead} ${INVENTORY_GUIDANCE}
+
+<connected_tools>
+${index}
+</connected_tools>`;
 }
 
 /**
@@ -85,12 +112,146 @@ export function buildMcpInventoryForPrompt(mcpTools: ToolDefinition[]): string {
     if (!shouldDeferMcpTools(mcpTools)) {
         return '';
     }
-    return `# External Tools
-These external (MCP) tools are connected and available to you. Full schemas may be hidden to keep your context lean; use ${SEARCH_TOOLS_TOOL_NAME} (or your tool search) to load the ones you need. A tool listed here exists even if a search does not return it — search again with a narrower pattern, such as the server name.
+    return renderInventory(
+        'These external (MCP) tools were connected on conversation start.',
+        buildToolIndex(mcpTools),
+    );
+}
 
-<connected_tools>
-${buildToolIndex(mcpTools)}
-</connected_tools>`;
+export interface InventoryStep {
+    source: string;
+    message?: string;
+    extra?: Record<string, unknown>;
+}
+
+/** Tool index a system prompt or inventory step carried, if it carried one */
+function extractToolIndex(text: string): string | undefined {
+    return text.match(CONNECTED_TOOLS_BLOCK)?.[1];
+}
+
+/** Namespaced tool names in a rendered index, for diffing one index against another */
+function parseToolIndex(index: string): string[] {
+    return index.split('\n').flatMap(line => {
+        const match = line.match(/^- ([^:]+): (.+)$/);
+        if (!match) return [];
+        const [, server, names] = match;
+        return names!.split(', ').map(name => `${server}__${name}`);
+    });
+}
+
+/** Carried on an inventory step so the next turn can diff against what it announced */
+function mcpInventoryExtra(index: string): Record<string, unknown> {
+    return { kind: MCP_INVENTORY_KIND, [MCP_TOOLS_KEY]: index };
+}
+
+/**
+ * The tool index this conversation has been told about: the one frozen into its
+ * system prompt, then any refresh appended since.
+ *
+ * Derived from the steps rather than tracked alongside them, so it cannot drift
+ * from what the model actually has in context. A refresh dropped by compaction
+ * makes its tools eligible to be announced again, and the state survives a server
+ * restart because it lives in the trajectory the model reads.
+ */
+export function mcpInventoryState(steps: InventoryStep[]): string | undefined {
+    let shown: string | undefined;
+
+    for (const step of steps) {
+        if (step.source !== 'system') continue;
+
+        const announced = step.extra?.[MCP_TOOLS_KEY];
+        if (typeof announced === 'string') {
+            shown = announced;
+            continue;
+        }
+
+        const listed = extractToolIndex(step.message ?? '');
+        if (listed !== undefined) {
+            shown = listed;
+        }
+    }
+
+    return shown;
+}
+
+/**
+ * Describe how the connected tool set changed since this conversation last saw it.
+ *
+ * Both sides are rendered indexes, and the set diff rather than the string
+ * comparison decides: MCP servers are iterated in connection order, so the same
+ * tools can render in a different order between runs. String equality is only the
+ * fast path out.
+ */
+function formatMcpInventoryUpdate(shownIndex: string, currentIndex: string): string | undefined {
+    if (shownIndex === currentIndex) {
+        return undefined;
+    }
+
+    const shown = new Set(parseToolIndex(shownIndex));
+    const current = new Set(parseToolIndex(currentIndex));
+    const added = [...current].filter(name => !shown.has(name));
+    const removed = [...shown].filter(name => !current.has(name));
+
+    if (!added.length && !removed.length) {
+        return undefined;
+    }
+
+    const sections = ['# External Tools changed'];
+    if (added.length) {
+        sections.push(`Connected:\n${buildToolIndex(added.map(name => ({ name })))}`);
+    }
+    if (removed.length) {
+        sections.push(`Disconnected:\n${buildToolIndex(removed.map(name => ({ name })))}`);
+    }
+    return sections.join('\n\n');
+}
+
+/**
+ * System steps that bring a continuing conversation's tool inventory up to date.
+ *
+ * The initial system prompt is written once per conversation and never rewritten,
+ * while the tool list is rebuilt every iteration. Appending keeps the cached prompt
+ * prefix intact and the timeline consistent, which rewriting the prompt would not.
+ */
+export function resolveMcpInventoryContext(args: {
+    steps: InventoryStep[];
+    mcpTools: ToolDefinition[];
+    isNewConversation: boolean;
+}): { systemSteps: Array<{ message: string; extra: Record<string, unknown> }> } {
+    const { steps, mcpTools, isNewConversation } = args;
+
+    // A new conversation's prompt is built from the current tool set, so it is current
+    // by construction, and a refresh now would only duplicate it
+    if (isNewConversation) {
+        return { systemSteps: [] };
+    }
+
+    const currentIndex = buildToolIndex(mcpTools);
+    const shownIndex = mcpInventoryState(steps);
+
+    // Started below the threshold, so there is no inventory to bring up to date.
+    // One is owed only once deferral engages and schemas actually leave context.
+    if (shownIndex === undefined) {
+        if (!shouldDeferMcpTools(mcpTools)) {
+            return { systemSteps: [] };
+        }
+        return {
+            systemSteps: [{
+                message: renderInventory(
+                    'These external (MCP) tools are now connected.',
+                    currentIndex,
+                ),
+                extra: mcpInventoryExtra(currentIndex),
+            }],
+        };
+    }
+
+    // Deliberately not gated on the threshold. Dropping back below it leaves the
+    // prompt's inventory in context, still advertising tools that are now gone.
+    const update = formatMcpInventoryUpdate(shownIndex, currentIndex);
+    return {
+        systemSteps: update ? [{ message: update, extra: mcpInventoryExtra(currentIndex) }] : [],
+    };
 }
 
 /**
