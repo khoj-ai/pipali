@@ -2,8 +2,10 @@ import { test, expect, describe } from 'bun:test';
 import {
     searchTools,
     buildSearchToolsDefinition,
+    buildMcpInventoryForPrompt,
     applyToolDeferral,
     applyProviderToolSearch,
+    shouldDeferMcpTools,
     MCP_TOOL_DEFER_THRESHOLD,
     SEARCH_TOOLS_TOOL_NAME,
 } from '../../src/server/processor/actor/search_tools';
@@ -25,6 +27,14 @@ const TOOLS: ToolDefinition[] = [
     makeTool('linear', 'create_issue', 'Create a new issue in Linear'),
     makeTool('linear', 'search_issues', 'Search Linear issues by keyword'),
     makeTool('slack', 'send_message', 'Send a message to a Slack channel'),
+];
+
+/** TOOLS padded just past MCP_TOOL_DEFER_THRESHOLD, where deferral engages */
+const DEFERRING_TOOLS: ToolDefinition[] = [
+    ...TOOLS,
+    ...Array.from({ length: MCP_TOOL_DEFER_THRESHOLD - TOOLS.length + 1 }, (_, i) =>
+        makeTool('notion', `page_action_${i}`, `Notion page action ${i}`)
+    ),
 ];
 
 describe('searchTools', () => {
@@ -98,14 +108,176 @@ describe('searchTools', () => {
     });
 });
 
+describe('searchTools ranking', () => {
+    function makeToolWithSchema(server: string, name: string, description: string, schema: object): ToolDefinition {
+        return { name: `${server}__${name}`, description: `[MCP: ${server}] ${description}`, schema };
+    }
+
+    /**
+     * The shape that makes ranking fail: two servers whose *parameter schemas*
+     * mention a query word, outnumbering the one server whose name matches it.
+     * That server is registered last, so order cannot be what rescues it.
+     */
+    const INCIDENT_TOOLS: ToolDefinition[] = [
+        ...Array.from({ length: 17 }, (_, i) => makeToolWithSchema(
+            'chrome-browser', `browser_action_${i}`,
+            'Type text into a input, text area or content editable element',
+            { type: 'object', properties: { text: { type: 'string', description: 'Request message for BrowserAction' } } },
+        )),
+        ...Array.from({ length: 8 }, (_, i) => makeToolWithSchema(
+            'calendar', `calendar_action_${i}`,
+            'Manage calendar events',
+            { type: 'object', properties: { request: { type: 'string', description: 'Request message for CreateEvent' } } },
+        )),
+        ...['search_threads', 'get_thread', 'create_draft', 'list_drafts', 'list_labels',
+            'label_thread', 'unlabel_thread', 'label_message', 'unlabel_message'
+        ].map(name => makeToolWithSchema('mailbox', name, 'Work with mail threads and labels', { type: 'object', properties: {} })),
+    ];
+
+    test('ranks a server-name match above schema-text noise that outnumbers it', () => {
+        const result = searchTools({ query: 'email|mail|inbox|message' }, INCIDENT_TOOLS);
+        const names = result.matches.map(t => t.name);
+        expect(names).toContain('mailbox__search_threads');
+        expect(names).toContain('mailbox__create_draft');
+        // Every mailbox tool ranks above the schema-text matches that displaced them
+        expect(names.slice(0, 9).every(n => n.startsWith('mailbox__'))).toBe(true);
+    });
+
+    test('returns a whole server for a bare server-name query', () => {
+        const result = searchTools({ query: 'mailbox' }, INCIDENT_TOOLS);
+        expect(result.matches).toHaveLength(9);
+        expect(result.matches.every(t => t.name.startsWith('mailbox__'))).toBe(true);
+        expect(result.truncated).toBe(false);
+    });
+
+    test('reports the total, the number shown, and which servers were cut off', () => {
+        const result = searchTools({ query: 'email|mail|inbox|message' }, INCIDENT_TOOLS);
+        expect(result.totalMatches).toBe(34);
+        expect(result.matches).toHaveLength(15);
+        expect(result.truncated).toBe(true);
+        expect(result.compiled).toContain('Found 34 matching tool(s), showing the 15 most relevant');
+        expect(result.compiled).toContain('19 more matched but were not shown');
+        expect(result.compiled).toContain('chrome-browser');
+        expect(result.compiled).toContain('Narrow the pattern');
+    });
+
+    test('reports no truncation when every match fits', () => {
+        const result = searchTools({ query: 'issue' }, TOOLS);
+        expect(result.truncated).toBe(false);
+        expect(result.totalMatches).toBe(result.matches.length);
+        expect(result.compiled).not.toContain('not shown');
+    });
+
+    test('exact tool name outranks a description mentioning it', () => {
+        const tools = [
+            makeTool('wiki', 'search_docs', 'Prefer create_issue for filing bugs'),
+            makeTool('github', 'create_issue', 'File a bug'),
+        ];
+        const result = searchTools({ query: 'create_issue' }, tools);
+        expect(result.matches.map(t => t.name)).toEqual(['github__create_issue', 'wiki__search_docs']);
+    });
+
+    test('tool name outranks description text', () => {
+        const tools = [
+            makeTool('wiki', 'read_page', 'Read a page about pull requests'),
+            makeTool('github', 'list_pull_requests', 'List them'),
+        ];
+        const result = searchTools({ query: 'pull_request' }, tools);
+        expect(result.matches[0]?.name).toBe('github__list_pull_requests');
+    });
+
+    test('matches parameter schema text but ranks it last', () => {
+        const tools = [
+            makeToolWithSchema('calendar', 'create_event', 'Create an event',
+                { type: 'object', properties: { body: { type: 'string', description: 'Request message for CreateEvent' } } }),
+            makeTool('slack', 'send_message', 'Post to a channel'),
+        ];
+        const result = searchTools({ query: 'message' }, tools);
+        // Schema-only match is found (recall) but never displaces the name match
+        expect(result.matches.map(t => t.name)).toEqual(['slack__send_message', 'calendar__create_event']);
+    });
+});
+
 describe('buildSearchToolsDefinition', () => {
-    test('indexes tool names grouped by server', () => {
-        const definition = buildSearchToolsDefinition(TOOLS);
+    test('points at the inventory instead of duplicating it', () => {
+        const definition = buildSearchToolsDefinition();
         expect(definition.name).toBe(SEARCH_TOOLS_TOOL_NAME);
-        expect(definition.description).toContain('- github: create_issue, list_pull_requests, merge_pull_request');
-        expect(definition.description).toContain('- linear: create_issue, search_issues');
-        expect(definition.description).toContain('- slack: send_message');
+        expect(definition.description).toContain('External Tools');
+        expect(definition.description).not.toContain('- github:');
         expect(definition.schema.required).toEqual(['query']);
+    });
+});
+
+describe('buildMcpInventoryForPrompt', () => {
+    test('indexes tool names grouped by server', () => {
+        const inventory = buildMcpInventoryForPrompt(DEFERRING_TOOLS);
+        expect(inventory).toContain('- github: create_issue, list_pull_requests, merge_pull_request');
+        expect(inventory).toContain('- linear: create_issue, search_issues');
+        expect(inventory).toContain('- slack: send_message');
+    });
+
+    test('tells the model a listed tool exists even when search misses it', () => {
+        expect(buildMcpInventoryForPrompt(DEFERRING_TOOLS)).toContain('exists even if a search does not return it');
+    });
+
+    test('is empty when no MCP tools are connected', () => {
+        expect(buildMcpInventoryForPrompt([])).toBe('');
+    });
+
+    /**
+     * Below the threshold every tool schema is already in context and
+     * applyToolDeferral advertises no search tool, so an inventory promising
+     * hidden schemas would spend tokens pointing at a tool that does not exist.
+     */
+    test('is empty below the deferral threshold, where nothing is hidden and no search tool exists', () => {
+        expect(applyToolDeferral(TOOLS, new Set())).toEqual(TOOLS);
+        expect(buildMcpInventoryForPrompt(TOOLS)).toBe('');
+    });
+
+    test('carries names only, never schemas or descriptions', () => {
+        const inventory = buildMcpInventoryForPrompt(DEFERRING_TOOLS);
+        expect(inventory).not.toContain('Create a new issue in a GitHub repository');
+        expect(inventory).not.toContain('properties');
+    });
+
+    /**
+     * Guards the token cost of the inventory, which every request above the
+     * threshold pays. Measured with o200k_base: an 81-token fixed preamble plus
+     * ~3.5 tokens per tool at realistic name lengths, so ~360 tokens for an
+     * 80-tool install. The marginal cost below is in characters, which tracks
+     * tokens closely here and needs no tokenizer dependency.
+     */
+    test('stays compact as installs grow', () => {
+        const install = (count: number) => Array.from({ length: count }, (_, i) =>
+            makeTool(`server-${i % 4}`, `list_calendar_events_${i}`, `Description of tool ${i} that must not be indexed`)
+        );
+        const perTool = (buildMcpInventoryForPrompt(install(120)).length - buildMcpInventoryForPrompt(install(60)).length) / 60;
+        expect(perTool).toBeLessThan(30);
+    });
+});
+
+describe('shouldDeferMcpTools', () => {
+    const atThreshold = Array.from({ length: MCP_TOOL_DEFER_THRESHOLD }, (_, i) =>
+        makeTool('server', `tool_${i}`, `Tool number ${i}`)
+    );
+    const overThreshold = [...atThreshold, makeTool('server', 'one_more', 'One more tool')];
+
+    /**
+     * The prompt inventory and both search paths must turn on at the same count.
+     * They drifted once — the inventory was unconditional while deferral was
+     * not — and the prompt told users below the threshold that their schemas
+     * were hidden behind a search_tools that had never been advertised.
+     */
+    test('gates the inventory and both search paths at the same count', () => {
+        expect(shouldDeferMcpTools(atThreshold)).toBe(false);
+        expect(buildMcpInventoryForPrompt(atThreshold)).toBe('');
+        expect(applyToolDeferral(atThreshold, new Set())).toEqual(atThreshold);
+        expect(applyProviderToolSearch(atThreshold)).toEqual(atThreshold);
+
+        expect(shouldDeferMcpTools(overThreshold)).toBe(true);
+        expect(buildMcpInventoryForPrompt(overThreshold)).toContain('<connected_tools>');
+        expect(applyToolDeferral(overThreshold, new Set())[0]?.name).toBe(SEARCH_TOOLS_TOOL_NAME);
+        expect(applyProviderToolSearch(overThreshold)[0]?.type).toBe('tool_search');
     });
 });
 
@@ -171,7 +343,7 @@ describe('applyToolDeferral', () => {
         expect(namespaces.every(n => n.deferLoading === undefined)).toBe(true);
     });
 
-    test('keeps the search_tools index stable as tools are loaded', () => {
+    test('keeps the search_tools description stable as tools are loaded, for cache reuse', () => {
         const before = applyToolDeferral(manyTools, new Set())[0]?.description;
         const after = applyToolDeferral(manyTools, new Set(['server__tool_3']))[0]?.description;
         expect(before).toBeDefined();

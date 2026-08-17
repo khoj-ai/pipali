@@ -142,6 +142,15 @@ describe('buildSystemPrompt', () => {
 
         expect(prompt).not.toContain('First Conversation');
     });
+
+    // The inventory is also gated on the deferral threshold; see shouldDeferMcpTools in search_tools.test.ts
+    test('omits the external tool inventory when no MCP servers are connected', async () => {
+        const prompt = await buildSystemPrompt({ username: 'TestUser' });
+
+        expect(prompt).not.toContain('External Tools');
+        expect(prompt).not.toContain('<connected_tools>');
+        expect(prompt).not.toContain('{mcp_context}');
+    });
 });
 
 describe('easter egg onboarding trigger', () => {

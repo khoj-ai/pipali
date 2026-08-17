@@ -41,6 +41,7 @@ You are running securely on the user's actual machine.
 
 {user_context}
 {skills_context}
+{mcp_context}
 {first_conversation_context}
 `);
 

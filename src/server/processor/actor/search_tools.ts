@@ -2,9 +2,10 @@
  * Tool Search Actor
  *
  * Lets the agent discover MCP tools on demand instead of loading every tool
- * schema into context upfront. When many MCP tools are connected, only a
- * compact name index is advertised (in this tool's description); the agent
- * searches by regex to load full tool definitions into its tool list.
+ * schema into context upfront. Once more than MCP_TOOL_DEFER_THRESHOLD tools are
+ * connected, only a compact name index is advertised (in the system prompt, see
+ * buildMcpInventoryForPrompt); the agent searches by regex to load full tool
+ * definitions into its tool list.
  *
  * Mirrors the client-executed tool search pattern in the OpenAI Responses API
  * and Anthropic Messages API * (`tool_search(_tool_*)` + `defer_loading`).
@@ -19,6 +20,16 @@ import { parseNamespacedToolName } from '../mcp';
  * tools) so deferral only engages once additional servers are connected.
  */
 export const MCP_TOOL_DEFER_THRESHOLD = 30;
+
+/**
+ * Whether tool schemas leave the model's context for this tool list. The single
+ * source of truth for the threshold: the prompt inventory, the app-side search
+ * tool and the provider-side one must engage together, or the prompt describes
+ * hidden schemas and a search tool that were never advertised.
+ */
+export function shouldDeferMcpTools(mcpTools: ToolDefinition[]): boolean {
+    return mcpTools.length > MCP_TOOL_DEFER_THRESHOLD;
+}
 
 export const SEARCH_TOOLS_TOOL_NAME = 'search_tools';
 
@@ -36,6 +47,9 @@ export interface SearchToolsArgs {
 export interface SearchToolsResult {
     compiled: string;
     matches: ToolDefinition[];
+    /** Matches before the result limit was applied */
+    totalMatches: number;
+    truncated: boolean;
 }
 
 /** Group namespaced tool names by server into a compact one-line-per-server index */
@@ -54,21 +68,44 @@ function buildToolIndex(mcpTools: ToolDefinition[]): string {
 }
 
 /**
- * Build the search_tools ToolDefinition. The description carries a name-only
- * index of every deferrable tool, so the model knows what is discoverable
- * without paying for full schemas upfront. The index is built from the full
- * MCP tool set (not just unloaded tools) to keep the description stable
- * across iterations, preserving the prompt prefix cache.
+ * Name-only inventory of every connected MCP tool, for the system prompt.
+ *
+ * Tool schemas are hidden from context once deferral engages, and on the
+ * provider-executed path (see applyProviderToolSearch) the model is given a
+ * search tool with no index at all. Without this the model can search, get
+ * results ranked and truncated by the provider, and conclude from their absence
+ * that a connected capability does not exist. The inventory is the standing
+ * contradiction to that inference, so both deferral paths emit it.
+ *
+ * Below the threshold it emits nothing: every schema is already in context and
+ * the app-side path advertises no search tool, so an index promising hidden
+ * schemas would cost tokens to point at a tool that does not exist.
  */
-export function buildSearchToolsDefinition(mcpTools: ToolDefinition[]): ToolDefinition {
+export function buildMcpInventoryForPrompt(mcpTools: ToolDefinition[]): string {
+    if (!shouldDeferMcpTools(mcpTools)) {
+        return '';
+    }
+    return `# External Tools
+These external (MCP) tools are connected and available to you. Full schemas may be hidden to keep your context lean; use ${SEARCH_TOOLS_TOOL_NAME} (or your tool search) to load the ones you need. A tool listed here exists even if a search does not return it — search again with a narrower pattern, such as the server name.
+
+<connected_tools>
+${buildToolIndex(mcpTools)}
+</connected_tools>`;
+}
+
+/**
+ * Build the search_tools ToolDefinition. The discoverable-tool index lives in
+ * the system prompt (buildMcpInventoryForPrompt) rather than here, so the model
+ * sees it on every path and pays for it once.
+ */
+export function buildSearchToolsDefinition(): ToolDefinition {
     return {
         name: SEARCH_TOOLS_TOOL_NAME,
         description: `Search the catalog of connected external (MCP) tools and load the ones you need.
 
 Most external tools are not given to you upfront to keep your context lean. Search by regular expression to load their full definitions; matched tools become available to call from your next step onwards.
 
-Tools available to discover, by server:
-${buildToolIndex(mcpTools)}`,
+The External Tools section of your context lists every discoverable tool by server. Search by server name to load a whole server's tools.`,
         schema: {
             type: 'object',
             properties: {
@@ -86,23 +123,69 @@ ${buildToolIndex(mcpTools)}`,
     };
 }
 
-/** Regex search over MCP tool names and descriptions */
+/**
+ * Relevance tiers, most relevant first. A match on what a tool *is* (its server,
+ * its name) outranks a match on prose about it. Parameter-schema text matches
+ * last: it is where boilerplate like "Request message for CreateEvent" lives, so
+ * it earns recall but must never displace an identity match.
+ */
+const enum Rank {
+    ExactName,
+    ServerName,
+    ToolName,
+    Description,
+    SchemaText,
+}
+
+/** Rank a tool against the search pattern, or null when it does not match at all */
+function rankTool(tool: ToolDefinition, regex: RegExp, exactRegex: RegExp): Rank | null {
+    const parsed = parseNamespacedToolName(tool.name);
+    const bareName = parsed?.toolName ?? tool.name;
+
+    if (exactRegex.test(bareName) || exactRegex.test(tool.name)) return Rank.ExactName;
+    if (parsed && regex.test(parsed.serverName)) return Rank.ServerName;
+    if (regex.test(tool.name)) return Rank.ToolName;
+    if (tool.description && regex.test(tool.description)) return Rank.Description;
+    if (regex.test(JSON.stringify(tool.schema ?? {}))) return Rank.SchemaText;
+    return null;
+}
+
+/** Count hidden matches per server, to name what the result limit cut off */
+function summarizeHidden(hidden: ToolDefinition[]): string {
+    const counts = new Map<string, number>();
+    for (const tool of hidden) {
+        const server = parseNamespacedToolName(tool.name)?.serverName ?? 'other';
+        counts.set(server, (counts.get(server) ?? 0) + 1);
+    }
+    return Array.from(counts.entries())
+        .map(([server, count]) => `${server} (${count})`)
+        .join(', ');
+}
+
+/**
+ * Regex search over MCP tool names, descriptions and parameter schemas, ranked
+ * by relevance so the result limit drops the least relevant matches rather than
+ * whichever tools happen to be registered last.
+ */
 export function searchTools(args: SearchToolsArgs, mcpTools: ToolDefinition[]): SearchToolsResult {
+    const empty = { matches: [], totalMatches: 0, truncated: false };
     const pattern = (args.query ?? '').trim();
     if (!pattern) {
-        return { compiled: 'No search pattern provided. Pass a regular expression to match against tool names and descriptions.', matches: [] };
+        return { ...empty, compiled: 'No search pattern provided. Pass a regular expression to match against tool names and descriptions.' };
     }
     if (pattern.length > MAX_PATTERN_CHARS) {
-        return { compiled: `Search pattern exceeds ${MAX_PATTERN_CHARS} characters. Use a shorter regular expression.`, matches: [] };
+        return { ...empty, compiled: `Search pattern exceeds ${MAX_PATTERN_CHARS} characters. Use a shorter regular expression.` };
     }
 
     let regex: RegExp;
+    let exactRegex: RegExp;
     try {
         regex = new RegExp(pattern, 'i');
+        exactRegex = new RegExp(`^(?:${pattern})$`, 'i');
     } catch (error) {
         return {
+            ...empty,
             compiled: `Invalid regular expression "${pattern}": ${error instanceof Error ? error.message : String(error)}. Fix the pattern and search again.`,
-            matches: [],
         };
     }
 
@@ -110,16 +193,23 @@ export function searchTools(args: SearchToolsArgs, mcpTools: ToolDefinition[]): 
         ? mcpTools.filter(t => parseNamespacedToolName(t.name)?.serverName === args.server)
         : mcpTools;
 
-    const allMatches = candidates.filter(tool => regex.test(`${tool.name} ${tool.description ?? ''}`));
-    const matches = allMatches.slice(0, MAX_SEARCH_RESULTS);
+    // Stable sort keeps registration order within a tier
+    const ranked = candidates
+        .map(tool => ({ tool, rank: rankTool(tool, regex, exactRegex) }))
+        .filter((entry): entry is { tool: ToolDefinition; rank: Rank } => entry.rank !== null)
+        .sort((a, b) => a.rank - b.rank)
+        .map(entry => entry.tool);
 
-    if (matches.length === 0) {
+    if (ranked.length === 0) {
         const scope = args.server ? ` on server "${args.server}"` : '';
         return {
-            compiled: `No tools matched /${args.query}/i${scope}. Try a broader pattern, or check the tool index in the search_tools description.`,
-            matches: [],
+            ...empty,
+            compiled: `No tools matched /${args.query}/i${scope}. Try a broader pattern, or search a server name from the External Tools section of your context.`,
         };
     }
+
+    const matches = ranked.slice(0, MAX_SEARCH_RESULTS);
+    const hidden = ranked.slice(MAX_SEARCH_RESULTS);
 
     const listing = matches
         .map(tool => {
@@ -128,12 +218,18 @@ export function searchTools(args: SearchToolsArgs, mcpTools: ToolDefinition[]): 
         })
         .join('\n');
 
-    const omitted = allMatches.length - matches.length;
-    const omittedNote = omitted > 0 ? `\n(${omitted} more matches omitted; refine the pattern to see them.)` : '';
+    const header = hidden.length > 0
+        ? `Found ${ranked.length} matching tool(s), showing the ${matches.length} most relevant:`
+        : `Found ${ranked.length} matching tool(s):`;
+    const truncationNote = hidden.length > 0
+        ? `\n\n${hidden.length} more matched but were not shown, on: ${summarizeHidden(hidden)}. Narrow the pattern or pass "server" to see them.`
+        : '';
 
     return {
-        compiled: `Found ${matches.length} matching tool(s):\n${listing}${omittedNote}\n\nThese tools are now loaded and available to call from your next step.`,
+        compiled: `${header}\n${listing}${truncationNote}\n\nThese tools are now loaded and available to call from your next step.`,
         matches,
+        totalMatches: ranked.length,
+        truncated: hidden.length > 0,
     };
 }
 
@@ -156,7 +252,7 @@ export function applyProviderToolSearch(
     mcpTools: ToolDefinition[],
     options: { namespaced?: boolean; serverDescriptions?: Map<string, string> } = {}
 ): ToolDefinition[] {
-    if (mcpTools.length <= MCP_TOOL_DEFER_THRESHOLD) {
+    if (!shouldDeferMcpTools(mcpTools)) {
         return mcpTools;
     }
     const searchTool: ToolDefinition = { name: 'tool_search', type: 'tool_search', schema: {} };
@@ -204,9 +300,9 @@ export function applyToolDeferral(
     mcpTools: ToolDefinition[],
     loadedToolNames: Set<string>
 ): ToolDefinition[] {
-    if (mcpTools.length <= MCP_TOOL_DEFER_THRESHOLD) {
+    if (!shouldDeferMcpTools(mcpTools)) {
         return mcpTools;
     }
     const loaded = mcpTools.filter(t => loadedToolNames.has(t.name));
-    return [buildSearchToolsDefinition(mcpTools), ...loaded];
+    return [buildSearchToolsDefinition(), ...loaded];
 }

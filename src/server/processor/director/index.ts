@@ -26,7 +26,7 @@ import {
 } from '../actor/delegate_task';
 import { generateImage, type GenerateImageArgs } from '../actor/generate_image';
 import { emailUser, type EmailUserArgs } from '../actor/email_user';
-import { applyProviderToolSearch, applyToolDeferral, searchTools, SEARCH_TOOLS_TOOL_NAME, type SearchToolsArgs } from '../actor/search_tools';
+import { applyProviderToolSearch, applyToolDeferral, buildMcpInventoryForPrompt, searchTools, SEARCH_TOOLS_TOOL_NAME, type SearchToolsArgs } from '../actor/search_tools';
 import { getFunctionCallName } from '../conversation/openai/utils';
 import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
@@ -167,6 +167,19 @@ interface ResearchConfig {
 
 export type ProviderToolSearchMode = 'off' | 'flat' | 'namespaced';
 
+/**
+ * Name-only inventory of connected MCP tools for the system prompt. Kept
+ * non-fatal: an unreachable MCP server must not block the prompt.
+ */
+async function buildMcpContext(): Promise<string> {
+    try {
+        return buildMcpInventoryForPrompt(await getMcpToolDefinitions());
+    } catch (error) {
+        log.warn({ err: error }, 'Failed to build MCP tool inventory for system prompt');
+        return '';
+    }
+}
+
 export async function buildSystemPrompt(args: {
     currentDate?: string;
     dayOfWeek?: string;
@@ -190,6 +203,8 @@ export async function buildSystemPrompt(args: {
 
     const skillsContext = formatSkillsForPrompt(getLoadedSkills().filter(s => s.visible));
 
+    const mcpContext = await buildMcpContext();
+
     const firstConversationContext = args.isFirstEverConversation
         ? await prompts.firstConversation.format({})
         : '';
@@ -197,6 +212,7 @@ export async function buildSystemPrompt(args: {
     return prompts.director.format({
         user_context: userContext,
         skills_context: skillsContext,
+        mcp_context: mcpContext,
         first_conversation_context: firstConversationContext,
         current_date: args.currentDate ?? now.toLocaleDateString('en-CA'),
         current_time: getTimeOfDay(now),
