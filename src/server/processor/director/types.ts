@@ -48,6 +48,7 @@ export interface MetricsAccumulator {
     prompt_tokens: number;
     completion_tokens: number;
     cached_tokens: number;
+    cache_write_tokens: number;
     cost_usd: number;
 }
 

@@ -6,6 +6,7 @@ import { describe, test, expect } from 'bun:test';
 import type {
   ATIFTrajectory,
   ATIFStep,
+  ATIFFinalMetrics,
 } from '../src/server/processor/conversation/atif/atif.types';
 import {
   createEmptyATIFTrajectory,
@@ -18,6 +19,8 @@ import {
   removeTurnFromTrajectory,
   removeAgentMessageFromTrajectory,
   calculateFinalMetrics,
+  accumulateFinalMetrics,
+  addMetrics,
   validateATIFTrajectory,
   exportATIFTrajectory,
   importATIFTrajectory,
@@ -116,7 +119,7 @@ describe('ATIF Trajectory Management', () => {
       'First response',
       undefined,
       undefined,
-      { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cost_usd: 0.01 }
+      { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cache_write_tokens: 400, cost_usd: 0.01 }
     );
 
     // Second agent response with metrics
@@ -126,19 +129,21 @@ describe('ATIF Trajectory Management', () => {
       'Second response',
       undefined,
       undefined,
-      { prompt_tokens: 150, completion_tokens: 75, cached_tokens: 20, cost_usd: 0.015 }
+      { prompt_tokens: 150, completion_tokens: 75, cached_tokens: 20, cache_write_tokens: 600, cost_usd: 0.015 }
     );
 
     // Verify step metrics
     expect(step1.metrics?.prompt_tokens).toBe(100);
     expect(step1.metrics?.completion_tokens).toBe(50);
     expect(step1.metrics?.cached_tokens).toBe(10);
+    expect(step1.metrics?.cache_write_tokens).toBe(400);
     expect(step1.metrics?.cost_usd).toBe(0.01);
 
     // Verify accumulated final_metrics
     expect(trajectory.final_metrics?.total_prompt_tokens).toBe(250);
     expect(trajectory.final_metrics?.total_completion_tokens).toBe(125);
     expect(trajectory.final_metrics?.total_cached_tokens).toBe(30);
+    expect(trajectory.final_metrics?.total_cache_write_tokens).toBe(1000);
     expect(trajectory.final_metrics?.total_cost_usd).toBe(0.025);
     expect(trajectory.final_metrics?.total_steps).toBe(4);
   });
@@ -157,6 +162,7 @@ describe('ATIF Trajectory Management', () => {
 
     expect(trajectory.final_metrics?.total_prompt_tokens).toBe(0);
     expect(trajectory.final_metrics?.total_completion_tokens).toBe(0);
+    expect(trajectory.final_metrics?.total_cache_write_tokens).toBeUndefined();
     expect(trajectory.final_metrics?.total_cost_usd).toBe(0);
     expect(trajectory.final_metrics?.total_steps).toBe(3);
   });
@@ -169,7 +175,7 @@ describe('ATIF Trajectory Management', () => {
         timestamp: '2024-01-01T10:00:30Z',
         source: 'agent',
         message: 'Response',
-        metrics: { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cost_usd: 0.01 },
+        metrics: { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cache_write_tokens: 90, cost_usd: 0.01 },
       },
       {
         step_id: 3,
@@ -185,8 +191,59 @@ describe('ATIF Trajectory Management', () => {
     expect(metrics.total_prompt_tokens).toBe(250);
     expect(metrics.total_completion_tokens).toBe(125);
     expect(metrics.total_cached_tokens).toBe(10);
+    expect(metrics.total_cache_write_tokens).toBe(90);
     expect(metrics.total_cost_usd).toBe(0.025);
     expect(metrics.total_steps).toBe(3);
+  });
+
+  test('should sum an iteration and its tool usage into one set of step metrics', () => {
+    const iterationMetrics = { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cache_write_tokens: 90, cost_usd: 0.01 };
+    const toolMetrics = { prompt_tokens: 20, completion_tokens: 5, cached_tokens: 0, cache_write_tokens: 60, cost_usd: 0.002 };
+
+    expect(addMetrics(iterationMetrics, toolMetrics)).toEqual({
+      prompt_tokens: 120,
+      completion_tokens: 55,
+      cached_tokens: 10,
+      cache_write_tokens: 150,
+      cost_usd: 0.012,
+    });
+
+    // Tool usage alone still forms valid step metrics, with unused counters left off
+    expect(addMetrics(undefined, { prompt_tokens: 20, completion_tokens: 5, cost_usd: 0.002 })).toEqual({
+      prompt_tokens: 20,
+      completion_tokens: 5,
+      cached_tokens: undefined,
+      cache_write_tokens: undefined,
+      cost_usd: 0.002,
+    });
+  });
+
+  test('should fold step metrics into a running total, matching a full recalculation', () => {
+    const steps: ATIFStep[] = [
+      { step_id: 1, timestamp: '2024-01-01T10:00:00Z', source: 'user', message: 'Hello' },
+      {
+        step_id: 2,
+        timestamp: '2024-01-01T10:00:30Z',
+        source: 'agent',
+        message: 'Response',
+        metrics: { prompt_tokens: 100, completion_tokens: 50, cached_tokens: 10, cache_write_tokens: 90, cost_usd: 0.01 },
+      },
+      {
+        step_id: 3,
+        timestamp: '2024-01-01T10:01:00Z',
+        source: 'agent',
+        message: 'Another response',
+        metrics: { prompt_tokens: 150, completion_tokens: 75, cache_write_tokens: 60, cost_usd: 0.015 },
+      },
+    ];
+
+    const running = steps.reduce<ATIFFinalMetrics | undefined>(
+      (totals, step, index) => accumulateFinalMetrics(totals, step.metrics, index + 1),
+      undefined,
+    );
+
+    expect(running).toEqual(calculateFinalMetrics(steps));
+    expect(running?.total_cache_write_tokens).toBe(150);
   });
 });
 
@@ -259,7 +316,7 @@ describe('ATIF Import/Export', () => {
       '',
       [{ function_name: 'list_files', arguments: { path: '~' }, tool_call_id: 'call-1' }],
       { results: [{ source_call_id: 'call-1', content: 'file1.txt\nfile2.txt\nfolder1/' }] },
-      { prompt_tokens: 200, completion_tokens: 30, cached_tokens: 50, cost_usd: 0.002 }
+      { prompt_tokens: 200, completion_tokens: 30, cached_tokens: 50, cache_write_tokens: 800, cost_usd: 0.002 }
     );
 
     // 4. Final agent response with metrics
@@ -269,7 +326,7 @@ describe('ATIF Import/Export', () => {
       'Here are the files:\n- file1.txt\n- file2.txt\n- folder1/',
       undefined,
       undefined,
-      { prompt_tokens: 250, completion_tokens: 40, cached_tokens: 100, cost_usd: 0.003 }
+      { prompt_tokens: 250, completion_tokens: 40, cached_tokens: 100, cache_write_tokens: 120, cost_usd: 0.003 }
     );
 
     // Export and import
@@ -301,6 +358,7 @@ describe('ATIF Import/Export', () => {
     // Verify step metrics preserved
     expect(imported.steps[2]?.metrics?.prompt_tokens).toBe(200);
     expect(imported.steps[2]?.metrics?.cached_tokens).toBe(50);
+    expect(imported.steps[2]?.metrics?.cache_write_tokens).toBe(800);
     expect(imported.steps[3]?.metrics?.prompt_tokens).toBe(250);
     expect(imported.steps[3]?.metrics?.cost_usd).toBe(0.003);
 
@@ -308,6 +366,7 @@ describe('ATIF Import/Export', () => {
     expect(imported.final_metrics?.total_prompt_tokens).toBe(450);
     expect(imported.final_metrics?.total_completion_tokens).toBe(70);
     expect(imported.final_metrics?.total_cached_tokens).toBe(150);
+    expect(imported.final_metrics?.total_cache_write_tokens).toBe(920);
     expect(imported.final_metrics?.total_cost_usd).toBe(0.005);
     expect(imported.final_metrics?.total_steps).toBe(4);
   });

@@ -84,6 +84,7 @@ export function calculateFinalMetrics(steps: ATIFStep[]): ATIFFinalMetrics {
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
   let totalCachedTokens = 0;
+  let totalCacheWriteTokens = 0;
   let totalCostUsd = 0;
 
   steps.forEach((step) => {
@@ -91,6 +92,7 @@ export function calculateFinalMetrics(steps: ATIFStep[]): ATIFFinalMetrics {
       totalPromptTokens += step.metrics.prompt_tokens || 0;
       totalCompletionTokens += step.metrics.completion_tokens || 0;
       totalCachedTokens += step.metrics.cached_tokens || 0;
+      totalCacheWriteTokens += step.metrics.cache_write_tokens || 0;
       totalCostUsd += step.metrics.cost_usd || 0;
     }
   });
@@ -99,8 +101,42 @@ export function calculateFinalMetrics(steps: ATIFStep[]): ATIFFinalMetrics {
     total_prompt_tokens: totalPromptTokens,
     total_completion_tokens: totalCompletionTokens,
     total_cached_tokens: totalCachedTokens || undefined,
+    total_cache_write_tokens: totalCacheWriteTokens || undefined,
     total_cost_usd: totalCostUsd,
     total_steps: steps.length,
+  };
+}
+
+/**
+ * Sums two sets of step metrics, e.g. a director iteration's own LLM usage and
+ * the usage its tools racked up while executing.
+ */
+export function addMetrics(previous: ATIFMetrics | undefined, next: ATIFMetrics): ATIFMetrics {
+  return {
+    prompt_tokens: (previous?.prompt_tokens ?? 0) + next.prompt_tokens,
+    completion_tokens: (previous?.completion_tokens ?? 0) + next.completion_tokens,
+    cached_tokens: (previous?.cached_tokens ?? 0) + (next.cached_tokens ?? 0) || undefined,
+    cache_write_tokens: (previous?.cache_write_tokens ?? 0) + (next.cache_write_tokens ?? 0) || undefined,
+    cost_usd: (previous?.cost_usd ?? 0) + next.cost_usd,
+  };
+}
+
+/**
+ * Folds one step's metrics into a running total, for callers that persist steps
+ * incrementally and never hold the whole trajectory in memory.
+ */
+export function accumulateFinalMetrics(
+  running: ATIFFinalMetrics | null | undefined,
+  step: ATIFMetrics | undefined,
+  totalSteps: number,
+): ATIFFinalMetrics {
+  return {
+    total_prompt_tokens: (running?.total_prompt_tokens ?? 0) + (step?.prompt_tokens ?? 0),
+    total_completion_tokens: (running?.total_completion_tokens ?? 0) + (step?.completion_tokens ?? 0),
+    total_cached_tokens: (running?.total_cached_tokens ?? 0) + (step?.cached_tokens ?? 0) || undefined,
+    total_cache_write_tokens: (running?.total_cache_write_tokens ?? 0) + (step?.cache_write_tokens ?? 0) || undefined,
+    total_cost_usd: (running?.total_cost_usd ?? 0) + (step?.cost_usd ?? 0),
+    total_steps: totalSteps,
   };
 }
 

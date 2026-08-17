@@ -105,6 +105,7 @@ export async function extractRelevantContent(
             metricsAccumulator.prompt_tokens += response.usage.prompt_tokens;
             metricsAccumulator.completion_tokens += response.usage.completion_tokens;
             metricsAccumulator.cached_tokens += response.usage.cached_tokens || 0;
+            metricsAccumulator.cache_write_tokens += response.usage.cache_write_tokens || 0;
             metricsAccumulator.cost_usd += response.usage.cost_usd;
             log.debug(`Added usage: ${response.usage.prompt_tokens} prompt, ${response.usage.completion_tokens} completion, $${response.usage.cost_usd.toFixed(6)}`);
         }

@@ -180,6 +180,11 @@ export interface ATIFMetrics {
   cached_tokens?: number;
 
   /**
+   * Number of tokens written to the prompt cache (if applicable)
+   */
+  cache_write_tokens?: number;
+
+  /**
    * Cost in USD for this step
    */
   cost_usd: number;
@@ -213,6 +218,11 @@ export interface ATIFFinalMetrics {
    * Total cached tokens across all steps
    */
   total_cached_tokens?: number;
+
+  /**
+   * Total tokens written to the prompt cache across all steps
+   */
+  total_cache_write_tokens?: number;
 
   /**
    * Total cost in USD for entire session

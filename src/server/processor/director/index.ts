@@ -32,6 +32,7 @@ import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
+import { addMetrics } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, getMcpServerDescriptions, executeMcpTool, isMcpTool } from '../mcp';
 import { PlatformBillingError } from '../../http/billing-errors';
@@ -802,6 +803,7 @@ async function pickNextTool(
                 prompt_tokens: response.usage.prompt_tokens,
                 completion_tokens: response.usage.completion_tokens,
                 cached_tokens: response.usage.cached_tokens,
+                cache_write_tokens: response.usage.cache_write_tokens,
                 cost_usd: response.usage.cost_usd,
             };
         }
@@ -1309,6 +1311,7 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             prompt_tokens: 0,
             completion_tokens: 0,
             cached_tokens: 0,
+            cache_write_tokens: 0,
             cost_usd: 0,
         };
 
@@ -1328,19 +1331,7 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
 
         // Merge tool execution metrics with director's LLM metrics
         if (metricsAccumulator.prompt_tokens > 0 || metricsAccumulator.completion_tokens > 0) {
-            if (iteration.metrics) {
-                iteration.metrics.prompt_tokens += metricsAccumulator.prompt_tokens;
-                iteration.metrics.completion_tokens += metricsAccumulator.completion_tokens;
-                iteration.metrics.cached_tokens = (iteration.metrics.cached_tokens || 0) + metricsAccumulator.cached_tokens;
-                iteration.metrics.cost_usd += metricsAccumulator.cost_usd;
-            } else {
-                iteration.metrics = {
-                    prompt_tokens: metricsAccumulator.prompt_tokens,
-                    completion_tokens: metricsAccumulator.completion_tokens,
-                    cached_tokens: metricsAccumulator.cached_tokens || undefined,
-                    cost_usd: metricsAccumulator.cost_usd,
-                };
-            }
+            iteration.metrics = addMetrics(iteration.metrics, metricsAccumulator);
         }
 
         yield iteration;

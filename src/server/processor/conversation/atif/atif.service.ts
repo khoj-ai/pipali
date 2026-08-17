@@ -24,6 +24,7 @@ import {
   exportATIFTrajectory,
   importATIFTrajectory,
   calculateFinalMetrics,
+  accumulateFinalMetrics,
   sanitizeForJsonb,
 } from './atif.utils';
 import { createChildLogger } from '../../../logger';
@@ -84,18 +85,6 @@ function getMessagePreview(message: string | undefined): string | undefined {
     return undefined;
   }
   return message.slice(0, 240);
-}
-
-function addMetricsToFinalMetrics(
-  previous: ATIFMetrics | undefined,
-  current: ATIFMetrics | undefined,
-): ATIFMetrics {
-  return {
-    prompt_tokens: (previous?.prompt_tokens ?? 0) + (current?.prompt_tokens ?? 0),
-    completion_tokens: (previous?.completion_tokens ?? 0) + (current?.completion_tokens ?? 0),
-    cached_tokens: (previous?.cached_tokens ?? 0) + (current?.cached_tokens ?? 0) || undefined,
-    cost_usd: (previous?.cost_usd ?? 0) + (current?.cost_usd ?? 0),
-  };
 }
 
 /**
@@ -275,24 +264,11 @@ export class ATIFConversationService {
         step.extra = { ...step.extra, ...extra };
       }
 
-      const totals = addMetricsToFinalMetrics(
-        conversation.final_metrics
-          ? {
-              prompt_tokens: conversation.final_metrics.total_prompt_tokens,
-              completion_tokens: conversation.final_metrics.total_completion_tokens,
-              cached_tokens: conversation.final_metrics.total_cached_tokens,
-              cost_usd: conversation.final_metrics.total_cost_usd,
-            }
-          : undefined,
+      const finalMetrics = accumulateFinalMetrics(
+        conversation.final_metrics,
         metrics,
+        Number(stats?.stepCount ?? 0) + 1,
       );
-      const finalMetrics = {
-        total_prompt_tokens: totals.prompt_tokens,
-        total_completion_tokens: totals.completion_tokens,
-        total_cached_tokens: totals.cached_tokens,
-        total_cost_usd: totals.cost_usd,
-        total_steps: Number(stats?.stepCount ?? 0) + 1,
-      };
       const now = new Date();
       const sanitizedStep = sanitizeForJsonb(step);
 
@@ -517,6 +493,7 @@ export class ATIFConversationService {
         total_prompt_tokens: sourceTrajectory.final_metrics.total_prompt_tokens || 0,
         total_completion_tokens: sourceTrajectory.final_metrics.total_completion_tokens || 0,
         total_cached_tokens: sourceTrajectory.final_metrics.total_cached_tokens || 0,
+        total_cache_write_tokens: sourceTrajectory.final_metrics.total_cache_write_tokens || 0,
         total_cost_usd: sourceTrajectory.final_metrics.total_cost_usd,
         total_steps: sourceTrajectory.final_metrics.total_steps,
       } : undefined,
