@@ -363,6 +363,30 @@ export function annotateStderrWithSandboxFailures(command: string, stderr: strin
 export const SANDBOX_TEMP_DIR = '/tmp/pipali';
 
 /**
+ * Resolve the host's IANA timezone, or '' if it can't be determined.
+ *
+ * Sandboxed commands cannot read the /etc/localtime symlink, which is how both
+ * libc and ICU discover the system zone, so they silently report UTC. Naming the
+ * zone in TZ fixes that: the rules under /var/db/timezone/zoneinfo are readable,
+ * only the pointer to them is not.
+ *
+ * Returns '' when resolution fails or already yields UTC — pinning a zone we could
+ * not determine would turn a known-UTC reading into a confidently wrong one.
+ */
+export function resolveHostTimezone(): string {
+    try {
+        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+        return zone && zone !== 'UTC' ? zone : '';
+    } catch {
+        return '';
+    }
+}
+
+// The server process is never sandboxed, so this resolves correctly. Cached because
+// the host zone doesn't change under us and every command would otherwise re-resolve.
+const HOST_TIMEZONE = resolveHostTimezone();
+
+/**
  * Get environment variables that redirect tool caches to sandbox-allowed directories.
  * These should be merged with process.env when running sandboxed commands.
  *
@@ -370,9 +394,17 @@ export const SANDBOX_TEMP_DIR = '/tmp/pipali';
  * instead of ~/.cache which isn't in the sandbox allowlist.
  */
 export function getSandboxEnvOverrides(): Record<string, string> {
+    // An explicit TZ wins; we only supply the zone the sandbox can't discover itself.
+    // Forwarding it rather than omitting it also sidesteps Bun marking a TZ assigned at
+    // runtime non-enumerable, which would silently drop it from the caller's spread.
+    const timezone = process.env.TZ || HOST_TIMEZONE;
+
     return {
         // General temp directory
         TMPDIR: SANDBOX_TEMP_DIR,
+
+        // Timezone - without this, /etc/localtime is unreadable and commands report UTC
+        ...(timezone ? { TZ: timezone } : {}),
 
         // Git - skip /etc/gitconfig which is denied by sandbox read restrictions
         GIT_CONFIG_NOSYSTEM: '1',

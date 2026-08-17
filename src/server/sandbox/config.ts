@@ -95,16 +95,21 @@ export const DEFAULT_DENIED_READ_PATHS: string[] = [
 
 /**
  * Paths re-allowed for reading inside the denied system directories above.
+ * All hold Apple-shipped public configuration, no secrets.
  *
- * macOS curl links against LibreSSL, which unconditionally fopen()s
- * /private/etc/ssl/openssl.cnf during crypto init — even for plain HTTP, and
- * before OPENSSL_CONF is consulted, so no env var can redirect it. Denying
- * /private/etc therefore breaks every curl invocation. The directory holds only
- * Apple-shipped public CA bundles and config templates, no secrets.
+ * - ssl: macOS curl links against LibreSSL, which unconditionally fopen()s
+ *   /private/etc/ssl/openssl.cnf during crypto init — even for plain HTTP, and
+ *   before OPENSSL_CONF is consulted, so no env var can redirect it. Denying
+ *   /private/etc therefore breaks every curl invocation.
+ * - localtime: the symlink naming the system timezone. Unreadable, libc and ICU
+ *   both fall back to UTC and every timestamp a command prints is wrong. TZ
+ *   (see getSandboxEnvOverrides) covers most tools; this covers the rest.
  */
 export const DEFAULT_ALLOWED_READ_PATHS: string[] = [
     '/etc/ssl',
     '/private/etc/ssl',  // macOS: /etc is a symlink to /private/etc
+    '/etc/localtime',
+    '/private/etc/localtime',
 ];
 
 /**

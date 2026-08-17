@@ -15,7 +15,12 @@ import {
     DEFAULT_ALLOWED_DOMAINS,
     type SandboxConfig,
 } from '../../../src/server/sandbox/config';
-import { getSandboxEnvOverrides, isPathDeniedForRead, SANDBOX_TEMP_DIR } from '../../../src/server/sandbox';
+import {
+    getSandboxEnvOverrides,
+    isPathDeniedForRead,
+    resolveHostTimezone,
+    SANDBOX_TEMP_DIR,
+} from '../../../src/server/sandbox';
 import { expandPath, expandPaths } from '../../../src/server/utils';
 
 describe('Sandbox Config', () => {
@@ -187,6 +192,40 @@ describe('Sandbox Config', () => {
             // Should redirect npm/bun caches
             expect(env.npm_config_cache).toContain(SANDBOX_TEMP_DIR);
             expect(env.BUN_INSTALL_CACHE_DIR).toContain(SANDBOX_TEMP_DIR);
+        });
+
+        test('should preserve an explicitly set TZ instead of replacing it with the host zone', () => {
+            const original = process.env.TZ;
+            const originalZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+            process.env.TZ = 'Asia/Kolkata';
+            try {
+                // Forwarded, not overridden - and reaches the child env shell_command builds,
+                // which a bare spread would miss since Bun hides an assigned TZ from it
+                expect(getSandboxEnvOverrides().TZ).toBe('Asia/Kolkata');
+                expect({ ...process.env, ...getSandboxEnvOverrides() }.TZ).toBe('Asia/Kolkata');
+            } finally {
+                // Bun re-inits its clock on assignment but not on delete, so name the old zone
+                // before clearing the var - otherwise every later test runs in Kolkata
+                process.env.TZ = original ?? originalZone;
+                if (original === undefined) delete process.env.TZ;
+            }
+        });
+    });
+
+    describe('resolveHostTimezone', () => {
+        test('should report no zone rather than a bogus one when the host resolves UTC or fails', () => {
+            const original = Intl.DateTimeFormat;
+            try {
+                // A UTC host tells us nothing about the real zone, so claim nothing
+                Intl.DateTimeFormat = (() => ({ resolvedOptions: () => ({ timeZone: 'UTC' }) })) as never;
+                expect(resolveHostTimezone()).toBe('');
+
+                // Same when the platform can't answer at all
+                Intl.DateTimeFormat = (() => { throw new Error('no ICU data'); }) as never;
+                expect(resolveHostTimezone()).toBe('');
+            } finally {
+                Intl.DateTimeFormat = original;
+            }
         });
     });
 });
