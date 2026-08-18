@@ -148,4 +148,43 @@ test.describe('Background commands', () => {
         expect(await chatPage.isProcessing()).toBe(false);
         expect(runsIn(await requestsFor(prompt))).toHaveLength(1);
     });
+
+    test('a command finishing mid-answer wakes a turn that ends on the update', async ({ page, request }) => {
+        const prompt = 'report the background command after answering';
+        const chatPage = new ChatPage(page);
+        await chatPage.goto();
+        await chatPage.sendMessage(prompt);
+
+        const conversationId = await chatPage.waitForConversationId();
+        await chatPage.waitForConfirmationDialog();
+        await chatPage.clickConfirmationButton('yes');
+
+        await expect(page.locator(Selectors.assistantMessage).last())
+            .toContainText('I will report back', { timeout: 30000 });
+
+        // The update landed after the last iteration that could have picked it up, so the
+        // conversation is woken - and answers, rather than being refused for resuming on
+        // its own last message.
+        await expect(page.locator(Selectors.assistantMessage).last())
+            .toContainText('finished while I was answering', { timeout: 40000 });
+
+        const records = await requestsFor(prompt);
+        const runs = runsIn(records);
+        expect(runs).toHaveLength(2);
+        // The woken turn is answering the update, so that is what its request ends on.
+        const woken = records.filter(record => record.runId === runs[1]);
+        expect(woken[0]!.tail.role).toBe('system');
+        expect(woken[0]!.tail.text).toContain('late-marker');
+
+        // The run answered past the update and buried it, so waking it moved the update
+        // back out: after the answer that buried it, before the turn woken to report it.
+        const steps = await historyOf(request, conversationId);
+        const indexOf = (text: string) => steps.findIndex(step => step.message?.includes(text));
+        expect(steps.filter(step => step.extra?.kind === 'background_command_update')).toHaveLength(1);
+        expect(indexOf('[Background command finished]')).toBeGreaterThan(indexOf('Started it, I will report back'));
+        expect(indexOf('[Background command finished]')).toBeLessThan(indexOf('finished while I was answering'));
+
+        // Moved, not re-asked: waking the conversation invents no user message.
+        expect(steps.filter(step => step.source === 'user')).toHaveLength(1);
+    });
 });

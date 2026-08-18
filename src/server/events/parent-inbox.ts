@@ -32,6 +32,11 @@ const MAX_AUTO_START_DEPTH = 3;
 
 const autoStartDepth = new Map<string, number>();
 const pendingWakeups = new Map<string, ReturnType<typeof setTimeout>>();
+/**
+ * Updates a run never read, in delivery order. They are moved back to the end of the
+ * conversation before the wake runs, so the woken turn is answering them.
+ */
+const unreadUpdates = new Map<string, number[]>();
 const suppressed = new Map<string, number>();
 const stoppedByUser = new Set<string>();
 
@@ -116,8 +121,14 @@ export async function deliverToParent(options: DeliverToParentOptions): Promise<
             if (event.type === 'run_complete' || event.type === 'run_stopped') {
                 unsubscribe();
                 if (event.type === 'run_stopped' && event.reason === 'error') return;
-                // Drained means this run answered with the update already in hand.
-                if (run.injectedSteps.length === 0) return;
+                // Claimed here too: the first subscriber to fire takes what the run left,
+                // so a second delivery's subscriber finds nothing to wake for.
+                const unread = run.injectedSteps.splice(0);
+                if (unread.length === 0) return;
+                unreadUpdates.set(parentConversationId, [
+                    ...(unreadUpdates.get(parentConversationId) ?? []),
+                    ...unread.map(unreadStep => unreadStep.step_id),
+                ]);
                 scheduleWakeup(parentConversationId, user);
             } else if (event.type === 'billing_error' || event.type === 'auth_error') {
                 unsubscribe();
@@ -141,6 +152,11 @@ function scheduleWakeup(conversationId: string, user: typeof User.$inferSelect):
 }
 
 async function wake(conversationId: string, user: typeof User.$inferSelect): Promise<void> {
+    // Taken on every path, including the ones that start no turn: an update only has to
+    // be last for a turn that resumes on it.
+    const unread = unreadUpdates.get(conversationId) ?? [];
+    unreadUpdates.delete(conversationId);
+
     if (getBus(conversationId)?.activeRun) {
         // Something started in the meantime; it will read the update from history.
         return;
@@ -160,6 +176,18 @@ async function wake(conversationId: string, user: typeof User.$inferSelect): Pro
     }
     autoStartDepth.set(conversationId, depth);
 
+    // The run that was in flight buried the update under its own steps. The woken turn
+    // has no user message of its own, so the update has to be the last thing said for
+    // the turn to be answering it.
+    try {
+        const moved = await atifConversationService.moveStepsToEnd(conversationId, unread);
+        if (moved.length > 0) log.debug({ conversationId, count: moved.length }, 'Moved unread updates to the end');
+    } catch (error) {
+        // The turn still runs: better a request the provider refuses out loud than an
+        // update the conversation never mentions.
+        log.warn({ err: error, conversationId }, 'Failed to move unread updates to the end');
+    }
+
     try {
         // No user message: the run continues from the update already in history.
         await startConversationRun({ conversationId, user });
@@ -175,4 +203,5 @@ export function clearInboxState(): void {
     pendingWakeups.clear();
     autoStartDepth.clear();
     stoppedByUser.clear();
+    unreadUpdates.clear();
 }

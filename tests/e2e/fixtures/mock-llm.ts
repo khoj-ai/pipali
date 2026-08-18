@@ -815,6 +815,28 @@ export function backgroundUpdateMidRunScenario(): MockScenario {
 }
 
 /**
+ * The command exits while the final answer is being produced - past the last point the
+ * run could pick it up, so the conversation is woken with no user message of its own.
+ */
+export function backgroundUpdateDuringFinalResponseScenario(): MockScenario {
+    return {
+        name: 'background-update-during-final-response',
+        queryPattern: '^report the background command after answering$',
+        iterations: [
+            backgroundCommandIteration(
+                'sleep 2; echo late-marker',
+                'tc-bg-late-1',
+                'Starting the job and answering while it runs.',
+            ),
+        ],
+        finalResponse: 'Started it, I will report back.',
+        // Held open long enough for the command to exit mid-answer.
+        finalResponseDelayMs: 5000,
+        resumedResponse: 'The background command finished while I was answering.',
+    };
+}
+
+/**
  * Delegates work and then changes its mind, all within one turn. The stopped task
  * reports that it did not finish, which is the outcome that was asked for.
  */
@@ -919,6 +941,7 @@ export const defaultMockScenarios: MockScenario[] = [
     backgroundCommandScenario(),
     stopBackgroundCommandScenario(),
     backgroundUpdateMidRunScenario(),
+    backgroundUpdateDuringFinalResponseScenario(),
     delegateAndStopScenario(),
 ];
 

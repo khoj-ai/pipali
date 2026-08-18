@@ -295,6 +295,76 @@ export class ATIFConversationService {
     });
   }
 
+  /**
+   * Re-append existing steps as the conversation's newest ones, keeping their order.
+   *
+   * An update delivered while a run was in flight ends up buried under everything the
+   * run went on to say. A turn woken by that update has to find it at the end: a
+   * request that ends on the agent's own turn is refused outright by some providers.
+   *
+   * Returns the steps in their new positions, or none if they were already last.
+   */
+  async moveStepsToEnd(conversationId: string, stepIds: number[]): Promise<ATIFStep[]> {
+    if (stepIds.length === 0) return [];
+
+    return await db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`
+        SELECT id FROM conversation WHERE id = ${conversationId} FOR UPDATE
+      `);
+
+      if (locked.rows.length === 0) {
+        throw new Error(`Conversation ${conversationId} not found`);
+      }
+
+      const [stats] = await tx
+        .select({ maxStepId: sql<number>`coalesce(max(${ConversationStep.stepId}), 0)::int` })
+        .from(ConversationStep)
+        .where(eq(ConversationStep.conversationId, conversationId));
+      const maxStepId = Number(stats?.maxStepId ?? 0);
+
+      const rows = await tx
+        .select({ stepId: ConversationStep.stepId, step: ConversationStep.step })
+        .from(ConversationStep)
+        .where(and(
+          eq(ConversationStep.conversationId, conversationId),
+          inArray(ConversationStep.stepId, stepIds),
+        ))
+        .orderBy(asc(ConversationStep.stepId));
+
+      // Step ids are unique and ascending, so occupying the last n of them means
+      // these already are the conversation's tail.
+      if (rows.length === 0 || rows[0]!.stepId === maxStepId - rows.length + 1) return [];
+
+      await tx
+        .delete(ConversationStep)
+        .where(and(
+          eq(ConversationStep.conversationId, conversationId),
+          inArray(ConversationStep.stepId, rows.map(row => row.stepId)),
+        ));
+
+      const now = new Date();
+      const moved = rows.map((row, index) => ({ ...row.step, step_id: maxStepId + index + 1 }));
+
+      await tx.insert(ConversationStep).values(moved.map(step => ({
+        conversationId,
+        stepId: step.step_id,
+        source: step.source,
+        // The step keeps saying when it happened; only its place in the order changes.
+        timestamp: getStepTimestamp(step),
+        messagePreview: getMessagePreview(step.message),
+        step,
+        updatedAt: now,
+      })));
+
+      await tx
+        .update(Conversation)
+        .set({ updatedAt: now })
+        .where(eq(Conversation.id, conversationId));
+
+      return moved;
+    });
+  }
+
   private async persistStepDeletions(
     conversationId: string,
     beforeSteps: ATIFStep[],
