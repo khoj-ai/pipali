@@ -217,6 +217,9 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 chatModelAlias: currentChatModelAlias,
                 conversationRole,
                 runId: runIdAuthoritative,
+                // Claimed, not copied: what a run leaves unclaimed is what wakes the
+                // conversation once it settles (see parent-inbox).
+                drainInjectedSteps: () => runHandle.injectedSteps.splice(0),
                 onTextDelta: (delta) => {
                     bus.publish({
                         type: 'text_delta',

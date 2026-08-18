@@ -23,6 +23,7 @@ import { loadUserContext } from '../user-context';
 import { resolveMcpInventoryContext } from './actor/search_tools';
 import { getMcpToolDefinitions } from './mcp';
 import type { ResearchIteration } from './director/types';
+import type { ATIFStep } from './conversation/atif/atif.types';
 import type { ConfirmationContext } from './confirmation';
 import { createChildLogger } from '../logger';
 
@@ -53,6 +54,11 @@ export interface ResearchRunnerOptions {
     runId?: string;
     /** Home, a delegated task, or an ordinary chat */
     conversationRole?: ConversationRole;
+    /**
+     * Returns and clears the steps delivered to this conversation mid-run, so the
+     * running loop picks them up instead of only the next run seeing them.
+     */
+    drainInjectedSteps?: () => ATIFStep[];
     /** Callback when tool calls are about to start (before execution) */
     onToolCallStart?: (iteration: ResearchIteration) => void;
     /** Callback when an iteration completes (after execution) */
@@ -215,6 +221,7 @@ export async function* runResearchWithConversation(
         conversationRole: options.conversationRole,
         runId,
         onTextChunk: onTextDelta,
+        drainInjectedSteps: options.drainInjectedSteps,
     })) {
         // On first iteration (new conversation), persist system prompt and user message to DB
         // System prompt is persisted first to maintain correct ordering: system → user → agent

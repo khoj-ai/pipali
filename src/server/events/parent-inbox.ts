@@ -106,14 +106,18 @@ export async function deliverToParent(options: DeliverToParentOptions): Promise<
 
     const bus = getBus(parentConversationId);
     if (bus?.activeRun) {
-        bus.activeRun.injectedSteps.push(step);
+        const run = bus.activeRun;
+        run.injectedSteps.push(step);
 
-        // The in-flight run may already be past the point where it would notice, so
-        // wake the conversation once the run settles. Terminal errors are left alone —
-        // re-running would just hit the same wall.
+        // The run picks the update up at its next iteration, but it may already be past
+        // its last one, so wake the conversation once the run settles. A run that ended
+        // in an error is left alone — re-running would just hit the same wall.
         const unsubscribe = bus.subscribe(event => {
             if (event.type === 'run_complete' || event.type === 'run_stopped') {
                 unsubscribe();
+                if (event.type === 'run_stopped' && event.reason === 'error') return;
+                // Drained means this run answered with the update already in hand.
+                if (run.injectedSteps.length === 0) return;
                 scheduleWakeup(parentConversationId, user);
             } else if (event.type === 'billing_error' || event.type === 'auth_error') {
                 unsubscribe();

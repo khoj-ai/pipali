@@ -31,7 +31,7 @@ import { getFunctionCallName } from '../conversation/openai/utils';
 import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
-import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
+import { type ATIFMetrics, type ATIFObservationResult, type ATIFStep, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
 import { addMetrics } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, getMcpServerDescriptions, executeMcpTool, isMcpTool } from '../mcp';
@@ -163,6 +163,8 @@ interface ResearchConfig {
     // OpenAI Responses API, 'flat' via provider translation) or the app-side
     // search_tools actor ('off')
     providerToolSearch?: ProviderToolSearchMode;
+    // Returns and clears steps delivered to this conversation while the run is in flight
+    drainInjectedSteps?: () => ATIFStep[];
 }
 
 export type ProviderToolSearchMode = 'off' | 'flat' | 'namespaced';
@@ -1210,6 +1212,15 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         // Check if paused before starting new iteration
         if (config.abortSignal?.aborted) {
             throw new ResearchPausedError();
+        }
+
+        // Updates delivered while this run was in flight - a background command
+        // exiting, a delegated task reporting back. Already persisted, so this only
+        // brings them into the trajectory the next request is built from.
+        const injectedSteps = config.drainInjectedSteps?.() ?? [];
+        if (injectedSteps.length > 0) {
+            config.chatHistory.steps.push(...injectedSteps);
+            log.info({ count: injectedSteps.length, iteration: i }, 'Picked up updates delivered mid-run');
         }
 
         // Capture step count when we first hit the threshold

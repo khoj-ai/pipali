@@ -7,16 +7,54 @@
  */
 
 import { test, expect, type APIRequestContext } from '@playwright/test';
+import { readFile } from 'fs/promises';
 import { ChatPage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
 import { stopAllActiveConversations, stopAllActiveRunsFromHome } from '../helpers/cleanup';
 
 type SystemStep = { source: string; message?: string; extra?: { kind?: string } };
 
-async function backgroundUpdates(request: APIRequestContext, conversationId: string): Promise<SystemStep[]> {
+/** What the mock LLM was handed, one line per request - see mock-preload. */
+type RequestRecord = {
+    query: string;
+    sessionId?: string;
+    runId?: string;
+    tail: { type?: string | null; role?: string; text: string };
+    systemUpdates: string[];
+};
+
+async function historyOf(request: APIRequestContext, conversationId: string): Promise<SystemStep[]> {
     const res = await request.get(`/api/chat/${conversationId}/history`);
-    const { history } = await res.json() as { history: SystemStep[] };
-    return history.filter(s => s.source === 'system' && s.extra?.kind === 'background_command_update');
+    return (await res.json() as { history: SystemStep[] }).history;
+}
+
+async function backgroundUpdates(request: APIRequestContext, conversationId: string): Promise<SystemStep[]> {
+    return (await historyOf(request, conversationId))
+        .filter(s => s.source === 'system' && s.extra?.kind === 'background_command_update');
+}
+
+/** Requests from the most recent conversation that answered this prompt. */
+async function requestsFor(prompt: string): Promise<RequestRecord[]> {
+    const path = process.env.TEST_REQUEST_LOG;
+    if (!path) throw new Error('TEST_REQUEST_LOG not set - global-setup may not have run');
+    const contents = await readFile(path, 'utf8').catch(() => '');
+    const records = contents
+        .split('\n')
+        .filter(Boolean)
+        .map(line => JSON.parse(line) as RequestRecord)
+        .filter(record => record.query === prompt);
+    // A retried spec answers the same prompt again; only the last attempt is ours.
+    const session = records.at(-1)?.sessionId;
+    return records.filter(record => record.sessionId === session);
+}
+
+/** Run ids in the order they first appear, so an extra one means an extra run. */
+function runsIn(records: RequestRecord[]): string[] {
+    return [...new Set(records.map(record => record.runId!))];
+}
+
+function carriesUpdate(records: RequestRecord[], marker: string): boolean {
+    return records.some(record => record.systemUpdates.some(update => update.includes(marker)));
 }
 
 test.describe('Background commands', () => {
@@ -80,5 +118,34 @@ test.describe('Background commands', () => {
         expect(await chatPage.isProcessing()).toBe(false);
         expect(await chatPage.getMessageCount()).toEqual(responsesAfterAnswering);
         expect(await backgroundUpdates(request, conversationId)).toHaveLength(0);
+    });
+
+    test('a command finishing mid-turn is picked up by the turn in flight', async ({ page, request }) => {
+        const prompt = 'report the background command while working';
+        const chatPage = new ChatPage(page);
+        await chatPage.goto();
+        await chatPage.sendMessage(prompt);
+
+        const conversationId = await chatPage.waitForConversationId();
+        await chatPage.waitForConfirmationDialog();
+        await chatPage.clickConfirmationButton('yes');
+
+        await expect(page.locator(Selectors.assistantMessage).last())
+            .toContainText('while I was still working', { timeout: 30000 });
+        await expect.poll(
+            () => chatPage.isProcessing(),
+            { timeout: 20000, message: 'expected the turn to end' },
+        ).toBe(false);
+
+        // The update reached the model within the run that was already going, rather
+        // than sitting unread until a run of its own.
+        const records = await requestsFor(prompt);
+        expect(runsIn(records)).toHaveLength(1);
+        expect(carriesUpdate(records, 'mid-run-marker')).toBe(true);
+
+        // So nothing wakes the conversation afterwards to report it a second time.
+        await page.waitForTimeout(6000);
+        expect(await chatPage.isProcessing()).toBe(false);
+        expect(runsIn(await requestsFor(prompt))).toHaveLength(1);
     });
 });

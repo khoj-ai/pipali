@@ -31,6 +31,10 @@ export interface MockScenario {
     // Async delay before the final response resolves. Unlike iterationDelayMs's
     // sync sleep, it yields the event loop so a mid-response soft interrupt lands.
     finalResponseDelayMs?: number;
+    // Answer for a turn that starts on this scenario after it already finished - a
+    // conversation woken by an inbox update. Without it the mock replays the scenario
+    // from its first tool call, since a woken turn carries the same user message.
+    resumedResponse?: string;
 }
 
 /**
@@ -756,6 +760,60 @@ export function backgroundCommandScenario(): MockScenario {
     };
 }
 
+/** A backgrounded command whose exit is meant to land at a particular moment. */
+function backgroundCommandIteration(command: string, toolCallId: string, thought: string): MockIteration {
+    return {
+        thought,
+        toolCalls: [
+            {
+                function_name: 'shell_command',
+                arguments: {
+                    justification: 'Start the job',
+                    command,
+                    operation_type: 'read-only',
+                    run_in_background: true,
+                },
+                tool_call_id: toolCallId,
+            },
+        ],
+    };
+}
+
+/**
+ * The command exits while the turn is still working, so the update it reports has to
+ * reach the run in flight rather than wait for a run of its own.
+ */
+export function backgroundUpdateMidRunScenario(): MockScenario {
+    return {
+        name: 'background-update-mid-run',
+        queryPattern: '^report the background command while working$',
+        iterations: [
+            backgroundCommandIteration(
+                'echo mid-run-marker',
+                'tc-bg-mid-run-1',
+                'Starting the quick job, then carrying on.',
+            ),
+            // Steps for the update to arrive during, and iteration boundaries for it to
+            // be picked up at.
+            ...Array.from({ length: 3 }, (_, i) => ({
+                thought: `Carrying on with part ${i + 1} while it runs.`,
+                toolCalls: [
+                    {
+                        function_name: 'list_files',
+                        arguments: { path: '.', pattern: `mid-run-${i + 1}` },
+                        tool_call_id: `tc-bg-mid-run-list-${i + 1}`,
+                    },
+                ],
+            })),
+        ],
+        finalResponse: 'The background command finished while I was still working.',
+        iterationDelayMs: 300,
+        // Only reached if the run missed the update and had to be woken - which is the
+        // failure this scenario is about, so it must not start the command again.
+        resumedResponse: 'I had to be woken to report the background command.',
+    };
+}
+
 /**
  * Delegates work and then changes its mind, all within one turn. The stopped task
  * reports that it did not finish, which is the outcome that was asked for.
@@ -860,6 +918,7 @@ export const defaultMockScenarios: MockScenario[] = [
     delegateTwoAndWaitScenario(),
     backgroundCommandScenario(),
     stopBackgroundCommandScenario(),
+    backgroundUpdateMidRunScenario(),
     delegateAndStopScenario(),
 ];
 

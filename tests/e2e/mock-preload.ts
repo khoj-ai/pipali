@@ -124,7 +124,7 @@ function resolveToolArguments(args: Record<string, unknown>, ctx?: MockCtx): Rec
 }
 
 // Track mock state per session+scenario+query so multiple conversations can run concurrently.
-const scenarioState = new Map<string, { currentIteration: number }>();
+const scenarioState = new Map<string, { currentIteration: number; answered?: boolean }>();
 
 // Parse scenarios from environment if provided
 function getScenarios(): MockScenario[] {
@@ -186,8 +186,15 @@ function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought | Pr
 
     // If we've exhausted iterations, return final response
     if (state.currentIteration >= iterations.length) {
+        // A scenario that says how it answers when resumed keeps its finished state, so a
+        // woken turn answers instead of replaying the scenario's tool calls from the top.
+        if (scenario.resumedResponse && state.answered) {
+            console.log(`[MockLLM] Scenario ${scenario.name} resumed, returning resumed response`);
+            return { message: scenario.resumedResponse, raw: [], thought: undefined };
+        }
         console.log(`[MockLLM] Scenario ${scenario.name} complete, returning final response`);
-        scenarioState.delete(key);
+        if (scenario.resumedResponse) state.answered = true;
+        else scenarioState.delete(key);
         const finalResponse: ResponseWithThought = {
             message: scenario.finalResponse,
             raw: [],
