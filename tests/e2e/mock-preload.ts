@@ -6,10 +6,64 @@
  * to return deterministic mock responses instead of calling real LLMs.
  */
 
+import { appendFileSync } from 'node:fs';
 import { findMatchingScenario, defaultMockScenarios, type MockScenario } from './fixtures/mock-llm';
 import type { ResponseWithThought } from '../../src/server/processor/conversation/conversation';
 
-type MockCtx = { sessionId?: string; history?: { steps?: Array<{ observation?: { results?: Array<{ content?: unknown }> } }> } };
+type MockMessage = { type?: string | null; role?: string; content?: unknown };
+type MockCtx = {
+    sessionId?: string;
+    runId?: string;
+    history?: { steps?: Array<{ observation?: { results?: Array<{ content?: unknown }> } }> };
+    messages?: MockMessage[];
+};
+
+/** Where each request's shape is recorded, for specs that assert on the payload. */
+const requestLogPath = process.env.PIPALI_MOCK_REQUEST_LOG;
+
+function contentText(content: unknown): string {
+    return typeof content === 'string' ? content : JSON.stringify(content ?? '');
+}
+
+function recordRequest(query: string, ctx: MockCtx): void {
+    if (!requestLogPath || !ctx.messages) return;
+    const last = ctx.messages.at(-1);
+    appendFileSync(requestLogPath, JSON.stringify({
+        // The prompt the turn is answering, which is how a spec finds its own requests.
+        query,
+        // Opaque per-conversation id, for telling one attempt at a prompt from another.
+        sessionId: ctx.sessionId,
+        runId: ctx.runId,
+        tail: { type: last?.type, role: last?.role, text: contentText(last?.content).slice(0, 300) },
+        // Mid-conversation system messages: how inbox updates reach the model
+        systemUpdates: ctx.messages
+            .slice(1)
+            .filter(message => message.role === 'system')
+            .map(message => contentText(message.content).slice(0, 300)),
+    }) + '\n');
+}
+
+/**
+ * Anthropic refuses a request that ends on the agent's own turn, and the platform marks
+ * that refusal as not recoverable by the model - which is what surfaces it to the user
+ * as an error rather than a retry. A trailing system message is accepted, so only the
+ * agent's own items are refused here.
+ */
+function rejectAssistantPrefill(messages: MockMessage[]): void {
+    const last = messages.at(-1);
+    const isAgentTurn = last?.role === 'assistant'
+        || last?.type === 'reasoning'
+        || last?.type === 'function_call';
+    if (!isAgentTurn) return;
+
+    const tail = `${last?.type ?? 'none'}/${last?.role ?? 'none'}`;
+    throw new Error(`400 rejected request ending on ${tail}: ${JSON.stringify({
+        error: {
+            message: 'This model does not support assistant message prefill. The conversation must end with a user message.',
+            recoverable_by_model: false,
+        },
+    })}`);
+}
 
 /**
  * Placeholder a scenario can put in tool arguments to reference every conversation id
@@ -97,6 +151,11 @@ function getStateKey(query: string, scenarioName: string, ctx?: MockCtx): string
  * Generate mock response based on query and scenario
  */
 function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought | Promise<ResponseWithThought> {
+    if (ctx?.messages) {
+        recordRequest(query, ctx);
+        rejectAssistantPrefill(ctx.messages);
+    }
+
     const scenario = findMatchingScenario(query, scenarios);
 
     if (!scenario) {
