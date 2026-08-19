@@ -17,6 +17,7 @@ const log = createChildLogger({ component: 'llm' });
 declare global {
     var __pipaliMockLLM:
         | ((query: string, ctx?: {
+            conversationId?: string;
             sessionId?: string;
             runId?: string;
             history?: ATIFTrajectory;
@@ -37,6 +38,7 @@ export async function sendMessageToModel(
     fastMode: boolean = false,
     user?: typeof User.$inferSelect,
     chatModelId?: number,
+    conversationId?: string,
     runId?: string,
     onTextChunk?: (chunk: string) => void,
     chatModelAlias?: string,
@@ -46,6 +48,7 @@ export async function sendMessageToModel(
         const actualQuery = query || history?.steps?.findLast(s => s.source === 'user')?.message || '';
         log.debug({ query: actualQuery.substring(0, 50) }, 'Using mock LLM');
         return globalThis.__pipaliMockLLM(actualQuery, {
+            conversationId,
             sessionId: history?.session_id,
             runId,
             history,
@@ -92,9 +95,6 @@ export async function sendMessageToModel(
     };
 
     const startTime = Date.now();
-
-    // Extract conversation ID from trajectory for platform tracing
-    const conversationId = history?.session_id;
 
     // Pipali Platform exposes an OpenAI-compatible Responses API for all model types
     // (openai, anthropic, google), so route all platform models through sendMessageToGpt

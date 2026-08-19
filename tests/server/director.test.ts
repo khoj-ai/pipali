@@ -1,6 +1,7 @@
 import { test, expect, describe } from 'bun:test';
-import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt } from '../../src/server/processor/director';
+import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research } from '../../src/server/processor/director';
 import { isFirstRunEasterEgg } from '../../src/server/utils';
+import type { ATIFTrajectory, ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
 
 type MultimodalContent = Array<{ type: string; [key: string]: string }>;
 
@@ -150,6 +151,46 @@ describe('buildSystemPrompt', () => {
         expect(prompt).not.toContain('External Tools');
         expect(prompt).not.toContain('<connected_tools>');
         expect(prompt).not.toContain('{mcp_context}');
+    });
+});
+
+const trajectory = (steps: Array<Partial<ATIFStep>>): ATIFTrajectory => ({
+    schema_version: 'ATIF-v1.4',
+    session_id: 'session-1',
+    agent: { name: 'pipali-agent', version: '1.0.0', model_name: 'mock' },
+    steps: steps.map((step, i) => ({
+        step_id: i + 1,
+        timestamp: new Date().toISOString(),
+        source: 'user',
+        ...step,
+    })) as ATIFStep[],
+});
+
+describe('research request tracing', () => {
+    // Requests are traced with the conversation row id, the handle that resolves
+    // against /api/chat/:id/history. The ATIF session_id is a separate identifier.
+    test('reports the conversation and run ids, not the ATIF session id', async () => {
+        const previousMock = globalThis.__pipaliMockLLM;
+        const traced: Array<Record<string, string | undefined>> = [];
+        globalThis.__pipaliMockLLM = (_query, ctx) => {
+            traced.push({ conversationId: ctx?.conversationId, sessionId: ctx?.sessionId, runId: ctx?.runId });
+            return { message: 'Done.', raw: [] };
+        };
+        try {
+            for await (const iteration of research({
+                chatHistory: trajectory([{ source: 'user', message: 'hi' }]),
+                conversationId: 'conversation-1',
+                runId: 'run-1',
+                maxIterations: 2,
+            })) {
+                if (iteration.isToolCallStart) continue;
+            }
+        } finally {
+            globalThis.__pipaliMockLLM = previousMock;
+        }
+
+        // Distinct sentinels, so a slip in the positional call reads as a swap here
+        expect(traced).toEqual([{ conversationId: 'conversation-1', sessionId: 'session-1', runId: 'run-1' }]);
     });
 });
 

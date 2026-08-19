@@ -804,6 +804,7 @@ async function pickNextTool(
             false,     // fastMode
             config.user, // user - for user's selected model
             config.chatModelId,
+            config.conversationId,
             config.runId,
             config.onTextChunk,
             config.chatModelAlias,
