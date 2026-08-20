@@ -26,6 +26,7 @@ import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, update
 import { loadUserContext, saveUserContext } from '../user-context';
 import { deleteAllMemories, deleteMemory, getMemory, listMemories } from '../memory';
 import { loadMemorySettings, saveMemorySettings } from '../memory/settings';
+import { stopDreaming } from '../memory/dream';
 import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
 import { IS_COMPILED_BINARY, EMBEDDED_CHANGELOG } from '../embedded-assets';
@@ -657,6 +658,9 @@ api.put('/memory/settings', zValidator('json', memorySettingsSchema), async (c) 
 
     try {
         const settings = await saveMemorySettings(user.id, c.req.valid('json'));
+        if (!settings.memoriesEnabled) {
+            await stopDreaming(user.id);
+        }
         return c.json(settings);
     } catch (err) {
         log.error({ err }, 'Failed to save memory settings');

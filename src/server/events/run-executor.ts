@@ -17,6 +17,7 @@ import { buildSystemPrompt } from '../processor/director';
 import { loadUserContext } from '../user-context';
 import { loadMemorySettings } from '../memory/settings';
 import { loadCatalogue } from '../memory';
+import { maybeDream } from '../memory/dream';
 import { isFirstRunEasterEgg, maxIterations as defaultMaxIterations } from '../utils';
 import { setSessionActive, setSessionInactive, updateSessionReasoning } from '../sessions';
 import { createConfirmationCallback } from '../routes/ws/confirmation-manager';
@@ -360,6 +361,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             }
 
             bus.onRunFinished();
+
+            // A settled run is the moment new material exists and nobody is waiting on
+            // the turn. Whether it is time to consolidate is the dream's own business.
+            void maybeDream(user);
             return;
         } catch (error) {
             if (error instanceof PlatformBillingError) {

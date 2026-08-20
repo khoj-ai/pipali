@@ -204,6 +204,14 @@ export interface BuiltinSkillInstallResult {
 }
 
 /**
+ * Builtin skills a feature installs itself, when it first needs one.
+ *
+ * Absent means the feature that owns it is off or has not run yet, so startup leaves
+ * it absent. Once on disk it is refreshed and kept like any other builtin.
+ */
+const LAZY_BUILTIN_SKILLS: readonly string[] = ['memory-dream'];
+
+/**
  * Install and update the builtin skills in ~/.pipali/skills, called on startup.
  *
  * These live in the user's directory and are theirs to edit, so an update lands only
@@ -220,6 +228,7 @@ export async function installBuiltinSkills(): Promise<BuiltinSkillInstallResult>
         const destDir = path.join(skillsDir, skillName);
         try {
             if (!(await Bun.file(path.join(destDir, 'SKILL.md')).exists())) {
+                if (LAZY_BUILTIN_SKILLS.includes(skillName)) continue;
                 await writeSkill(destDir, files);
                 await installSkillDependencies(destDir, skillName);
                 result.installed.push(skillName);
@@ -249,7 +258,8 @@ export async function installBuiltinSkills(): Promise<BuiltinSkillInstallResult>
 }
 
 /**
- * Restore a builtin skill to the version this build ships.
+ * Write a builtin skill from the copy this build ships, installing it where it is
+ * absent and replacing what is there otherwise.
  *
  * The shipped copy travels with the app, so the user's edits are never a one-way door.
  */
