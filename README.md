@@ -37,10 +37,10 @@ Commands that need broader access require your explicit approval. You can config
 ## Starter Prompts
 
 - "We have not been properly introduced"
-- "Summarize the last 5 PDFs in my Downloads folder into a professional 1-page brief."
+- "Go through the app store submissions process for both Apple and Google for my mobile app using the Chrome Browser"
+- "Draft and file a provisional patent with the USPTO for the invention described in my design docs"
+- "Tailor my resume and cover letter to these five job postings, then submit the applications"
 - "Make me a personal newspaper from today's top stories, styled like the NYT front page"
-- "Find all images on my Downloads folder and create a mood board webpage from them"
-- "Turn my recent screenshots into a story describing my week"
 
 ## Get Started
 
