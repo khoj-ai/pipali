@@ -15,7 +15,7 @@ import {
     EMBEDDED_MIGRATIONS,
 } from "./embedded-assets";
 import { startAutomationSystem, stopAutomationSystem } from "./automation";
-import { loadEnabledMcpServers, closeMcpClients } from "./processor/mcp";
+import { loadEnabledMcpServers, startMcpRetrySweep, stopMcpRetrySweep, closeMcpClients } from "./processor/mcp";
 import { configureAuth, isAuthenticated, getPlatformUserInfo } from "./auth";
 import { createChildLogger } from './logger';
 import { initializeSandbox, shutdownSandbox } from './sandbox';
@@ -250,6 +250,11 @@ async function main() {
         log.warn(`⚠️ Failed to load MCP servers:`, error);
     });
 
+    // Servers that failed to connect, or that drop later, are retried in the
+    // background. Nothing else reconnects them without the user going to the
+    // Tools page, and they have no way to know they need to.
+    startMcpRetrySweep();
+
     // Build frontend only in development mode (not when running as compiled binary)
     if (!IS_COMPILED_BINARY && !process.env.PIPALI_SERVER_RESOURCE_DIR) {
         log.info("Building frontend...");
@@ -338,6 +343,7 @@ async function main() {
       server.stop();
       killAllBackgroundProcesses();
       await stopAutomationSystem();
+      stopMcpRetrySweep();
       await closeMcpClients();
       await shutdownSandbox();
       await shutdownPlatformTransport();
