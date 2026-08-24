@@ -607,32 +607,41 @@ async function installPatchedGtkPlugin() {
 }
 
 /**
- * Strip the build host's Wayland core libraries from the extracted AppDir.
+ * Strip the build host's libwayland-client from the extracted AppDir.
  *
- * The linuxdeploy build Tauri's bundler uses deploys libwayland-client and
- * libwayland-server from the build host into AppDir/usr/lib. At runtime the
- * AppImage's AppRun wrapper prepends AppDir/usr/lib to LD_LIBRARY_PATH for the
- * whole process tree, so the host's Mesa libEGL — which links both libraries
- * and is correctly NOT bundled, like libGL/libgbm/libdrm — resolves those
- * SONAMEs to the bundled copies instead of the host's own. When the target
- * distro's Mesa was built against a newer libwayland than the build host's
- * (wayland 1.20 on our ubuntu-22.04 CI), symbol resolution fails, no EGL
- * display can be created, and WebKitWebProcess aborts with
- * `Could not create default EGL display: EGL_BAD_PARAMETER` — a blank white
- * window while the backend keeps running (khoj-ai/pipali#21). The canonical
- * AppImage excludelist mandates leaving libwayland-client system-provided:
- * "New version of Mesa has some dependency issues with libwayland-client if
- * it is bundled". Any host that can render the app already ships both libs,
- * because host Mesa's libEGL itself links them.
+ * The linuxdeploy build Tauri's bundler uses deploys libwayland-client from
+ * the build host into AppDir/usr/lib. At runtime the AppImage's AppRun
+ * wrapper prepends AppDir/usr/lib to LD_LIBRARY_PATH for the whole process
+ * tree, so the host's Mesa libEGL — which links libwayland-client and is
+ * correctly NOT bundled, like libGL/libgbm/libdrm — resolves that SONAME to
+ * the bundled copy instead of the host's own. When the target distro's Mesa
+ * was built against a newer libwayland than the build host's (wayland 1.20 on
+ * our ubuntu-22.04 CI), symbol resolution fails (e.g. current Arch/Fedora
+ * Mesa needs wl_fixes_interface, added in wayland 1.24), no EGL display can
+ * be created, and WebKitWebProcess aborts with `Could not create default EGL
+ * display: EGL_BAD_PARAMETER` — a blank white window while the backend keeps
+ * running (khoj-ai/pipali#21). The canonical AppImage excludelist mandates
+ * leaving exactly this library system-provided: "New version of Mesa has some
+ * dependency issues with libwayland-client if it is bundled". Any host that
+ * can render the app already ships it, because host Mesa's libEGL itself
+ * links it (verified on Ubuntu 24.04 / Debian 13 / Fedora and Arch current).
  *
- * libwayland-cursor and libwayland-egl deliberately stay bundled: the bundled
- * libgdk-3 needs them at load time (stripping them would add a new host
- * package requirement), and they only call the wayland client library's
- * stable, additive public ABI, so they work fine against the host's copy.
+ * The other three bundled Wayland libraries deliberately stay bundled:
+ * - libwayland-server: the bundled libwebkit2gtk links it, and current Mesa
+ *   (Arch 26.2 / Fedora 26.1 / Ubuntu 24.04) does NOT link it anymore, so the
+ *   host provides no guarantee it is installed — stripping it makes the app
+ *   fail to start on hosts without it (verified on a minimal Fedora with
+ *   working X11+Mesa). Keeping it is safe: the only host library that may
+ *   bind it (Debian 13's Mesa) uses long-stable wayland-server ABI that the
+ *   bundled 1.20 copy fully exports (symbol-diffed).
+ * - libwayland-cursor / libwayland-egl: the bundled libgdk-3 needs them at
+ *   load time (stripping them would add a new host package requirement), and
+ *   they only call the wayland client library's stable, additive public ABI,
+ *   so they work fine against the host's newer copy.
  */
-const BUILD_HOST_WAYLAND_LIB_PREFIXES = ["libwayland-client.so", "libwayland-server.so"];
+const BUILD_HOST_WAYLAND_LIB_PREFIXES = ["libwayland-client.so"];
 
-async function stripBundledWaylandLibs(extractRoot: string) {
+async function stripBundledWaylandClient(extractRoot: string) {
     const removed: string[] = [];
 
     async function walk(dir: string) {
@@ -656,7 +665,7 @@ async function stripBundledWaylandLibs(extractRoot: string) {
     await walk(path.join(extractRoot, "usr", "lib64"));
 
     if (removed.length === 0) {
-        console.log("   No bundled Wayland core libraries found to strip");
+        console.log("   No bundled libwayland-client found to strip");
     }
     for (const lib of removed) {
         console.log(`   Stripped bundled ${lib} (host provides it, see khoj-ai/pipali#21)`);
@@ -746,7 +755,7 @@ async function repackAppImageWithPristineSidecars(debug: boolean, platform: Plat
         console.log(`   Restored pristine ${name}`);
     }
 
-    await stripBundledWaylandLibs(extractRoot);
+    await stripBundledWaylandClient(extractRoot);
 
     // Without this verify step the build could regress to silently shipping a
     // corrupted bun again — the original symptom only surfaces at app launch.
