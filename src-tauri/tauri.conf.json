@@ -21,8 +21,7 @@
         "resizable": true,
         "fullscreen": false,
         "center": true,
-        "visible": false,
-        "zoomHotkeysEnabled": true
+        "visible": false
       },
       {
         "label": "splashscreen",

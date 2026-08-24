@@ -73,6 +73,7 @@ const SIDEBAR_STORAGE_KEY = 'pipali-sidebar-open';
 
 const App = () => {
     const { t } = useTranslation();
+    const [mainViewZoom, setMainViewZoom] = useState(1);
 
     // Sidecar configuration (for Tauri desktop app)
     const { baseUrl, wsBaseUrl } = useSidecar();
@@ -596,6 +597,37 @@ const App = () => {
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [scheduleTextareaFocus, syncSelectedModelForConversation]);
+
+    useEffect(() => {
+        const updateZoom = (change?: number) => setMainViewZoom(current => {
+            if (change === undefined) return 1;
+            return Math.min(Math.max(Math.round((current + change) * 10) / 10, 0.2), 10);
+        });
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (!(event.metaKey || event.ctrlKey)) return;
+
+            const change = event.key === '-' || event.key === '_' ? -0.2
+                : event.key === '=' || event.key === '+' ? 0.2
+                    : event.key === '0' ? undefined
+                        : null;
+            if (change === null) return;
+
+            event.preventDefault();
+            updateZoom(change);
+        };
+        const handleWheel = (event: WheelEvent) => {
+            if (!event.ctrlKey) return;
+            event.preventDefault();
+            updateZoom(event.deltaY < 0 ? 0.2 : -0.2);
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('wheel', handleWheel, { passive: false });
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('wheel', handleWheel);
+        };
+    }, []);
 
     // Focus textarea on various state changes
     useEffect(() => { scheduleTextareaFocus(); }, [conversationId]);
@@ -1798,7 +1830,7 @@ const App = () => {
                     )}
                     {currentPage === 'chat' && (
                         <ErrorBoundary>
-                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} />
+                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} zoom={mainViewZoom} />
                         </ErrorBoundary>
                     )}
 
