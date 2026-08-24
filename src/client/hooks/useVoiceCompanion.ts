@@ -46,7 +46,7 @@ import { SegmentedCapture, type CapturedSegment } from '../utils/voice/voice-cap
 import { TurnTranscript, isHallucination, isSelfEcho, isImplausibleSpeechRate } from '../utils/voice/voice-turn';
 import { VOICE_TUNABLES, STT_BIAS_PROMPT, type VoiceMode, type VoiceStatus } from '../utils/voice/voice-config';
 import { playVoiceCue, playTranscriptTicks, speakPcm, stopSpeaking, duckSpeech, voiceCueDurationMs, type VoiceCueProfile } from '../utils/notifications';
-import { parseConfirmationIntent, parseGoAhead, parseAddressing, parseStopWork } from '../utils/voice/voice-intent';
+import { parseConfirmationIntent, parseAddressing, parseStopWork, routeOpenVoice } from '../utils/voice/voice-intent';
 import { buildConfirmationSummary, buildConfirmationDetail, buildCompletionSummary } from '../utils/voice/voice-summary';
 
 interface PendingConfirmation {
@@ -167,6 +167,8 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
     const inviteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const speakingRef = useRef(0);
+    const speechGenerationRef = useRef(0);
+    const activeSpeechRef = useRef<Set<SpeechHandle>>(new Set());
     /** The readout Pipali is (or just was) speaking — what a barge-in is checked against. */
     const spokenTextRef = useRef('');
     const busyRef = useRef(false);
@@ -188,6 +190,17 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         // spokenTextRef deliberately survives: a segment captured at the tail of
         // a readout resolves after playback ends and still needs checking
         // against it. The next utterance overwrites it.
+        captureRef.current?.setSpeaking(false);
+        duckSpeech(false);
+    }, []);
+
+    /** Stop both active and queued readouts and invalidate their continuations. */
+    const interruptSpeaking = useCallback(() => {
+        speechGenerationRef.current++;
+        stopSpeaking();
+        for (const speech of activeSpeechRef.current) speech.cancel();
+        activeSpeechRef.current.clear();
+        speakingRef.current = 0;
         captureRef.current?.setSpeaking(false);
         duckSpeech(false);
     }, []);
@@ -246,10 +259,8 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         sessionTokenRef.current++;
         clearInviteTimer();
         clearIdleTimer();
-        // Stale speaking state would start the next session deaf; late TTS releases clamp at zero.
-        speakingRef.current = 0;
+        interruptSpeaking();
         spokenTextRef.current = '';
-        duckSpeech(false);
         // A pending that survives dormancy re-synthesizes from its summary on cache miss.
         for (const handle of prefetchRef.current.values()) handle.cancel();
         prefetchRef.current.clear();
@@ -259,7 +270,7 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         captureRef.current = null;
         capture?.stop();
         if (withCue && capture) playVoiceCue('session_end');
-    }, [clearInviteTimer, clearIdleTimer, releaseTurn]);
+    }, [clearInviteTimer, clearIdleTimer, interruptSpeaking, releaseTurn]);
 
     const startSession = useCallback(async () => {
         if (captureRef.current || !supported) return;
@@ -289,12 +300,11 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         if (sessionTokenRef.current !== token) { capture.stop(); return; }
         captureRef.current = capture;
         playVoiceCue('session_start');
-        setStatus(pendingRef.current ? 'announced' : 'idle');
+        setStatus(pendingRef.current && !pendingRef.current.heard ? 'announced' : 'idle');
         markAddressed();
     }, [supported, reportError, markAddressed, clearInviteTimer]);
 
     const reset = useCallback(() => {
-        stopSpeaking();
         stopSession(false);
         pendingRef.current = null;
         busyRef.current = false;
@@ -361,23 +371,29 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
     // Speaking (always followed by a reply invitation)
     // ------------------------------------------------------------------
     const speakThenListen = useCallback(async (text: string, getSpeech: () => SpeechHandle) => {
+        const generation = ++speechGenerationRef.current;
         if (!captureRef.current) await startSession();
+        if (generation !== speechGenerationRef.current) return;
+        const speech = getSpeech();
+        activeSpeechRef.current.add(speech);
         setStatus('speaking');
         beginSpeaking(text);
         try {
-            await speakPcm(getSpeech().stream);
+            await speakPcm(speech.stream);
         } catch {
             // Synthesis/playback failed — fall through to listening anyway.
         } finally {
+            activeSpeechRef.current.delete(speech);
             endSpeaking();
         }
         // A barge-in — tap or spoken — may already have opened the reply turn;
         // and an interruption that made Pipali speak again (a mode-switch ack)
         // owns the channel now, so this readout no longer invites a reply.
-        if (!turnRef.current && speakingRef.current === 0) openReplyTurn();
+        if (generation === speechGenerationRef.current && !turnRef.current && speakingRef.current === 0) openReplyTurn();
     }, [startSession, beginSpeaking, endSpeaking, openReplyTurn]);
 
     const speakPendingAndListen = useCallback(async (pending: Pending) => {
+        if (pendingRef.current !== pending) return;
         // Marked on attempt, not success — a failing synthesis must not loop.
         pending.heard = true;
         await speakThenListen(pending.summary, () => {
@@ -399,22 +415,26 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
             void speakPendingAndListen(pending);
             return;
         }
-        setStatus(pending ? 'announced' : 'idle');
+        setStatus(pending && !pending.heard ? 'announced' : 'idle');
     }, [speakPendingAndListen]);
     useEffect(() => { settleRef.current = settle; }, [settle]);
 
     /** Short spoken confirmation that doesn't invite a reply (unlike speakThenListen). */
     const speakAck = useCallback(async (text: string) => {
+        const generation = ++speechGenerationRef.current;
+        const speech = startSpeech(text);
+        activeSpeechRef.current.add(speech);
         setStatus('speaking');
         beginSpeaking(text);
         try {
-            await speakPcm(startSpeech(text).stream);
+            await speakPcm(speech.stream);
         } catch {
             // best-effort; the mode switch itself already took effect
         } finally {
+            activeSpeechRef.current.delete(speech);
             endSpeaking();
         }
-        settle();
+        if (generation === speechGenerationRef.current) settle();
     }, [beginSpeaking, endSpeaking, settle]);
 
     const applyMode = useCallback((target: Exclude<VoiceMode, 'off'>) => {
@@ -551,6 +571,21 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         markSpoken(key);
         announce({ kind: 'confirmation', key, conversationId: convId, runId, request, summary: buildConfirmationSummary(request), ready: false, heard: false }, 'confirmation');
     }, [supported, announce, markSpoken]);
+
+    /** A response sent through the UI or resolved elsewhere ends the voice turn too. */
+    const onConfirmationResponded = useCallback((requestId: string, convId: string) => {
+        const pending = pendingRef.current;
+        if (pending?.kind !== 'confirmation'
+            || pending.request.requestId !== requestId
+            || pending.conversationId !== convId) return;
+
+        interruptSpeaking();
+        dropPrefetch(pending.key);
+        pendingRef.current = null;
+        const turn = turnRef.current;
+        if (turn) releaseTurn(turn);
+        setStatus(captureRef.current ? 'idle' : 'dormant');
+    }, [interruptSpeaking, dropPrefetch, releaseTurn]);
 
     const onTaskComplete = useCallback((response: string, convId: string) => {
         if (cbRef.current.mode === 'off' || !supported) return;
@@ -755,6 +790,7 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
                 markAddressed();
                 const payload = addr.payload;
                 const pending = pendingRef.current;
+                const route = routeOpenVoice(payload, pending?.heard ?? null);
 
                 const command = payload ? classifySpokenCommand(payload, pending?.kind ?? null) : null;
                 if (command) {
@@ -762,22 +798,24 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
                     return;
                 }
 
-                if (pending && (!payload || parseGoAhead(payload))) {
+                if (pending && route === 'speak_pending') {
                     // "Pipali, go ahead" — acknowledge the waiting announcement.
                     void speakPendingAndListen(pending);
                     return;
                 }
                 if (!payload) {
-                    // Bare "Pipali" with nothing pending: start dictating.
-                    openComposedTurn();
+                    // Once a pending readout was heard, a bare wake opens its
+                    // reply turn instead of reading the same content again.
+                    if (route === 'reply') openReplyTurn();
+                    else openComposedTurn();
                     return;
                 }
 
                 // Addressed with content. With an announcement pending it's a reply
                 // (decision/guidance/follow-up); otherwise a composed message turn.
-                beginTurn(pending ? 'reply' : 'composed', payload, seq);
+                beginTurn(route === 'reply' ? 'reply' : 'composed', payload, seq);
             });
-    }, [transcribeSegment, markAddressed, runSpokenCommand, speakPendingAndListen, openComposedTurn, beginTurn]);
+    }, [transcribeSegment, markAddressed, runSpokenCommand, speakPendingAndListen, openReplyTurn, openComposedTurn, beginTurn]);
 
     /**
      * Speech captured while Pipali is talking (full duplex only). Playback has
@@ -883,7 +921,10 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
             done();
         } else if (s === 'idle') {
             // Push-to-talk for general chat (or wake a failed session).
-            if (captureRef.current) openComposedTurn();
+            if (captureRef.current) {
+                if (pendingRef.current) openReplyTurn();
+                else openComposedTurn();
+            }
             else void startSession();
             done();
         } else {
@@ -891,5 +932,5 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         }
     }, [status, supported, startSession, speakPendingAndListen, openReplyTurn, finishListeningTap, openComposedTurn]);
 
-    return { status, supported, liveTranscript, handleTap, onConfirmationRequest, onTaskComplete, onStepStart };
+    return { status, supported, liveTranscript, handleTap, onConfirmationRequest, onConfirmationResponded, onTaskComplete, onStepStart };
 }

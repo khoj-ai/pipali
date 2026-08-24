@@ -185,6 +185,7 @@ const App = () => {
     // WebSocket callbacks below reach them without a forward reference.
     const voiceCompanionRef = useRef<{
         onConfirmationRequest: (request: ConfirmationRequest, convId: string, runId: string) => void;
+        onConfirmationResponded: (requestId: string, convId: string) => void;
         onTaskComplete: (response: string, convId: string) => void;
         onStepStart: (convId: string) => void;
     } | null>(null);
@@ -247,6 +248,9 @@ const App = () => {
             const conv = conversationsRef.current.find(c => c.id === convId);
             notifyConfirmationRequest(request, conv?.title, convId);
             voiceCompanionRef.current?.onConfirmationRequest(request, convId, runId);
+        },
+        onConfirmationResolved: (requestId, convId) => {
+            voiceCompanionRef.current?.onConfirmationResponded(requestId, convId);
         },
         onRunStarted: (convId) => {
             // Delegated tasks and routines create their conversation server-side, so a run
@@ -1522,7 +1526,8 @@ const App = () => {
         const queue = pendingConfirmations.get(convId);
         const pendingConfirmation = queue?.find(c => c.request.requestId === requestId);
         if (!pendingConfirmation || !isConnected) return;
-        respondToConfirmation(convId, pendingConfirmation.runId, requestId, optionId, guidance, attachments);
+        const sent = respondToConfirmation(convId, pendingConfirmation.runId, requestId, optionId, guidance, attachments);
+        if (sent) voiceCompanionRef.current?.onConfirmationResponded(requestId, convId);
     };
 
     const sendCurrentConfirmationResponse = (optionId: string, guidance?: string) => {

@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { parseConfirmationIntent, parseGoAhead, parseAddressing, parseStopWork, normalizeUtterance } from '../../src/client/utils/voice/voice-intent';
+import { parseConfirmationIntent, parseGoAhead, parseAddressing, parseStopWork, normalizeUtterance, routeOpenVoice } from '../../src/client/utils/voice/voice-intent';
 
 describe('parseStopWork', () => {
     test('recognizes the stop vocabulary', () => {
@@ -37,6 +37,26 @@ describe('parseGoAhead', () => {
     test('rejects empty or unrelated speech', () => {
         expect(parseGoAhead('')).toBe(false);
         expect(parseGoAhead('what is the meaning of life')).toBe(false);
+    });
+});
+
+describe('routeOpenVoice', () => {
+    test('a wake phrase only reads pending content that has not been heard', () => {
+        // `false`: something is pending but unread, so a wake/readiness phrase permits the readout.
+        expect(routeOpenVoice('', false)).toBe('speak_pending');
+        expect(routeOpenVoice('go ahead', false)).toBe('speak_pending');
+
+        // `true`: the pending content was already read, so the same phrases start its reply.
+        expect(routeOpenVoice('', true)).toBe('reply');
+        expect(routeOpenVoice('go ahead', true)).toBe('reply');
+    });
+
+    test('addressed content routes to the pending reply or a new message', () => {
+        // Other speech answers the pending item even if its readout has not played yet.
+        expect(routeOpenVoice('use the staging bucket', false)).toBe('reply');
+
+        // `null`: nothing is pending, so addressed speech starts a new chat message.
+        expect(routeOpenVoice('summarize this', null)).toBe('compose');
     });
 });
 

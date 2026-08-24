@@ -148,6 +148,9 @@ export function playTranscriptTicks(wordCount: number): number {
 let speechChain: Promise<void> = Promise.resolve();
 // Halts the readout currently scheduling PCM blocks (barge-in).
 let stopActiveSpeech: (() => void) | null = null;
+// Invalidates callbacks already chained behind the active readout. Resetting
+// speechChain alone cannot detach callbacks from its previous value.
+let speechGeneration = 0;
 
 /** A pull source of decoded speech samples; sampleRate is 0 until the stream's header has parsed. */
 export interface PcmStream {
@@ -212,13 +215,18 @@ async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void
 export function speakPcm(stream: PcmStream): Promise<void> {
     const ctx = ensureAudioContext();
     if (!ctx) return Promise.resolve();
-    const play = speechChain.catch(() => {}).then(() => playPcmStream(ctx, stream));
+    const generation = speechGeneration;
+    const play = speechChain.catch(() => {}).then(() => {
+        if (generation !== speechGeneration) return;
+        return playPcmStream(ctx, stream);
+    });
     speechChain = play.catch(() => {});
     return play;
 }
 
 /** Stop current playback and clear the queue (barge-in). */
 export function stopSpeaking(): void {
+    speechGeneration++;
     stopActiveSpeech?.();
     stopActiveSpeech = null;
     speechChain = Promise.resolve();
