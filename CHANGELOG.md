@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.8.0
+
+### 🎁 New
+- Voice mode — Assign tasks and provide guidance with voice, so your hands, eyes stay free. Use earbuds to step away from your desk (go cook, read, caffeinate). In Ask first mode, Pipali will chime and wait when it needs your attention. Enable voice mode via Settings/Permissions.
+- Background tasks - Pipali can now delegate tasks to background chats or terminals. So it stays available to chat while they work. Parallelize research or manage multiple coding sessions (e.g. claude, codex) from a single Pipali chat.
+
+### 🧪 Improve
+- Improve UX: Sidebar collapses to an icon rail, chat text can be resized and messages and images get more space
+
+### 🛠️ Fix
+- MCP tool servers will automatically reconnect on temporary connection issues
+
 ## 0.7.0
 
 ### 🎁 New
