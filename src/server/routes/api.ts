@@ -39,6 +39,13 @@ const log = createChildLogger({ component: 'api' });
 
 const api = new Hono().basePath('/api');
 
+function isTrustedBrowserOrigin(origin: string): boolean {
+    return origin.startsWith('tauri://')
+        || origin === 'http://tauri.localhost'
+        || origin.startsWith('http://localhost:')
+        || origin.startsWith('http://127.0.0.1:');
+}
+
 // Enable CORS for Tauri desktop app and local development
 // - macOS/Linux WebView uses tauri://localhost origin
 // - Windows WebView2 uses http://tauri.localhost origin
@@ -46,16 +53,22 @@ api.use('*', cors({
     origin: (origin) => {
         // Allow Tauri app, localhost dev servers, and same-origin requests
         if (!origin) return '*'; // Same-origin or non-browser requests
-        if (origin.startsWith('tauri://')) return origin;
-        if (origin === 'http://tauri.localhost') return origin; // Windows WebView2
-        if (origin.startsWith('http://localhost:')) return origin;
-        if (origin.startsWith('http://127.0.0.1:')) return origin;
-        return null; // Reject other origins
+        return isTrustedBrowserOrigin(origin) ? origin : null;
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
 }));
+
+// CORS hides disallowed responses but does not stop simple cross-origin writes.
+api.use('*', async (c, next) => {
+    const origin = c.req.header('Origin');
+    const safeMethod = c.req.method === 'GET' || c.req.method === 'HEAD' || c.req.method === 'OPTIONS';
+    if (origin && !safeMethod && !isTrustedBrowserOrigin(origin)) {
+        return c.json({ error: 'Forbidden origin' }, 403);
+    }
+    await next();
+});
 
 // Health check endpoint for Tauri sidecar readiness detection
 api.get('/health', (c) => c.json({ status: 'ok' }));
@@ -854,23 +867,26 @@ api.put('/user/sandbox', zValidator('json', sandboxSettingsSchema), async (c) =>
     }
 });
 
-// Upload files to /tmp/pipali/uploads/ (web mode file attachment)
+// Upload files to Pipali's system temp directory (web mode file attachment)
 api.post('/upload', async (c) => {
     const body = await c.req.parseBody({ all: true });
     const files = body['files'];
     if (!files) return c.json({ error: 'No files provided' }, 400);
 
     const fileArray = Array.isArray(files) ? files : [files];
-    const uploadDir = path.join(os.tmpdir(), 'pipali', 'uploads');
+    const uploadDir = path.resolve(os.tmpdir(), 'pipali', 'uploads');
     await Bun.$`mkdir -p ${uploadDir}`.quiet();
 
     const results = [];
     for (const file of fileArray) {
         if (typeof file === 'string') continue;
         const uuid = crypto.randomUUID().slice(0, 8);
-        const fileName = file.name || 'unknown';
+        const fileName = path.basename((file.name || 'unknown').replaceAll('\\', '/')) || 'unknown';
         const destName = `${uuid}-${fileName}`;
-        const destPath = path.join(uploadDir, destName);
+        const destPath = path.resolve(uploadDir, destName);
+        if (path.dirname(destPath) !== uploadDir) {
+            return c.json({ error: 'Invalid file name' }, 400);
+        }
         await Bun.write(destPath, file);
         results.push({ fileName, filePath: destPath, sizeBytes: file.size });
     }

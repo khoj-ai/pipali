@@ -86,6 +86,14 @@ mock.module(dbSchemaModule, () => {
         },
         Automation: { $inferSelect: {} },
         AutomationExecution: { $inferSelect: {} },
+        PendingConfirmation: {
+            id: 'id',
+            executionId: 'executionId',
+            request: 'request',
+            status: 'status',
+            expiresAt: 'expiresAt',
+            $inferSelect: {},
+        },
         // Sandbox settings table with column references
         SandboxSettings: {
             id: 'id',
