@@ -12,11 +12,21 @@ import {
     syncPlatformModels,
     syncPlatformWebTools,
 } from '../auth';
+import { createPendingAuthState, consumePendingAuthState } from '../auth/pending-state';
 import { initializeUserContext } from '../user-context';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'auth' });
 const auth = new Hono();
+
+// The callback page turns a URL fragment into stored credentials, so it must never be framed
+const NO_FRAME_HEADERS = {
+    'X-Frame-Options': 'DENY',
+    'Content-Security-Policy': "frame-ancestors 'none'",
+};
+
+// Start a sign-in. The caller puts this state on its callback URL and we require it back.
+auth.post('/state', (c) => c.json({ state: createPendingAuthState() }));
 
 // OAuth callback - serves a page that extracts tokens from URL fragment
 // Tokens are passed via fragment (#) instead of query params (?) for security:
@@ -28,18 +38,25 @@ auth.get('/callback', async (c) => {
 
     if (error) {
         log.error({ error }, 'OAuth callback error');
-        return c.html(getAuthErrorHtml(error));
+        return c.html(getAuthErrorHtml(error), 200, NO_FRAME_HEADERS);
     }
 
     // Return a page that extracts tokens from fragment and POSTs to /complete
-    return c.html(getTokenExtractorHtml());
+    return c.html(getTokenExtractorHtml(), 200, NO_FRAME_HEADERS);
 });
 
 // Complete OAuth - receives tokens via POST body (more secure than URL)
 auth.post('/complete', async (c) => {
     try {
         const body = await c.req.json();
-        const { accessToken, refreshToken, expiresIn, desktopAuth } = body;
+        const { accessToken, refreshToken, expiresIn, desktopAuth, state } = body;
+
+        // Consume first: a sign-in we did not start never gets to store credentials, and a
+        // captured callback URL cannot be replayed.
+        if (!consumePendingAuthState(state)) {
+            log.error('Rejected authentication completion without a matching pending sign-in');
+            return c.json({ error: 'Invalid or expired sign-in request' }, 400, NO_FRAME_HEADERS);
+        }
 
         if (!accessToken || !refreshToken) {
             log.error('Missing tokens in completion request');
@@ -374,6 +391,7 @@ function getTokenExtractorHtml(): string {
             const accessToken = params.get('access_token');
             const refreshToken = params.get('refresh_token');
             const expiresIn = params.get('expires_in');
+            const state = urlParams.get('state');
 
             if (!accessToken || !refreshToken) {
                 document.getElementById('spinner').style.display = 'none';
@@ -390,7 +408,8 @@ function getTokenExtractorHtml(): string {
                     accessToken: accessToken,
                     refreshToken: refreshToken,
                     expiresIn: expiresIn ? parseInt(expiresIn, 10) : null,
-                    desktopAuth: isDesktopAuth
+                    desktopAuth: isDesktopAuth,
+                    state: state
                 })
             })
             .then(response => response.json())

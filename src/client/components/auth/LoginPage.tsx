@@ -65,16 +65,28 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
         return () => clearInterval(interval);
     }, [isWaitingForAuth, checkAuthStatus]);
 
+    // Each sign-in is bound to a state the server minted, so a page that frames the callback
+    // cannot complete a sign-in we never started.
+    const buildCallbackUrl = async (): Promise<string> => {
+        const res = await apiFetch('/api/auth/state', { method: 'POST' });
+        if (!res.ok) {
+            throw new Error('Failed to start sign-in');
+        }
+        const { state } = await res.json();
+        const params = new URLSearchParams({ state });
+        if (isDesktop) {
+            params.set('desktop', '1');
+        }
+        const baseUrl = getApiBaseUrl() || window.location.origin;
+        return `${baseUrl}/api/auth/callback?${params.toString()}`;
+    };
+
     const handleGoogleSignIn = async () => {
         setIsLoading(true);
         setError(null);
 
         try {
-            // Build callback URL with desktop flag if in desktop mode
-            const baseUrl = getApiBaseUrl() || window.location.origin;
-            const callbackUrl = isDesktop
-                ? `${baseUrl}/api/auth/callback?desktop=1`
-                : `${baseUrl}/api/auth/callback`;
+            const callbackUrl = await buildCallbackUrl();
 
             // Get the OAuth URL from the server with custom callback
             const deviceFingerprint = await getDeviceFingerprint();
@@ -116,11 +128,7 @@ export function LoginPage({ onLoginSuccess }: LoginPageProps) {
             }
             const { url } = await res.json();
 
-            // Build callback URL with desktop flag if in desktop mode
-            const baseUrl = getApiBaseUrl() || window.location.origin;
-            const callbackUrl = isDesktop
-                ? `${baseUrl}/api/auth/callback?desktop=1`
-                : `${baseUrl}/api/auth/callback`;
+            const callbackUrl = await buildCallbackUrl();
 
             // Build full login URL with source=app to distinguish from direct platform login
             const loginUrl = `${url}/login?redirect_uri=${encodeURIComponent(callbackUrl)}&source=app`;
