@@ -47,6 +47,8 @@ describe('POST /api/upload', () => {
         expect(await Bun.file(targetPath).exists()).toBe(false);
     });
 
+    // The origin policy itself is covered in tests/server/security/origin-guard.test.ts. This keeps
+    // the endpoint under it, since a route registered above the middleware would escape it.
     test('reject uploads from untrusted browser origins', async () => {
         const fileName = `blocked-${crypto.randomUUID()}.txt`;
         const response = await api.fetch(uploadRequest(fileName, 'https://untrusted.example'));
@@ -60,14 +62,4 @@ describe('POST /api/upload', () => {
         const uploadedNames = await readdir(uploadDir).catch(() => []);
         expect(uploadedNames.some(name => name.endsWith(fileName))).toBe(false);
     });
-
-    for (const origin of ['tauri://localhost', 'http://127.0.0.1:6464']) {
-        test(`allows uploads from ${origin}`, async () => {
-            const response = await api.fetch(uploadRequest('notes.txt', origin));
-
-            expect(response.status).toBe(200);
-            const result = await response.json() as { files: Array<{ filePath: string }> };
-            createdPaths.push(...result.files.map(file => file.filePath));
-        });
-    }
 });

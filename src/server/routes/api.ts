@@ -9,6 +9,7 @@ import { db, getDefaultChatModel } from '../db';
 import { Automation, Conversation, ConversationStep } from '../db/schema';
 import { asc, eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { AiModelApi, ChatModel, User, UserChatModel } from '../db/schema';
+import { isAllowedOrigin } from './origin-guard';
 import openapi from './openapi';
 import automations from './automations';
 import mcp from './mcp';
@@ -39,21 +40,12 @@ const log = createChildLogger({ component: 'api' });
 
 const api = new Hono().basePath('/api');
 
-function isTrustedBrowserOrigin(origin: string): boolean {
-    return origin.startsWith('tauri://')
-        || origin === 'http://tauri.localhost'
-        || origin.startsWith('http://localhost:')
-        || origin.startsWith('http://127.0.0.1:');
-}
-
 // Enable CORS for Tauri desktop app and local development
-// - macOS/Linux WebView uses tauri://localhost origin
-// - Windows WebView2 uses http://tauri.localhost origin
 api.use('*', cors({
-    origin: (origin) => {
+    origin: (origin, c) => {
         // Allow Tauri app, localhost dev servers, and same-origin requests
         if (!origin) return '*'; // Same-origin or non-browser requests
-        return isTrustedBrowserOrigin(origin) ? origin : null;
+        return isAllowedOrigin(origin, c.req.header('Host')) ? origin : null;
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
@@ -64,7 +56,7 @@ api.use('*', cors({
 api.use('*', async (c, next) => {
     const origin = c.req.header('Origin');
     const safeMethod = c.req.method === 'GET' || c.req.method === 'HEAD' || c.req.method === 'OPTIONS';
-    if (origin && !safeMethod && !isTrustedBrowserOrigin(origin)) {
+    if (origin && !safeMethod && !isAllowedOrigin(origin, c.req.header('Host'))) {
         return c.json({ error: 'Forbidden origin' }, 403);
     }
     await next();

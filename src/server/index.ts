@@ -70,6 +70,11 @@ Options:
       --platform-url <url> Platform URL for authentication (env: PIPALI_PLATFORM_URL)
       --help               Show this help message
 
+Environment:
+  PIPALI_TRUSTED_HOSTS   Comma separated hostnames this server can be reached on behind
+                         a reverse proxy. Browser requests whose Host is not loopback or
+                         listed here are refused.
+
 Examples:
   pipali                        # Start with platform authentication
   pipali --anon                 # Start without authentication (use local API keys)
