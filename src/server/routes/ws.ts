@@ -1,4 +1,4 @@
-import type { ServerWebSocket } from 'bun';
+import type { Server, ServerWebSocket } from 'bun';
 import { eq } from 'drizzle-orm';
 import { db } from '../db';
 import { User } from '../db/schema';
@@ -14,6 +14,7 @@ import {
     ObserveCommandHandler,
 } from './ws/commands';
 import type { Session } from './ws/session-state';
+import { isAllowedRequestOrigin } from './origin-guard';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'ws' });
@@ -165,6 +166,22 @@ async function handleClientMessage(
     });
 
     connCtx.executors.set(conversationId, executor);
+}
+
+/**
+ * Admit a /ws/chat handshake, or refuse it.
+ *
+ * This channel drives the agent as the local user, and CORS does not apply to WebSocket upgrades,
+ * so a page the user merely visits could otherwise open one and issue commands. Returns a response
+ * to send when the handshake is refused, or undefined once the socket has been taken over.
+ */
+export function handleChatUpgrade(req: Request, server: Server<WebSocketData>): Response | undefined {
+    if (!isAllowedRequestOrigin(req)) {
+        log.warn(`Rejected WebSocket upgrade from origin ${req.headers.get('Origin')}`);
+        return new Response('Forbidden origin', { status: 403 });
+    }
+    if (server.upgrade(req, { data: {} })) return undefined;
+    return new Response('WebSocket upgrade failed', { status: 400 });
 }
 
 export const websocketHandler = {

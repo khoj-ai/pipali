@@ -9,7 +9,7 @@ import { initializeDatabase } from "./init";
 import { getMigrationsFolder } from "./utils";
 import { loadSkills, installBuiltinSkills } from "./skills";
 import { initializeUserContext } from "./user-context";
-import { websocketHandler, type WebSocketData } from "./routes/ws";
+import { handleChatUpgrade, websocketHandler, type WebSocketData } from "./routes/ws";
 import {
     IS_COMPILED_BINARY,
     EMBEDDED_MIGRATIONS,
@@ -301,14 +301,7 @@ async function main() {
 
         // WebSocket
         if (url.pathname === "/ws/chat") {
-            const success = server.upgrade(req, {
-                data: {
-                    // Initialize data if needed
-                }
-            });
-            if (success) {
-                return undefined;
-            }
+            return handleChatUpgrade(req, server);
         }
 
         // API

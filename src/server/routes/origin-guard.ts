@@ -78,3 +78,15 @@ function isSameOriginRequest(origin: string, host: string | undefined): boolean 
 export function isAllowedOrigin(origin: string, host: string | undefined): boolean {
     return isTrustedBrowserOrigin(origin) || isSameOriginRequest(origin, host);
 }
+
+/**
+ * Whether a request may act on the user's behalf.
+ *
+ * Unlike the API guard this has no safe-method exemption: a WebSocket handshake is a GET that opens
+ * a fully state-changing channel, and CORS never covers it.
+ */
+export function isAllowedRequestOrigin(req: Request): boolean {
+    const origin = req.headers.get('Origin');
+    if (!origin) return true; // Non-browser clients (CLI, desktop internals) send no Origin
+    return isAllowedOrigin(origin, req.headers.get('Host') ?? undefined);
+}

@@ -4,6 +4,8 @@
  * These drive the real middleware through api.fetch, so they cover both the policy and its
  * wiring into the app. An unrouted path keeps the subject to the guard alone: a refused request
  * never reaches the router, an accepted one falls through to a 404.
+ *
+ * The same policy over the WebSocket upgrade is covered in tests/server/ws/upgrade-origin.test.ts.
  */
 
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
@@ -93,7 +95,8 @@ describe('API origin guard', () => {
         expect(await post('http://rebind.attacker.example:6464', 'rebind.attacker.example:6464')).toBe(REFUSED);
     });
 
-    // Reads stay open because CORS withholds the response.
+    // Reads stay open because CORS withholds the response. The WebSocket upgrade is a GET that
+    // opens a writable channel, so its guard deliberately has no such exemption.
     test('leaves safe methods to CORS', async () => {
         const request = new Request('http://127.0.0.1:6464/api/origin-guard-probe', {
             headers: { Origin: 'https://untrusted.example' },
