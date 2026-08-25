@@ -216,6 +216,19 @@
     line-height: 1.4;
 }
 
+/* Marks a builtin skill the user has edited, so app updates no longer land on it */
+.skill-card-badge {
+    margin-right: auto;
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-full);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--color-text-muted);
+}
+
 .skill-card-description {
     font-size: 13px;
     color: var(--color-text-secondary);

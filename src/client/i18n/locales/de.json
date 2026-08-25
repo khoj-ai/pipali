@@ -362,7 +362,12 @@
         "saving": "Wird gespeichert...",
         "save": "Speichern",
         "failedToSave": "Skill konnte nicht gespeichert werden",
-        "failedToDelete": "Skill konnte nicht gelöscht werden"
+        "failedToDelete": "Skill konnte nicht gelöscht werden",
+        "modified": "Geändert",
+        "resetToDefault": "Auf Standard zurücksetzen",
+        "resetSkillConfirm": "Ihre Änderungen durch den Standard-Skill ersetzen?",
+        "resetting": "Wird zurückgesetzt...",
+        "failedToReset": "Skill konnte nicht zurückgesetzt werden"
     },
     "automations": {
         "title": "Routinen",

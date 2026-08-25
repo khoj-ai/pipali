@@ -2,6 +2,7 @@
 
 import React from 'react';
 import { ChevronRight } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import type { SkillInfo } from '../../types/skills';
 
 interface SkillCardProps {
@@ -11,6 +12,8 @@ interface SkillCardProps {
 }
 
 export function SkillCard({ skill, onClick, onToggleVisibility }: SkillCardProps) {
+    const { t } = useTranslation();
+
     const handleToggle = (e: React.MouseEvent) => {
         e.stopPropagation();
         onToggleVisibility?.(skill, !skill.visible);
@@ -31,6 +34,7 @@ export function SkillCard({ skill, onClick, onToggleVisibility }: SkillCardProps
         >
             <div className="skill-card-title-row">
                 <h3 className="skill-card-title">{skill.name}</h3>
+                {skill.modified && <span className="skill-card-badge">{t('skills.modified')}</span>}
                 <button
                     className={`skill-toggle-btn${skill.visible ? ' skill-toggle-on' : ''}`}
                     onClick={handleToggle}

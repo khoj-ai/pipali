@@ -5,6 +5,8 @@ import os from 'os';
 import { parseFrontmatter, isValidSkillName, scanSkillsDirectory } from '../../src/server/skills/loader';
 import { formatSkillsForPrompt, escapeYamlValue } from '../../src/server/skills/utils';
 import type { Skill } from '../../src/server/skills/types';
+import { loadSkills, builtinSkillAction, resetBuiltinSkill } from '../../src/server/skills';
+import { SHIPPED_SKILL_HASHES, hashSkillFiles, readSkillDirectory } from '../../src/server/skills/builtin-versions';
 
 describe('skills', () => {
     const testDir = path.join(os.tmpdir(), 'skills-tests');
@@ -513,5 +515,132 @@ Content here.
             expect(result).toContain('<name>skill-1</name>');
             expect(result).toContain('<name>skill-2</name>');
         });
+    });
+});
+
+describe('builtin skill provenance', () => {
+    const builtinDir = path.join(import.meta.dir, '..', '..', 'src', 'server', 'skills', 'builtin');
+    const shippedDir = path.join(os.tmpdir(), 'skills-provenance-tests');
+
+    const shippedSkillNames = async () =>
+        (await fs.readdir(builtinDir, { withFileTypes: true }))
+            .filter(entry => entry.isDirectory() && !entry.name.startsWith('.'))
+            .map(entry => entry.name);
+
+    beforeAll(async () => {
+        await fs.mkdir(shippedDir, { recursive: true });
+    });
+
+    afterAll(async () => {
+        await fs.rm(shippedDir, { recursive: true, force: true });
+        delete process.env.PIPALI_SKILLS_DIR;
+    });
+
+    test('every builtin skill we ship has its hash recorded', async () => {
+        for (const name of await shippedSkillNames()) {
+            const hash = hashSkillFiles(await readSkillDirectory(path.join(builtinDir, name)));
+            // Editing a builtin skill without `bun scripts/builtin-skill-hashes.ts` would
+            // leave every existing install looking customized, frozen on its old version
+            expect(SHIPPED_SKILL_HASHES[name] ?? []).toContain(hash);
+        }
+    });
+
+    test('an install left by an older release refreshes, an edited one is kept', async () => {
+        // A skill we have shipped more than once, so its first hash is genuinely an
+        // older release rather than the version on disk now
+        const revised = Object.entries(SHIPPED_SKILL_HASHES).find(([, hashes]) => hashes.length > 1);
+        expect(revised).toBeDefined();
+
+        const [name, hashes] = revised!;
+        const shipped = hashSkillFiles(await readSkillDirectory(path.join(builtinDir, name)));
+
+        expect(builtinSkillAction(name, hashes[0]!, shipped)).toBe('refresh');
+        expect(builtinSkillAction(name, shipped, shipped)).toBe('unchanged');
+        expect(builtinSkillAction(name, 'a'.repeat(64), shipped)).toBe('keep');
+    });
+
+    test('installing and running a skill does not make it look edited', async () => {
+        const [name] = await shippedSkillNames();
+        const skillDir = path.join(shippedDir, 'generated', name!);
+        await fs.cp(path.join(builtinDir, name!), skillDir, { recursive: true });
+        const pristine = hashSkillFiles(await readSkillDirectory(skillDir));
+
+        // What each toolchain leaves in a skill directory. Anything counted here would
+        // freeze the skill on its current version the first time the user ran it
+        const artifacts: [string, string][] = [
+            ['scripts/node_modules/left-pad/index.js', 'module.exports = 1;'],
+            ['scripts/bun.lock', '{}'],
+            ['scripts/__pycache__/helper.cpython-313.pyc', 'compiled bytecode'],
+            ['scripts/.venv/pyvenv.cfg', 'home = /usr/bin'],
+        ];
+        for (const [relPath, content] of artifacts) {
+            await fs.mkdir(path.dirname(path.join(skillDir, relPath)), { recursive: true });
+            await fs.writeFile(path.join(skillDir, relPath), content);
+        }
+
+        expect(hashSkillFiles(await readSkillDirectory(skillDir))).toBe(pristine);
+    });
+
+    test('loadSkills marks builtin skills and whether the user edited them', async () => {
+        const skillsDir = path.join(shippedDir, 'installed');
+        await fs.rm(skillsDir, { recursive: true, force: true });
+        await fs.mkdir(skillsDir, { recursive: true });
+
+        const names = await shippedSkillNames();
+        for (const name of names) {
+            await fs.cp(path.join(builtinDir, name), path.join(skillsDir, name), { recursive: true });
+        }
+        await fs.mkdir(path.join(skillsDir, 'user-own'), { recursive: true });
+        await fs.writeFile(
+            path.join(skillsDir, 'user-own', 'SKILL.md'),
+            '---\nname: user-own\ndescription: A skill the user wrote themselves\n---\n\nDo the thing.\n',
+        );
+
+        const edited = names[0]!;
+        await fs.appendFile(path.join(skillsDir, edited, 'SKILL.md'), '\nAlso never record anything about my health.\n');
+
+        process.env.PIPALI_SKILLS_DIR = skillsDir;
+        const byName = new Map((await loadSkills()).skills.map(skill => [skill.name, skill]));
+
+        expect(byName.get(edited)).toMatchObject({ builtin: true, modified: true });
+        for (const name of names.slice(1)) {
+            expect(byName.get(name)).toMatchObject({ builtin: true, modified: false });
+        }
+        expect(byName.get('user-own')?.builtin).toBeUndefined();
+    });
+
+    test('resetting a builtin skill restores our version and clears what the user added', async () => {
+        const skillsDir = path.join(shippedDir, 'reset');
+        await fs.rm(skillsDir, { recursive: true, force: true });
+        await fs.mkdir(skillsDir, { recursive: true });
+
+        // A skill with no scripts/package.json, so the reset does not shell out to `bun install`
+        const names = await shippedSkillNames();
+        const candidates = await Promise.all(names.map(async name =>
+            (await Bun.file(path.join(builtinDir, name, 'scripts', 'package.json')).exists()) ? null : name));
+        const name = candidates.find(Boolean)!;
+        expect(name).toBeDefined();
+
+        await fs.cp(path.join(builtinDir, name), path.join(skillsDir, name), { recursive: true });
+        const shipped = hashSkillFiles(await readSkillDirectory(path.join(builtinDir, name)));
+
+        await fs.appendFile(path.join(skillsDir, name, 'SKILL.md'), '\nAlways read the ledger first.\n');
+        await fs.writeFile(path.join(skillsDir, name, 'NOTES.md'), 'a file the user dropped in');
+
+        process.env.PIPALI_SKILLS_DIR = skillsDir;
+        expect(hashSkillFiles(await readSkillDirectory(path.join(skillsDir, name)))).not.toBe(shipped);
+
+        const result = await resetBuiltinSkill(name);
+
+        expect(result.success).toBe(true);
+        expect(result.skill?.modified).toBe(false);
+        // Restoring means the directory holds our files and only our files, so the next
+        // release can recognize it as untouched and update it again
+        expect(hashSkillFiles(await readSkillDirectory(path.join(skillsDir, name)))).toBe(shipped);
+        expect(await Bun.file(path.join(skillsDir, name, 'NOTES.md')).exists()).toBe(false);
+    });
+
+    test('a skill we never shipped cannot be reset', async () => {
+        expect((await resetBuiltinSkill('user-own')).success).toBe(false);
     });
 });

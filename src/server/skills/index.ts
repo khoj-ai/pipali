@@ -5,10 +5,18 @@
 
 import path from 'path';
 import type { Dirent } from 'fs';
-import { mkdir, rm, readdir, cp } from 'fs/promises';
+import { mkdir, rm, readdir } from 'fs/promises';
 import { scanSkillsDirectory, isValidSkillName, isValidDescription } from './loader';
 import { formatSkillsForPrompt, escapeYamlValue } from './utils';
 import type { Skill, SkillLoadResult } from './types';
+import {
+    SHIPPED_SKILL_HASHES,
+    hashSkillFiles,
+    isGeneratedSkillPath,
+    isShippedSkillVersion,
+    readSkillDirectory,
+    type SkillFiles,
+} from './builtin-versions';
 import { parseFrontmatter } from '../frontmatter';
 import { IS_COMPILED_BINARY, EMBEDDED_BUILTIN_SKILLS } from '../embedded-assets';
 import { getSkillsDir as getSkillsDirFromPaths } from '../paths';
@@ -52,6 +60,12 @@ export interface UpdateSkillInput {
 }
 
 export interface UpdateSkillResult {
+    success: boolean;
+    skill?: Skill;
+    error?: string;
+}
+
+export interface ResetSkillResult {
     success: boolean;
     skill?: Skill;
     error?: string;
@@ -106,141 +120,158 @@ export function getSkillsDir(): string {
 }
 
 /**
- * Install builtin skills to the skills directory.
- * Only copies skills that don't already exist (won't overwrite user modifications).
- * Called on app startup/first run.
+ * The builtin skills as this build ships them, keyed by skill name.
  *
- * In compiled binary mode, uses embedded skills from EMBEDDED_BUILTIN_SKILLS.
- * In development mode, copies from the builtin/ directory.
+ * A compiled binary carries them as embedded strings and development reads the source
+ * tree; both arrive as the same file map, so everything downstream is shared.
  */
-export async function installBuiltinSkills(): Promise<{ installed: string[]; skipped: string[] }> {
-    const installed: string[] = [];
-    const skipped: string[] = [];
-    const skillsDir = getSkillsDir();
-
-    // Ensure skills directory exists
-    await mkdir(skillsDir, { recursive: true });
+async function readShippedSkills(): Promise<Map<string, SkillFiles>> {
+    const skills = new Map<string, SkillFiles>();
 
     if (IS_COMPILED_BINARY) {
-        // Use embedded skills in compiled binary
-        return installEmbeddedSkills(skillsDir, installed, skipped);
-    } else {
-        // Use filesystem skills in development
-        return installFilesystemSkills(skillsDir, installed, skipped);
-    }
-}
-
-/**
- * Install skills from embedded assets (compiled binary mode)
- */
-async function installEmbeddedSkills(
-    skillsDir: string,
-    installed: string[],
-    skipped: string[]
-): Promise<{ installed: string[]; skipped: string[] }> {
-    // Group files by skill name (first path segment)
-    const skillFiles = new Map<string, Array<{ relativePath: string; content: string; binary: boolean }>>();
-
-    for (const [filePath, { content, binary }] of Object.entries(EMBEDDED_BUILTIN_SKILLS)) {
-        const parts = filePath.split(path.sep);
-        const skillName = parts[0];
-        if (!skillName) continue;
-        const relativePath = parts.slice(1).join(path.sep);
-
-        if (!skillFiles.has(skillName)) {
-            skillFiles.set(skillName, []);
+        for (const [filePath, { content, binary }] of Object.entries(EMBEDDED_BUILTIN_SKILLS)) {
+            const [skillName, ...rest] = filePath.split(path.sep);
+            const relPath = rest.join(path.sep);
+            if (!skillName || !relPath || isGeneratedSkillPath(relPath)) continue;
+            if (!skills.has(skillName)) skills.set(skillName, new Map());
+            skills.get(skillName)!.set(relPath, new Uint8Array(Buffer.from(content, binary ? 'base64' : 'utf8')));
         }
-        skillFiles.get(skillName)!.push({ relativePath, content, binary });
+        return skills;
     }
 
-    // Install each skill
-    for (const [skillName, files] of skillFiles) {
-        const destDir = path.join(skillsDir, skillName);
-
-        // Check if skill already exists
-        const destSkillMd = Bun.file(path.join(destDir, 'SKILL.md'));
-        if (await destSkillMd.exists()) {
-            skipped.push(skillName);
-            continue;
-        }
-
-        // Write all files for this skill
-        try {
-            for (const { relativePath, content, binary } of files) {
-                const destPath = path.join(destDir, relativePath);
-                await mkdir(path.dirname(destPath), { recursive: true });
-
-                if (binary) {
-                    // Decode base64 for binary files
-                    await Bun.write(destPath, Buffer.from(content, 'base64'));
-                } else {
-                    await Bun.write(destPath, content);
-                }
-            }
-
-            // Install npm dependencies if the skill has a scripts/package.json
-            await installSkillDependencies(destDir, skillName);
-
-            installed.push(skillName);
-        } catch (err) {
-            log.error({ err, skillName }, `Failed to install builtin skill "${skillName}"`);
-        }
-    }
-
-    return { installed, skipped };
-}
-
-/**
- * Install skills from filesystem (development mode)
- */
-async function installFilesystemSkills(
-    skillsDir: string,
-    installed: string[],
-    skipped: string[]
-): Promise<{ installed: string[]; skipped: string[] }> {
-    // Read builtin skills directory
-    let builtinEntries: Dirent[];
+    let entries: Dirent[];
     try {
-        builtinEntries = await readdir(BUILTIN_SKILLS_DIR, { withFileTypes: true });
+        entries = await readdir(BUILTIN_SKILLS_DIR, { withFileTypes: true });
     } catch (err) {
-        // No builtin skills directory or can't read it
         if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-            return { installed, skipped };
+            return skills;
         }
         throw err;
     }
 
-    for (const entry of builtinEntries) {
-        // Skip non-directories and hidden files
-        if (!entry.isDirectory() || entry.name.startsWith('.')) {
-            continue;
-        }
+    for (const entry of entries) {
+        if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
+        skills.set(entry.name, await readSkillDirectory(path.join(BUILTIN_SKILLS_DIR, entry.name)));
+    }
 
-        const skillName = entry.name;
-        const srcDir = path.join(BUILTIN_SKILLS_DIR, skillName);
+    return skills;
+}
+
+/**
+ * Make a skill directory hold exactly what we ship, removing shipped files this
+ * version dropped.
+ *
+ * Called to refresh an untouched install, where the removed files are only ever ones
+ * we put there, and to reset a customized one, where replacing the user's version is
+ * the point. Leaving a dropped file behind would keep the directory hashing as
+ * customized forever, so the removal pass is what makes a refresh repeatable.
+ */
+async function writeSkill(destDir: string, files: SkillFiles): Promise<void> {
+    for (const [relPath, content] of files) {
+        const destPath = path.join(destDir, relPath);
+        await mkdir(path.dirname(destPath), { recursive: true });
+        await Bun.write(destPath, content);
+    }
+
+    for (const relPath of (await readSkillDirectory(destDir)).keys()) {
+        if (!files.has(relPath)) {
+            await rm(path.join(destDir, relPath), { force: true });
+        }
+    }
+}
+
+/**
+ * What an installed builtin skill should get on startup.
+ *
+ * `refresh` is the case the hash list exists for: the files differ from what ships
+ * today but match a release of ours, so they are an old install rather than the user's
+ * work. Anything else that differs is theirs and is kept.
+ */
+export function builtinSkillAction(skillName: string, onDiskHash: string, shippedHash: string): 'unchanged' | 'refresh' | 'keep' {
+    if (onDiskHash === shippedHash) return 'unchanged';
+    return isShippedSkillVersion(skillName, onDiskHash) ? 'refresh' : 'keep';
+}
+
+export interface BuiltinSkillInstallResult {
+    /** Skills that were not on disk at all */
+    installed: string[];
+    /** Untouched installs of an older release, brought up to date */
+    refreshed: string[];
+    /** Installs the user has edited, left as they are */
+    customized: string[];
+    /** Installs already holding what this build ships */
+    unchanged: string[];
+}
+
+/**
+ * Install and update the builtin skills in ~/.pipali/skills, called on startup.
+ *
+ * These live in the user's directory and are theirs to edit, so an update lands only
+ * where the files are still exactly as some release of ours left them. Anything else is
+ * their own version and stays until they reset it.
+ */
+export async function installBuiltinSkills(): Promise<BuiltinSkillInstallResult> {
+    const result: BuiltinSkillInstallResult = { installed: [], refreshed: [], customized: [], unchanged: [] };
+    const skillsDir = getSkillsDir();
+
+    await mkdir(skillsDir, { recursive: true });
+
+    for (const [skillName, files] of await readShippedSkills()) {
         const destDir = path.join(skillsDir, skillName);
-
-        // Check if skill already exists
-        const destSkillMd = Bun.file(path.join(destDir, 'SKILL.md'));
-        if (await destSkillMd.exists()) {
-            skipped.push(skillName);
-            continue;
-        }
-
-        // Copy the skill directory
         try {
-            await cp(srcDir, destDir, { recursive: true });
+            if (!(await Bun.file(path.join(destDir, 'SKILL.md')).exists())) {
+                await writeSkill(destDir, files);
+                await installSkillDependencies(destDir, skillName);
+                result.installed.push(skillName);
+                continue;
+            }
 
-            // Install npm dependencies if the skill has a scripts/package.json
-            await installSkillDependencies(destDir, skillName);
-
-            installed.push(skillName);
+            const onDisk = hashSkillFiles(await readSkillDirectory(destDir));
+            switch (builtinSkillAction(skillName, onDisk, hashSkillFiles(files))) {
+                case 'unchanged':
+                    result.unchanged.push(skillName);
+                    break;
+                case 'refresh':
+                    await writeSkill(destDir, files);
+                    await installSkillDependencies(destDir, skillName);
+                    result.refreshed.push(skillName);
+                    break;
+                case 'keep':
+                    result.customized.push(skillName);
+                    break;
+            }
         } catch (err) {
             log.error({ err, skillName }, `Failed to install builtin skill "${skillName}"`);
         }
     }
 
-    return { installed, skipped };
+    return result;
+}
+
+/**
+ * Restore a builtin skill to the version this build ships.
+ *
+ * The shipped copy travels with the app, so the user's edits are never a one-way door.
+ */
+export async function resetBuiltinSkill(name: string): Promise<ResetSkillResult> {
+    const files = (await readShippedSkills()).get(name);
+    if (!files) {
+        return { success: false, error: `"${name}" is not a builtin skill` };
+    }
+
+    const destDir = path.join(getSkillsDir(), name);
+    try {
+        await writeSkill(destDir, files);
+        await installSkillDependencies(destDir, name);
+    } catch (err) {
+        return {
+            success: false,
+            error: `Failed to reset skill: ${err instanceof Error ? err.message : String(err)}`,
+        };
+    }
+
+    await loadSkills();
+    return { success: true, skill: cachedSkills.find(s => s.name === name) };
 }
 
 /**
@@ -249,8 +280,27 @@ async function installFilesystemSkills(
  */
 export async function loadSkills(): Promise<SkillLoadResult> {
     const result = await scanSkillsDirectory(getSkillsDir());
-    cachedSkills = result.skills;
-    return result;
+    cachedSkills = await Promise.all(result.skills.map(markBuiltinProvenance));
+    return { ...result, skills: cachedSkills };
+}
+
+/**
+ * Note whether a skill is one we ship and, if so, whether the user has edited it.
+ *
+ * Drives the modified badge and the reset action. A skill we never shipped is simply
+ * the user's own and gets neither.
+ */
+async function markBuiltinProvenance(skill: Skill): Promise<Skill> {
+    if (!(skill.name in SHIPPED_SKILL_HASHES)) {
+        return skill;
+    }
+    try {
+        const hash = hashSkillFiles(await readSkillDirectory(path.dirname(skill.location)));
+        return { ...skill, builtin: true, modified: !isShippedSkillVersion(skill.name, hash) };
+    } catch (err) {
+        log.warn({ err, skillName: skill.name }, 'Could not determine whether builtin skill was edited');
+        return { ...skill, builtin: true };
+    }
 }
 
 /**

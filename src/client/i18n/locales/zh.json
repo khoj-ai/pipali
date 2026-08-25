@@ -362,7 +362,12 @@
         "saving": "保存中...",
         "save": "保存",
         "failedToSave": "保存技能失败",
-        "failedToDelete": "删除技能失败"
+        "failedToDelete": "删除技能失败",
+        "modified": "已修改",
+        "resetToDefault": "恢复默认",
+        "resetSkillConfirm": "用默认技能替换你的修改？",
+        "resetting": "恢复中...",
+        "failedToReset": "恢复技能失败"
     },
     "automations": {
         "title": "例行任务",

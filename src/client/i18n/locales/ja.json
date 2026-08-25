@@ -362,7 +362,12 @@
         "saving": "保存中...",
         "save": "保存",
         "failedToSave": "スキルの保存に失敗しました",
-        "failedToDelete": "スキルの削除に失敗しました"
+        "failedToDelete": "スキルの削除に失敗しました",
+        "modified": "変更済み",
+        "resetToDefault": "デフォルトに戻す",
+        "resetSkillConfirm": "変更をデフォルトのスキルに戻しますか？",
+        "resetting": "リセット中...",
+        "failedToReset": "スキルのリセットに失敗しました"
     },
     "automations": {
         "title": "ルーティン",

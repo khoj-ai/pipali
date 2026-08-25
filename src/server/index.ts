@@ -208,10 +208,16 @@ async function main() {
         log.info('🔓 Running in anonymous mode (using local API keys)');
     }
 
-    // Install builtin skills to global directory (skips if already exists)
+    // Install builtin skills, updating the ones the user has not edited
     const builtinResult = await installBuiltinSkills();
     if (builtinResult.installed.length > 0) {
         log.info(`📦 Installed builtin skill(s): ${builtinResult.installed.join(', ')}`);
+    }
+    if (builtinResult.refreshed.length > 0) {
+        log.info(`📦 Updated builtin skill(s): ${builtinResult.refreshed.join(', ')}`);
+    }
+    if (builtinResult.customized.length > 0) {
+        log.info(`📦 Kept your edited builtin skill(s): ${builtinResult.customized.join(', ')}`);
     }
 
     // Load skills from global and local paths

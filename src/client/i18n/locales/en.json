@@ -362,7 +362,12 @@
         "saving": "Saving...",
         "save": "Save",
         "failedToSave": "Failed to save skill",
-        "failedToDelete": "Failed to delete skill"
+        "failedToDelete": "Failed to delete skill",
+        "modified": "Modified",
+        "resetToDefault": "Reset to Default",
+        "resetSkillConfirm": "Replace your changes with the default skill?",
+        "resetting": "Resetting...",
+        "failedToReset": "Failed to reset skill"
     },
     "automations": {
         "title": "Routines",

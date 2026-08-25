@@ -362,7 +362,12 @@
         "saving": "Enregistrement...",
         "save": "Enregistrer",
         "failedToSave": "\u00c9chec de l'enregistrement de la comp\u00e9tence",
-        "failedToDelete": "\u00c9chec de la suppression de la comp\u00e9tence"
+        "failedToDelete": "\u00c9chec de la suppression de la comp\u00e9tence",
+        "modified": "Modifiée",
+        "resetToDefault": "Réinitialiser",
+        "resetSkillConfirm": "Remplacer vos modifications par la compétence par défaut ?",
+        "resetting": "Réinitialisation...",
+        "failedToReset": "Échec de la réinitialisation de la compétence"
     },
     "automations": {
         "title": "Routines",

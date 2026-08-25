@@ -21,7 +21,7 @@ import { getActiveStatus } from '../sessions';
 import { transcribeAudio, synthesizeSpeech, summarizeForSpeech, VoiceUnavailableError } from '../voice';
 import { PlatformAuthError } from '../http/platform-fetch';
 import { PlatformBillingError } from '../http/billing-errors';
-import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill, toggleSkillVisibility } from '../skills';
+import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill, toggleSkillVisibility, resetBuiltinSkill } from '../skills';
 import { loadUserContext, saveUserContext } from '../user-context';
 import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
@@ -803,6 +803,22 @@ api.patch('/skills/:name/visibility', zValidator('json', toggleVisibilitySchema)
         return c.json({ error: result.error }, 400);
     }
 
+    return c.json({ success: true, skill: result.skill });
+});
+
+// Restore a builtin skill to the version shipped with this build
+api.post('/skills/:name/reset', async (c) => {
+    const name = c.req.param('name');
+    log.info(`♻️  Resetting builtin skill "${name}"`);
+
+    const result = await resetBuiltinSkill(name);
+
+    if (!result.success) {
+        log.warn(`⚠️  Failed to reset skill: ${result.error}`);
+        return c.json({ error: result.error }, 400);
+    }
+
+    log.info(`✅ Reset skill "${name}"`);
     return c.json({ success: true, skill: result.skill });
 });
 
