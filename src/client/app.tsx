@@ -163,6 +163,8 @@ const App = () => {
     const defaultModelRef = useRef<ChatModelInfo | null>(null);
     // Track isConnected for callbacks that may close over stale state
     const isConnectedRef = useRef(false);
+    // Distinguishes the first connect from a reconnect
+    const hasConnectedRef = useRef(false);
     // When on home page, observe active conversations so confirmations and live state
     // (e.g., needs_input) can appear without opening the conversation.
     const observedActiveConversationsRef = useRef<Set<string>>(new Set());
@@ -694,6 +696,18 @@ const App = () => {
         if (!conversationId || !isConnected) return;
         observe(conversationId);
     }, [conversationId, isConnected, observe]);
+
+    // A dropped connection misses every event published while it was down, and the bus replays
+    // nothing once the run it belonged to has finished. Re-read persisted state on reconnect.
+    useEffect(() => {
+        if (!isConnected) return;
+        const isReconnect = hasConnectedRef.current;
+        hasConnectedRef.current = true;
+        if (!isReconnect) return; // the first connect is covered by the fetches on mount
+
+        fetchConversations();
+        if (conversationIdRef.current) void fetchHistory(conversationIdRef.current);
+    }, [isConnected]);
 
     useEffect(() => {
         if (!isConnected) return;
