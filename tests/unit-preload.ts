@@ -35,10 +35,12 @@ try {
     mkdirSync(baseDir, { recursive: true });
     process.env.POSTGRES_DB ||= `${baseDir}/pipali-unit-${process.pid}-${Date.now()}`;
     process.env.PIPALI_MEMORY_DIR ||= `${baseDir}/pipali-unit-${process.pid}-memory`;
+    process.env.PIPALI_LOGS_DIR ||= `${baseDir}/pipali-unit-${process.pid}-logs`;
 } catch {
     // If /tmp isn't available, fall back to cwd
     process.env.POSTGRES_DB ||= `${process.cwd()}/.pipali-unit-test.db`;
     process.env.PIPALI_MEMORY_DIR ||= `${process.cwd()}/.pipali-unit-test-memory`;
+    process.env.PIPALI_LOGS_DIR ||= `${process.cwd()}/.pipali-unit-test-logs`;
 }
 
 process.env.PIPALI_TEST_MODE ||= 'true';

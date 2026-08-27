@@ -5,8 +5,11 @@
  * Also sends error/warning logs to the platform for diagnostics (when authenticated).
  */
 
+import fs from 'fs';
+import path from 'path';
 import pino from 'pino';
 import { IS_COMPILED_BINARY } from './embedded-assets';
+import { getAppLogsDir } from './paths';
 
 // Lazy import to avoid circular dependency (platform-transport imports auth which imports logger)
 type QueueLogEntryFn = (entry: { level: number; time: number; msg: string; [key: string]: unknown }) => void;
@@ -152,26 +155,76 @@ const redactingHooks = {
     },
 };
 
+const LOG_FILE_NAME = 'pipali.log';
+
+/** Roll over at this size, keeping one previous file, so logs cannot grow without bound. */
+const MAX_LOG_FILE_BYTES = 10 * 1024 * 1024;
+
 /**
- * Create the base pino logger with redaction enabled.
+ * The file to log to, rolled over if a previous run left a large one.
+ *
+ * Returns undefined if the directory cannot be prepared: somewhere to write logs is never
+ * a reason to fail starting.
+ */
+export function prepareLogFile(): string | undefined {
+    try {
+        const dir = getAppLogsDir();
+        fs.mkdirSync(dir, { recursive: true });
+
+        const file = path.join(dir, LOG_FILE_NAME);
+        if ((fs.statSync(file, { throwIfNoEntry: false })?.size ?? 0) > MAX_LOG_FILE_BYTES) {
+            fs.renameSync(file, `${file}.1`);
+        }
+        return file;
+    } catch {
+        return undefined;
+    }
+}
+
+/**
+ * Where log lines go.
+ *
+ * Always to a file, because stdout does not survive the packaged app: the server runs as a
+ * Tauri sidecar whose output is piped to a shell that was itself launched without a
+ * terminal, so anything written there is discarded.
+ *
  * Note: pino-pretty doesn't work in compiled Bun binaries, so we only use it in dev mode.
+ * It runs in a worker, which rules out combining it with streams, so dev prints pretty to
+ * the terminal and writes the same lines to the file through a second worker target.
  */
 const usePrettyPrint = !IS_COMPILED_BINARY && process.env.NODE_ENV !== 'production';
+const logFile = prepareLogFile();
+const logLevel = process.env.LOG_LEVEL || 'info';
 
-const baseLogger = pino({
-    level: process.env.LOG_LEVEL || 'info',
-    hooks: redactingHooks,
-    transport: usePrettyPrint
-        ? {
-              target: 'pino-pretty',
-              options: {
-                  colorize: true,
-                  translateTime: 'SYS:standard',
-                  ignore: 'pid,hostname',
-              },
-          }
-        : undefined,
-});
+function prettyTargets() {
+    // Transport targets filter independently and default to info, so anything
+    // below it is dropped after the logger has already let it through.
+    const targets: pino.TransportTargetOptions[] = [{
+        target: 'pino-pretty',
+        level: logLevel,
+        options: { colorize: true, translateTime: 'SYS:standard', ignore: 'pid,hostname' },
+    }];
+    if (logFile) {
+        targets.push({ target: 'pino/file', level: logLevel, options: { destination: logFile, mkdir: true } });
+    }
+    return { targets };
+}
+
+function fileAndStdout() {
+    const destination = pino.destination({ dest: logFile, mkdir: true, sync: false });
+    // Buffered writes are lost on exit unless they are pushed out first.
+    process.on('exit', () => destination.flushSync());
+    return pino.multistream([{ stream: process.stdout }, { stream: destination }]);
+}
+
+const baseLogger = pino(
+    {
+        level: logLevel,
+        hooks: redactingHooks,
+        transport: usePrettyPrint ? prettyTargets() : undefined,
+    },
+    usePrettyPrint || !logFile ? undefined : fileAndStdout(),
+);
 
 /**
  * Main logger instance. Use this throughout the application.

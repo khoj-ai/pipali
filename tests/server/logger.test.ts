@@ -1,4 +1,6 @@
 import { test, expect, describe, beforeEach, afterEach } from 'bun:test';
+import fs from 'fs/promises';
+import path from 'path';
 
 // Mock pino-pretty since it's a dev dependency that may not work in test env
 // We test the redaction logic directly by importing the logger
@@ -147,5 +149,59 @@ describe('Logger Redaction', () => {
             const result = redactString(input);
             expect(result).toBe('OpenAI: sk-[REDACTED], Groq: gsk_[REDACTED]');
         });
+    });
+});
+
+/**
+ * The packaged app runs the server as a Tauri sidecar whose output is piped to a shell
+ * launched without a terminal, so stdout goes nowhere. The file is the only copy.
+ */
+describe('Log file', () => {
+    const logsDir = process.env.PIPALI_LOGS_DIR!;
+    const logFile = path.join(logsDir, 'pipali.log');
+
+    test('log lines are written to a file', async () => {
+        const { createChildLogger, logger } = await import('../../src/server/logger');
+        const marker = `log-file-probe-${crypto.randomUUID()}`;
+
+        createChildLogger({ component: 'logger-test' }).info(marker);
+        logger.flush?.();
+
+        // Writes are buffered, so give the flush a moment to reach the file.
+        let contents = '';
+        for (let attempt = 0; attempt < 40 && !contents.includes(marker); attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 25));
+            contents = await fs.readFile(logFile, 'utf-8').catch(() => '');
+        }
+
+        expect(contents).toContain(marker);
+        // Structured, not the pretty rendering, so the file stays machine readable.
+        const line = contents.split('\n').find(entry => entry.includes(marker))!;
+        expect(JSON.parse(line)).toMatchObject({ component: 'logger-test', msg: marker });
+    });
+
+    test('a large file from a previous run is rolled over, keeping one', async () => {
+        const { prepareLogFile } = await import('../../src/server/logger');
+        const rollDir = path.join(logsDir, `roll-${crypto.randomUUID()}`);
+        const previous = process.env.PIPALI_LOGS_DIR;
+        process.env.PIPALI_LOGS_DIR = rollDir;
+
+        try {
+            const file = prepareLogFile()!;
+            expect(file).toBe(path.join(rollDir, 'pipali.log'));
+
+            await fs.writeFile(file, 'a'.repeat(1024));
+            expect(prepareLogFile()).toBe(file);
+            // Still under the cap, so nothing was rolled over.
+            expect(await fs.readFile(file, 'utf-8')).toHaveLength(1024);
+
+            await fs.writeFile(file, 'b'.repeat(11 * 1024 * 1024));
+            prepareLogFile();
+            expect(await fs.readFile(`${file}.1`, 'utf-8')).toHaveLength(11 * 1024 * 1024);
+            expect(await fs.exists(file)).toBe(false);
+        } finally {
+            process.env.PIPALI_LOGS_DIR = previous;
+            await fs.rm(rollDir, { recursive: true, force: true });
+        }
     });
 });

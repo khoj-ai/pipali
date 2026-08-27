@@ -30,6 +30,7 @@ export class TestServer {
     private skillsDir: string;
     private memoryDir: string;
     private backgroundLogDir: string;
+    private logsDir: string;
     private requestLogPath: string;
     private mockScenarios: MockScenario[];
 
@@ -41,6 +42,7 @@ export class TestServer {
         this.skillsDir = `/tmp/pipali/pipali-test-${testId}-skills`;
         this.memoryDir = `/tmp/pipali/pipali-test-${testId}-memory`;
         this.backgroundLogDir = `/tmp/pipali/pipali-test-${testId}-background`;
+        this.logsDir = `/tmp/pipali/pipali-test-${testId}-logs`;
         this.requestLogPath = `/tmp/pipali/pipali-test-${testId}-requests.jsonl`;
         this.mockScenarios = config.mockScenarios || [];
     }
@@ -90,6 +92,8 @@ export class TestServer {
             PIPALI_MEMORY_DIR: this.memoryDir,
             // Keep background command logs out of the developer's real ~/.pipali
             PIPALI_BACKGROUND_LOG_DIR: this.backgroundLogDir,
+            // Keep server logs out of the developer's real log directory
+            PIPALI_LOGS_DIR: this.logsDir,
             // Let specs assert on the request the mock LLM was handed
             PIPALI_MOCK_REQUEST_LOG: this.requestLogPath,
             // Disable sandbox for e2e tests so confirmation dialogs work as expected
@@ -183,6 +187,7 @@ export class TestServer {
             await rm(this.skillsDir, { recursive: true, force: true });
             await rm(this.memoryDir, { recursive: true, force: true });
             await rm(this.backgroundLogDir, { recursive: true, force: true });
+            await rm(this.logsDir, { recursive: true, force: true });
             await rm(this.requestLogPath, { force: true });
             console.log('[TestServer] Cleaned up test database and skills directory');
         } catch {
