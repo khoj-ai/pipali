@@ -92,7 +92,8 @@
         "waitForTasks": "on {{tasks}}",
         "noRunInProgress": "No run was in progress.",
         "recalledMemories_one": "Recalled {{count}} memory.",
-        "recalledMemories_other": "Recalled {{count}} memories."
+        "recalledMemories_other": "Recalled {{count}} memories.",
+        "streamedArgs": "{{chars}} chars"
     },
     "voice": {
         "beta": "Beta",

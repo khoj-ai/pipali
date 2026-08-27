@@ -613,3 +613,14 @@ export function formatDelegationToolResult(
         .join('\n\n---\n\n')
         .trim();
 }
+
+/**
+ * Compact size for a live character count. Above a thousand it keeps one decimal
+ * rather than dropping to a whole number, so a ticking counter holds its width
+ * instead of jittering the row each time it crosses a boundary.
+ */
+export function formatCharCount(chars: number): string {
+    if (chars < 1000) return String(chars);
+    if (chars < 1_000_000) return `${(chars / 1000).toFixed(1)}K`;
+    return `${(chars / 1_000_000).toFixed(1)}M`;
+}

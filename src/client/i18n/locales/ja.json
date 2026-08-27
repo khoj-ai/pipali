@@ -92,7 +92,8 @@
         "waitForTasks": "{{tasks}}を待機",
         "noRunInProgress": "実行中のタスクはありませんでした。",
         "recalledMemories_one": "メモリを{{count}}件呼び出しました。",
-        "recalledMemories_other": "メモリを{{count}}件呼び出しました。"
+        "recalledMemories_other": "メモリを{{count}}件呼び出しました。",
+        "streamedArgs": "{{chars}} 文字"
     },
     "home": {
         "greetings": {

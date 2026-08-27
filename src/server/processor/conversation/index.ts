@@ -1,6 +1,6 @@
 import { getDefaultChatModel, getChatModelById } from '../../db';
 import { User, type ChatModelWithApi } from '../../db/schema';
-import { type ToolDefinition, type ChatMessage, type ResponseWithThought } from './conversation';
+import { type ToolDefinition, type ChatMessage, type LlmStreamEvent, type ResponseWithThought } from './conversation';
 import { generateChatmlMessagesWithContext } from './utils';
 import { sendMessageToGpt } from './openai';
 import type { ATIFTrajectory } from './atif/atif.types';
@@ -40,7 +40,7 @@ export async function sendMessageToModel(
     chatModelId?: number,
     conversationId?: string,
     runId?: string,
-    onTextChunk?: (chunk: string) => void,
+    onStreamEvent?: (event: LlmStreamEvent) => void,
     chatModelAlias?: string,
 ) {
     // Check for test mock (E2E tests inject this via preload)
@@ -111,7 +111,7 @@ export async function sendMessageToModel(
                     pricing,
                     conversationId,
                     runId,
-                    onTextChunk,
+                    onStreamEvent,
                 );
             });
             log.info({ model: modelName, durationMs: Date.now() - startTime }, 'Response received');
@@ -138,7 +138,7 @@ export async function sendMessageToModel(
                 pricing,
                 conversationId,
                 runId,
-                onTextChunk,
+                onStreamEvent,
             );
             log.info({ model: modelName, durationMs: Date.now() - startTime }, 'Response received');
             return response;

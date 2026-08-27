@@ -17,6 +17,7 @@
 import { User } from '../db/schema';
 import { research, ResearchPausedError } from './director';
 import { atifConversationService, type ConversationRole } from './conversation/atif/atif.service';
+import type { LlmStreamEvent } from './conversation/conversation';
 import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
@@ -70,8 +71,8 @@ export interface ResearchRunnerOptions {
     onReasoning?: (thought: string) => void;
     /** Callback when user message is persisted to DB (provides step_id for deletion) */
     onUserMessagePersisted?: (stepId: number) => void;
-    /** Callback for real-time text delta streaming */
-    onTextDelta?: (delta: string) => void;
+    /** Live signals from the model's response stream, for real-time UI updates */
+    onStreamEvent?: (event: LlmStreamEvent) => void;
 }
 
 export interface ResearchRunnerResult {
@@ -127,7 +128,7 @@ export async function* runResearchWithConversation(
         onIteration,
         onReasoning,
         onUserMessagePersisted,
-        onTextDelta,
+        onStreamEvent,
     } = options;
 
     // Load conversation from DB
@@ -265,7 +266,7 @@ export async function* runResearchWithConversation(
         conversationId,
         conversationRole: options.conversationRole,
         runId,
-        onTextChunk: onTextDelta,
+        onStreamEvent,
         drainInjectedSteps: options.drainInjectedSteps,
     })) {
         // On first iteration (new conversation), persist system prompt and user message to DB

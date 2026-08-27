@@ -130,6 +130,59 @@ describe('ConversationEventBus', () => {
         expect((received[0] as { data: { delta: string } }).data.delta).toBe('Hello');
     });
 
+    test('reasoning and text deltas coalesce on separate channels', () => {
+        const bus = new ConversationEventBus('conv-1');
+        bus.activeRun = createRunHandle('r1', 'm1', 'conv-1');
+        const received: ConversationEvent[] = [];
+        bus.subscribe(event => received.push(event));
+
+        // Interleaved on the wire; each channel must stay whole.
+        bus.publish({ type: 'reasoning_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'I should ' } });
+        bus.publish({ type: 'text_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'Writing ' } });
+        bus.publish({ type: 'reasoning_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'write the file.' } });
+        bus.publish({ type: 'text_delta', conversationId: 'conv-1', runId: 'r1', data: { delta: 'the config now.' } });
+        expect(received).toHaveLength(0);
+
+        bus.publish({ type: 'step_start', conversationId: 'conv-1', runId: 'r1', data: { toolCalls: [] } });
+
+        const byType = (type: string) => received.find(e => e.type === type) as { data: { delta: string } };
+        expect(byType('text_delta').data.delta).toBe('Writing the config now.');
+        expect(byType('reasoning_delta').data.delta).toBe('I should write the file.');
+        // Streamed text never arrives after the step that supersedes it
+        expect(received[received.length - 1]?.type).toBe('step_start');
+        expect(bus.getReplayEvents().map(e => e.type)).toEqual(['step_start']);
+    });
+
+    test('tool call progress keeps only the latest frame per call', () => {
+        const bus = new ConversationEventBus('conv-1');
+        bus.activeRun = createRunHandle('r1', 'm1', 'conv-1');
+        const received: ConversationEvent[] = [];
+        bus.subscribe(event => received.push(event));
+
+        for (const argChars of [0, 120, 4800]) {
+            bus.publish({
+                type: 'tool_call_progress',
+                conversationId: 'conv-1',
+                runId: 'r1',
+                data: { callId: 'call-a', name: 'write_file', argChars },
+            });
+        }
+        bus.publish({
+            type: 'tool_call_progress',
+            conversationId: 'conv-1',
+            runId: 'r1',
+            data: { callId: 'call-b', name: 'shell_command', argChars: 90 },
+        });
+
+        bus.publish({ type: 'step_start', conversationId: 'conv-1', runId: 'r1', data: { toolCalls: [] } });
+
+        // The count is cumulative, so intermediate frames are dropped rather than summed
+        const progress = received.filter(e => e.type === 'tool_call_progress') as { data: { callId: string; argChars: number } }[];
+        expect(progress.map(e => [e.data.callId, e.data.argChars])).toEqual([['call-a', 4800], ['call-b', 90]]);
+        expect(received[received.length - 1]?.type).toBe('step_start');
+        expect(bus.getReplayEvents().map(e => e.type)).toEqual(['step_start']);
+    });
+
     test('replay buffer resets on run_started', () => {
         const bus = new ConversationEventBus('conv-1');
         bus.activeRun = createRunHandle('r1', 'm1', 'conv-1');

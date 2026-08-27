@@ -229,12 +229,21 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 // Claimed, not copied: what a run leaves unclaimed is what wakes the
                 // conversation once it settles (see parent-inbox).
                 drainInjectedSteps: () => runHandle.injectedSteps.splice(0),
-                onTextDelta: (delta) => {
+                onStreamEvent: (event) => {
+                    if (event.kind === 'tool_call') {
+                        bus.publish({
+                            type: 'tool_call_progress',
+                            conversationId,
+                            runId: runIdAuthoritative,
+                            data: { callId: event.callId, name: event.name, argChars: event.argChars },
+                        });
+                        return;
+                    }
                     bus.publish({
-                        type: 'text_delta',
+                        type: event.kind === 'reasoning' ? 'reasoning_delta' : 'text_delta',
                         conversationId,
                         runId: runIdAuthoritative,
-                        data: { delta },
+                        data: { delta: event.delta },
                     });
                 },
             });

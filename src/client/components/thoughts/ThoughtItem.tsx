@@ -1,9 +1,9 @@
 // Individual thought/tool_call rendering
 
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Thought } from '../../types';
-import { formatDelegationToolResult, formatToolArgs, getFriendlyToolName, formatToolArgsRich, getToolCategory, getDelegatedConversationId } from '../../utils/formatting';
+import { formatCharCount, formatDelegationToolResult, formatToolArgs, getFriendlyToolName, formatToolArgsRich, getToolCategory, getDelegatedConversationId } from '../../utils/formatting';
 import { getToolResultStatus } from '../../utils/toolStatus';
 import { useConversationNavigation } from '../../hooks/useConversationNavigation';
 import { ExternalLink } from '../ExternalLink';
@@ -55,6 +55,7 @@ interface ThoughtItemProps {
     onToggle?: () => void; // Toggle this item's detail level individually
     uidMap?: Map<string, { role: string; label: string }>; // Chrome snapshot uid→label map
     delegatedTaskTitles?: Map<string, string>;
+    runStreaming?: boolean; // The run this thought belongs to is still in flight
 }
 
 // Clear markdown markers for the single-line outline view, where the
@@ -64,21 +65,106 @@ function formatPlainText(text: string): string {
     return text.replace(/\*\*([^*]+)\*\*/g, '$1');
 }
 
-export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult = true, onToggle, uidMap, delegatedTaskTitles }: ThoughtItemProps) {
+/**
+ * Reasoning is generated far faster than it can be read, so an outline row samples
+ * it at this cadence instead of following every delta. Long enough to read a short
+ * sentence; short enough that the row still reads as live.
+ */
+const REASONING_SAMPLE_MS = 1200;
+
+/**
+ * Reasoning has gone quiet once no delta has extended it for this long, and the row
+ * refreshes early rather than waiting out the sample interval. Comfortably above 50ms
+ * the bus flushes reasoning deltas at, so a live stream never looks quiet: a bursty
+ * model that trips it early only repeats the refresh the interval would have made.
+ */
+const REASONING_SETTLE_MS = 250;
+
+/**
+ * A run of text this short did not end a sentence: a list marker, an ordinal or an
+ * abbreviation put a period there. Models that number their reasoning steps produce
+ * these constantly, and splitting on them strands a row showing "2." or "e.g.".
+ */
+const MIN_SENTENCE_CHARS = 12;
+
+/**
+ * Newest sentence the model has finished writing, else the line so far. Sampling
+ * mid-sentence gives a fragment starting mid-word, which is what makes a fast
+ * stream unreadable in the first place.
+ */
+export function newestSentence(text: string): string {
+    const line = text.split('\n').at(-1)?.trim() || text;
+
+    const sentences: string[] = [];
+    for (const part of line.split(/(?<=[.!?])\s+/).filter(Boolean)) {
+        const previous = sentences.at(-1);
+        if (previous !== undefined && previous.length < MIN_SENTENCE_CHARS) {
+            sentences[sentences.length - 1] = `${previous} ${part}`;
+        } else {
+            sentences.push(part);
+        }
+    }
+
+    if (sentences.length < 2) return line;
+    // The final entry is still being written unless the line closes on a terminator
+    const finished = /[.!?]["')\]]?$/.test(line) ? sentences.at(-1) : sentences.at(-2);
+    return finished ?? line;
+}
+
+/**
+ * Hold one sentence of streaming text still long enough to read, then jump to the
+ * newest. Sampling on a timer rather than on each delta keeps the cadence steady
+ * whatever rate the model writes at.
+ */
+function useSampledText(text: string, active: boolean): string {
+    const [sampled, setSampled] = useState('');
+    const latest = useRef(text);
+    latest.current = text;
+
+    useEffect(() => {
+        if (!active) return;
+        // No sample up front: at mount only the first few characters have arrived, and
+        // holding those for a full interval shows a stray word. Callers fall back to the
+        // live text until the first interval lands, by which point a sentence exists.
+        const timer = setInterval(() => setSampled(newestSentence(latest.current)), REASONING_SAMPLE_MS);
+        return () => clearInterval(timer);
+    }, [active]);
+
+    // Refresh early when reasoning goes quiet, so a sentence from mid-thought does not
+    // sit on screen for the rest of the interval after the model has moved on.
+    useEffect(() => {
+        if (!active) return;
+        const settle = setTimeout(() => setSampled(newestSentence(latest.current)), REASONING_SETTLE_MS);
+        return () => clearTimeout(settle);
+    }, [text, active]);
+
+    return sampled;
+}
+
+export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult = true, onToggle, uidMap, delegatedTaskTitles, runStreaming = false }: ThoughtItemProps) {
     const { t } = useTranslation();
     const navigateToConversation = useConversationNavigation();
+    // Internal reasoning collapses to one line outside the detailed view. While the run is
+    // live that line tracks where the model got to; at run end every row reverts to its
+    // first line at once, so nothing above the step being read shifts mid-run.
+    const isOutline = thought.type === 'thought' && !!thought.isInternalThought && !showResult;
+    // Only the live thought needs a timer. A settled one is static text already, and
+    // newestSentence over it returns the same line every render.
+    const sampledReasoning = useSampledText(thought.content, isOutline && !!thought.isStreaming);
     // Track whether the reasoning text is overflowing (truncated by ellipsis)
     const [isOverflowing, setIsOverflowing] = useState(false);
     const reasoningRef = useCallback((el: HTMLDivElement | null) => {
         if (el) setIsOverflowing(el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
     }, [thought.content, showResult]);
 
-    if (thought.type === 'thought' && thought.content) {
+    if (thought.type === 'thought' && thought.content.trim()) {
         const text = thought.content.trim();
         const isInternal = !!thought.isInternalThought;
-        // Truncate internal reasoning in outline mode; show non-internal text in full
-        const isOutline = !showResult && isInternal;
-        const displayText = isOutline ? (text.split('\n')[0] ?? text) : text;
+        // Where the model got to while the run is live, where it started once it is done
+        const outlineText = runStreaming
+            ? (sampledReasoning || newestSentence(text))
+            : (text.split('\n')[0] ?? text);
+        const displayText = isOutline ? outlineText : text;
         const isTruncated = isOutline && (text.includes('\n') || isOverflowing);
         const canToggle = onToggle && isInternal && (isTruncated || showResult);
         return (
@@ -178,6 +264,13 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult
                         ) : formattedArgs ? (
                             <span className="thought-args"> {formattedArgs}</span>
                         ) : null}
+                        {/* A call opens at 0 chars, so any count above that means arguments are streaming */}
+                        {thought.isStreaming && (thought.argChars ?? 0) > 0 && (
+                            <span className="thought-args thought-args-secondary">
+                                {' '}
+                                {t('thoughts.streamedArgs', { chars: formatCharCount(thought.argChars!) })}
+                            </span>
+                        )}
                     </div>
                     {showResult && (
                         <>

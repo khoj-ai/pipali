@@ -1,5 +1,7 @@
 import { test, expect, describe } from 'bun:test';
 import { getCollapsedPreviewThoughts } from '../../src/client/components/thoughts/ThoughtsSection';
+import { newestSentence } from '../../src/client/components/thoughts/ThoughtItem';
+import { formatCharCount } from '../../src/client/utils/formatting';
 import {
     buildDelegatedTaskTitleMap,
     formatDelegationToolResult,
@@ -212,5 +214,51 @@ describe('file tool formatting', () => {
             text: 'notes.md',
             secondary: 'in Documents',
         });
+    });
+});
+
+describe('sampled reasoning line', () => {
+    test('holds the last finished sentence while the next is being written', () => {
+        // Sampling mid-sentence would show a fragment starting mid-word
+        expect(newestSentence('A poem it is, then. I should pick a form. Maybe a son'))
+            .toBe('I should pick a form.');
+    });
+
+    test('shows the opening sentence before any is finished', () => {
+        expect(newestSentence('The user wants a poem')).toBe('The user wants a poem');
+    });
+
+    test('advances once the sentence closes', () => {
+        expect(newestSentence('The user wants a poem. Sonnet, then.')).toBe('Sonnet, then.');
+    });
+
+    test('does not mistake list markers and abbreviations for sentence ends', () => {
+        // Models that number their reasoning steps otherwise strand the row on "2."
+        expect(newestSentence('1. First I need to read the file. 2. Then I sho'))
+            .toBe('1. First I need to read the file.');
+        expect(newestSentence('Let me check the config. e.g. the timeout is wro'))
+            .toBe('Let me check the config.');
+        expect(newestSentence('It uses v1.2 of the schema so I should upda'))
+            .toBe('It uses v1.2 of the schema so I should upda');
+    });
+
+    test('tracks the newest paragraph', () => {
+        expect(newestSentence('Form settled.\n\nNow the rhyme scheme. Working through it'))
+            .toBe('Now the rhyme scheme.');
+    });
+});
+
+describe('streamed character counts', () => {
+    test('reads compactly above a thousand', () => {
+        expect(formatCharCount(347)).toBe('347');
+        expect(formatCharCount(1100)).toBe('1.1K');
+        expect(formatCharCount(12345)).toBe('12.3K');
+        expect(formatCharCount(1_234_567)).toBe('1.2M');
+    });
+
+    test('holds its width as it ticks, so the row does not jitter', () => {
+        // 1.0K rather than 1K: a counter that changes width redraws the whole row
+        expect(formatCharCount(1000)).toBe('1.0K');
+        expect(formatCharCount(1090)).toBe('1.1K');
     });
 });

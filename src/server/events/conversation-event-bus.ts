@@ -5,7 +5,15 @@
  * WebSocket connections subscribe. Runs complete independently of any observer.
  */
 
-import type { ServerMessage, QueuedMessage, PendingConfirmation, StopReason } from '../routes/ws/message-types';
+import type {
+    ServerMessage,
+    QueuedMessage,
+    PendingConfirmation,
+    StopReason,
+    TextDeltaMessage,
+    ReasoningDeltaMessage,
+    ToolCallProgressMessage,
+} from '../routes/ws/message-types';
 import type { ConfirmationPreferences } from '../processor/confirmation';
 import type { ATIFStep } from '../processor/conversation/atif/atif.types';
 import type { User } from '../db/schema';
@@ -58,11 +66,15 @@ const MAX_REPLAY_EVENTS = 250;
 // The client re-paces rendering, so window stays below perceptible latency.
 const DELTA_COALESCE_MS = 50;
 
+/** Streamed text channels, buffered separately so their content never interleaves. */
+type DeltaEvent = TextDeltaMessage | ReasoningDeltaMessage;
+
 export class ConversationEventBus {
     readonly conversationId: string;
     private subscribers = new Set<Subscriber>();
     private recentEvents: ConversationEvent[] = [];
-    private pendingDelta: { runId: string; text: string } | null = null;
+    private pendingDeltas = new Map<DeltaEvent['type'], DeltaEvent>();
+    private pendingToolProgress = new Map<string, ToolCallProgressMessage>();
     private deltaFlushTimer: ReturnType<typeof setTimeout> | null = null;
     activeRun: RunHandle | null = null;
 
@@ -94,18 +106,26 @@ export class ConversationEventBus {
     }
 
     publish(event: ConversationEvent): void {
-        // Buffer streamed text and emit it coalesced (see flushPendingDelta).
-        if (event.type === 'text_delta') {
-            this.bufferDelta(event.runId, event.data.delta);
-            // Short-circuit. Don't add text deltas to recentEvents to:
+        // Buffer streamed text and emit it coalesced (see flushPending).
+        if (event.type === 'text_delta' || event.type === 'reasoning_delta') {
+            this.bufferDelta(event);
+            // Short-circuit. Don't add streamed events to recentEvents to:
             // 1. Not evict actual replay events from bounded buffer
             // 2. Avoid duplicate streamed content after localStorage hydration on replay
             return;
         }
 
+        // Tool call progress is cumulative, so only the newest frame per call
+        // matters. Keep the latest instead of appending.
+        if (event.type === 'tool_call_progress') {
+            this.pendingToolProgress.set(event.data.callId, event);
+            this.scheduleFlush();
+            return;
+        }
+
         // Any other event flushes pending deltas first, so streamed text never
         // arrives after the step or lifecycle event that supersedes it.
-        this.flushPendingDelta();
+        this.flushPending();
 
         // Reset replay buffer on run_started
         if (event.type === 'run_started') {
@@ -130,41 +150,45 @@ export class ConversationEventBus {
         }
     }
 
-    private bufferDelta(runId: string, delta: string): void {
+    private bufferDelta(event: DeltaEvent): void {
+        const pending = this.pendingDeltas.get(event.type);
         // A run change shouldn't interleave with live deltas, but flush
         // defensively so buffered text is never misattributed to a new run.
-        if (this.pendingDelta && this.pendingDelta.runId !== runId) {
-            this.flushPendingDelta();
+        if (pending && pending.runId !== event.runId) {
+            this.flushPending();
         }
 
-        if (this.pendingDelta) {
-            this.pendingDelta.text += delta;
+        const current = this.pendingDeltas.get(event.type);
+        if (current) {
+            current.data = { delta: current.data.delta + event.data.delta };
         } else {
-            this.pendingDelta = { runId, text: delta };
+            this.pendingDeltas.set(event.type, { ...event, data: { ...event.data } });
         }
 
-        // Fixed-interval flush, not a sliding debounce: continuous streaming
-        // still flushes every DELTA_COALESCE_MS, bounding added latency.
+        this.scheduleFlush();
+    }
+
+    /** Fixed-interval flush, not a sliding debounce: continuous streaming still
+     *  flushes every DELTA_COALESCE_MS, bounding added latency. */
+    private scheduleFlush(): void {
         if (!this.deltaFlushTimer) {
-            this.deltaFlushTimer = setTimeout(() => this.flushPendingDelta(), DELTA_COALESCE_MS);
+            this.deltaFlushTimer = setTimeout(() => this.flushPending(), DELTA_COALESCE_MS);
         }
     }
 
-    private flushPendingDelta(): void {
+    private flushPending(): void {
         if (this.deltaFlushTimer) {
             clearTimeout(this.deltaFlushTimer);
             this.deltaFlushTimer = null;
         }
-        const pending = this.pendingDelta;
-        if (!pending) return;
-        this.pendingDelta = null;
 
-        this.deliver({
-            type: 'text_delta',
-            conversationId: this.conversationId,
-            runId: pending.runId,
-            data: { delta: pending.text },
-        });
+        const deltas = [...this.pendingDeltas.values()];
+        this.pendingDeltas.clear();
+        for (const event of deltas) this.deliver(event);
+
+        const progress = [...this.pendingToolProgress.values()];
+        this.pendingToolProgress.clear();
+        for (const event of progress) this.deliver(event);
     }
 
     hasSubscribers(): boolean {
@@ -184,7 +208,8 @@ export class ConversationEventBus {
         const pending = this.activeRun.pendingConfirmations;
 
         return this.recentEvents.filter(e => {
-            if (e.type === 'text_delta') return false;  // defensive, deltas excluded from replay buffer in publish()
+            // defensive, streamed events are excluded from the replay buffer in publish()
+            if (e.type === 'text_delta' || e.type === 'reasoning_delta' || e.type === 'tool_call_progress') return false;
             if (e.type !== 'confirmation_request') return true;
             const requestId = (e as any)?.data?.requestId;
             return typeof requestId === 'string' && pending.has(requestId);
@@ -200,7 +225,7 @@ export class ConversationEventBus {
     /** Called when a run finishes to potentially clean up the bus */
     onRunFinished(): void {
         // Terminal events already flush, but guard against a dangling timer.
-        this.flushPendingDelta();
+        this.flushPending();
         this.activeRun = null;
         this.maybeCleanup();
     }

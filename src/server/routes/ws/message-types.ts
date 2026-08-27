@@ -134,6 +134,34 @@ export interface TextDeltaMessage {
 }
 
 /**
+ * Run lifecycle - partial reasoning delta for real-time streaming
+ */
+export interface ReasoningDeltaMessage {
+    type: 'reasoning_delta';
+    conversationId: string;
+    runId: string;
+    data: {
+        delta: string;
+    };
+}
+
+/**
+ * Step lifecycle - a tool call the model is still writing out.
+ * `argChars` is cumulative, so a later message supersedes earlier ones for the
+ * same call, and step_start supersedes them all.
+ */
+export interface ToolCallProgressMessage {
+    type: 'tool_call_progress';
+    conversationId: string;
+    runId: string;
+    data: {
+        callId: string;
+        name: string;
+        argChars: number;
+    };
+}
+
+/**
  * Step lifecycle - step started (preview of what's about to execute)
  */
 export interface StepStartMessage {
@@ -277,6 +305,8 @@ export type ServerMessage =
     | RunStoppedMessage
     | RunCompleteMessage
     | TextDeltaMessage
+    | ReasoningDeltaMessage
+    | ToolCallProgressMessage
     | StepStartMessage
     | StepEndMessage
     | ConfirmationRequestMessage

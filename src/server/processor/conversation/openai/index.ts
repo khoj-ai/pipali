@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { Responses } from 'openai/resources/responses/responses';
-import type { ChatMessage, ResponseWithThought, ToolDefinition, UsageMetrics } from '../conversation';
-import { toOpenaiTools, getReasoningText } from './utils';
+import type { ChatMessage, LlmStreamEvent, ResponseWithThought, ToolDefinition, UsageMetrics } from '../conversation';
+import { toOpenaiTools, getReasoningText, getFunctionCallName } from './utils';
 import { calculateCost, type PricingConfig } from '../costs';
 import { createChildLogger } from '../../../logger';
 import { getClientHeaders } from '../../../http/client-info';
@@ -18,7 +18,7 @@ export async function sendMessageToGpt(
     pricing?: PricingConfig,
     conversationId?: string,
     runId?: string,
-    onTextChunk?: (chunk: string) => void,
+    onStreamEvent?: (event: LlmStreamEvent) => void,
 ): Promise<ResponseWithThought> {
     const openaiTools = toOpenaiTools(tools);
 
@@ -43,9 +43,36 @@ export async function sendMessageToGpt(
         ...(Object.keys(tracer).length > 0 && { metadata: tracer }),
     });
 
-    if (onTextChunk) {
+    if (onStreamEvent) {
+        // Keyed by output item id, so argument chunks can be attributed to a call
+        const streamedToolCalls = new Map<string, { callId: string; name: string; argChars: number }>();
+
         stream.on('response.output_text.delta', (event) => {
-            onTextChunk(event.delta);
+            onStreamEvent({ kind: 'text', delta: event.delta });
+        });
+
+        stream.on('response.reasoning_summary_text.delta', (event) => {
+            onStreamEvent({ kind: 'reasoning', delta: event.delta });
+        });
+
+        // Cast: a namespaced tool call carries a `namespace` the SDK's type omits
+        stream.on('response.output_item.added', (event) => {
+            const item = event.item as any;
+            if (item.type !== 'function_call') return;
+            // The two ids differ on OpenAI proper (fc_… vs call_…): argument chunks
+            // arrive keyed by the item id, while the app routes calls by call_id
+            const itemId = item.id ?? item.call_id;
+            if (!itemId) return;
+            const call = { callId: item.call_id ?? itemId, name: getFunctionCallName(item), argChars: 0 };
+            streamedToolCalls.set(itemId, call);
+            onStreamEvent({ kind: 'tool_call', ...call });
+        });
+
+        stream.on('response.function_call_arguments.delta', (event) => {
+            const call = streamedToolCalls.get(event.item_id);
+            if (!call) return;
+            call.argChars += event.delta.length;
+            onStreamEvent({ kind: 'tool_call', ...call });
         });
     }
 
@@ -55,9 +82,13 @@ export async function sendMessageToGpt(
         throw new Error('No response received from model');
     }
 
-    // Extract reasoning from output items
-    const reasoningItem = response.output.find((item): item is Responses.ResponseReasoningItem => item.type === 'reasoning');
-    const thought = getReasoningText(reasoningItem);
+    // Models that think between tool calls emit several reasoning items; join
+    // them so the persisted thought matches what streamed.
+    const thought = (response.output as Responses.ResponseOutputItem[])
+        .filter((item): item is Responses.ResponseReasoningItem => item.type === 'reasoning')
+        .map(getReasoningText)
+        .filter((text): text is string => !!text)
+        .join('\n\n') || undefined;
 
     // Extract text from message output items
     const outputText = (response.output as Responses.ResponseOutputItem[])

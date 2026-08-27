@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs';
 import { type User } from '../../db/schema';
-import type { ToolDefinition } from '../conversation/conversation';
+import type { LlmStreamEvent, ToolDefinition } from '../conversation/conversation';
 import { sendMessageToModel } from '../conversation/index';
 import type { ResearchIteration, ToolExecutionContext, MetricsAccumulator } from './types';
 import { listFiles, type ListFilesArgs } from '../actor/list_files';
@@ -160,8 +160,8 @@ interface ResearchConfig {
     conversationId?: string;
     // Whether this conversation may itself delegate
     conversationRole?: ConversationRole;
-    // Callback for real-time text delta streaming
-    onTextChunk?: (chunk: string) => void;
+    // Live signals from the model's response stream, for real-time UI updates
+    onStreamEvent?: (event: LlmStreamEvent) => void;
     // MCP tools whose full schemas are advertised to the model (others are deferred behind search_tools)
     loadedMcpTools?: Set<string>;
     // How MCP tools defer for this run: provider tool search ('namespaced' over the
@@ -827,7 +827,7 @@ async function pickNextTool(
             config.chatModelId,
             config.conversationId,
             config.runId,
-            config.onTextChunk,
+            config.onStreamEvent,
             config.chatModelAlias,
         );
 

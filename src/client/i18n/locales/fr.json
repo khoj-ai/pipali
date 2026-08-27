@@ -92,7 +92,8 @@
         "waitForTasks": "pour {{tasks}}",
         "noRunInProgress": "Aucune t\u00e2che n\u2019\u00e9tait en cours.",
         "recalledMemories_one": "{{count}} souvenir rappel\u00e9.",
-        "recalledMemories_other": "{{count}} souvenirs rappel\u00e9s."
+        "recalledMemories_other": "{{count}} souvenirs rappel\u00e9s.",
+        "streamedArgs": "{{chars}} caractères"
     },
     "home": {
         "greetings": {

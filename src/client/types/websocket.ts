@@ -146,6 +146,21 @@ export type TextDeltaMessage = {
     data: { delta: string };
 };
 
+export type ReasoningDeltaMessage = {
+    type: 'reasoning_delta';
+    conversationId: string;
+    runId: string;
+    data: { delta: string };
+};
+
+/** A tool call the model is still writing out. `argChars` is cumulative. */
+export type ToolCallProgressMessage = {
+    type: 'tool_call_progress';
+    conversationId: string;
+    runId: string;
+    data: { callId: string; name: string; argChars: number };
+};
+
 export type StepStartMessage = {
     type: 'step_start';
     conversationId: string;
@@ -225,6 +240,8 @@ export type ServerMessage =
     | RunStoppedMessage
     | RunCompleteMessage
     | TextDeltaMessage
+    | ReasoningDeltaMessage
+    | ToolCallProgressMessage
     | StepStartMessage
     | StepEndMessage
     | ConfirmationRequestMessage

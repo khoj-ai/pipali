@@ -61,6 +61,8 @@ export type ChatAction =
     | { type: 'RUN_STOPPED'; conversationId: string; runId: string; reason: StopReason; error?: string }
     | { type: 'RUN_COMPLETE'; conversationId: string; runId: string; response: string; stepId: number }
     | { type: 'TEXT_DELTA'; conversationId: string; runId: string; delta: string }
+    | { type: 'REASONING_DELTA'; conversationId: string; runId: string; delta: string }
+    | { type: 'TOOL_CALL_PROGRESS'; conversationId: string; runId: string; callId: string; name: string; argChars: number }
     | { type: 'STEP_START'; conversationId: string; runId: string; thought?: string; message?: string; toolCalls: any[] }
     | { type: 'STEP_END'; conversationId: string; runId: string; toolResults: any[]; stepId: number }
     | { type: 'CONFIRMATION_REQUEST'; conversationId: string; runId: string; request: ConfirmationRequest }
@@ -250,12 +252,87 @@ function findStreamingRunId(messages: Message[]): string | undefined {
     return messages.findLast(m => m.role === 'assistant' && m.isStreaming)?.stableId;
 }
 
+/** Run-scoped ids for the previews streamed ahead of a step landing. */
+const streamedReasoningId = (runId: string) => `reasoning-stream-${runId}`;
+const streamedMessageId = (runId: string) => `message-stream-${runId}`;
+/**
+ * Groups a run's previews the way a landed step groups its own thoughts. Collapsed
+ * views select a step by the group of its last tool call, so previews without one
+ * are read as loose thoughts and the message ahead of the call is dropped.
+ */
+const streamedStepGroupId = (runId: string) => `step-stream-${runId}`;
+
+/**
+ * Append streamed text to a run-scoped preview thought, creating it if absent.
+ * A new row lands before the first thought `insertBefore` matches, so prose can take
+ * its place ahead of the tool call it accompanies rather than after it.
+ */
+function appendStreamedThought(
+    thoughts: Thought[] | undefined,
+    delta: string,
+    row: Omit<Thought, 'type' | 'content' | 'isStreaming'>,
+    insertBefore?: (thought: Thought) => boolean,
+): Thought[] {
+    const list = thoughts ?? [];
+    const index = list.findIndex(t => t.id === row.id);
+    if (index !== -1) {
+        return list.map((t, i) => (i === index ? { ...t, content: t.content + delta } : t));
+    }
+
+    // Streams open on a paragraph break often enough that starting a thought on
+    // whitespace leaves an empty row hanging until real text lands
+    if (!delta.trim()) return list;
+
+    const created: Thought = { ...row, type: 'thought', content: delta, isStreaming: true };
+    const at = insertBefore ? list.findIndex(insertBefore) : -1;
+    return at === -1 ? [...list, created] : [...list.slice(0, at), created, ...list.slice(at)];
+}
+
+/** The model's reasoning for the step being streamed. */
+function appendStreamedReasoning(thoughts: Thought[] | undefined, runId: string, delta: string): Thought[] {
+    return appendStreamedThought(thoughts, delta, {
+        id: streamedReasoningId(runId),
+        isInternalThought: true,
+        stepGroupId: streamedStepGroupId(runId),
+    });
+}
+
+/**
+ * The prose accompanying a step's tool calls, which goes ahead of them the way a
+ * landed step orders its own thoughts. Text is replayed at reading speed, so it often
+ * arrives after the call has opened and has to be inserted rather than appended.
+ */
+function appendStreamedMessage(thoughts: Thought[] | undefined, runId: string, delta: string): Thought[] {
+    return appendStreamedThought(
+        thoughts,
+        delta,
+        { id: streamedMessageId(runId), stepGroupId: streamedStepGroupId(runId) },
+        t => !!t.isStreaming && t.type === 'tool_call',
+    );
+}
+
+/**
+ * Streamed reasoning and tool call rows preview the step in flight. Once the run
+ * ends, reasoning settles into an ordinary thought and tool calls the model never
+ * finished writing are dropped.
+ */
+function settleStreamedThoughts(thoughts: Thought[] | undefined): Thought[] | undefined {
+    if (!thoughts?.some(t => t.isStreaming)) return thoughts;
+    return thoughts
+        .filter(t => !(t.isStreaming && t.type === 'tool_call'))
+        .map(t => (t.isStreaming ? { ...t, isStreaming: false } : t));
+}
+
 function stopAllStreamingAssistants(messages: Message[]): Message[] {
     let changed = false;
     const next = messages.map(m => {
-        if (m.role !== 'assistant' || !m.isStreaming) return m;
+        if (m.role !== 'assistant') return m;
+        // Callers may already have cleared isStreaming while settling content,
+        // so streamed thoughts are checked independently.
+        const thoughts = settleStreamedThoughts(m.thoughts);
+        if (!m.isStreaming && thoughts === m.thoughts) return m;
         changed = true;
-        return { ...m, isStreaming: false };
+        return { ...m, isStreaming: false, thoughts };
     });
     return changed ? next : messages;
 }
@@ -629,8 +706,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     const isTargetRun = runId ? msg.stableId === runId : msg.thoughts.some(t => t.type === 'tool_call' && t.isPending);
                     if (!isTargetRun) return msg;
 
-                    if (msg.thoughts?.some(t => t.isPending)) {
-                        const updatedThoughts = msg.thoughts!.map(thought => {
+                    const settled = settleStreamedThoughts(msg.thoughts);
+                    if (settled?.some(t => t.isPending)) {
+                        const updatedThoughts = settled.map(thought => {
                             if (thought.type === 'tool_call' && thought.isPending) {
                                 return { ...thought, isPending: false, toolResult: '[interrupted]' };
                             }
@@ -638,7 +716,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                         });
                         return { ...msg, thoughts: updatedThoughts, isStreaming: false };
                     }
-                    return { ...msg, isStreaming: false };
+                    return { ...msg, thoughts: settled, isStreaming: false };
                 });
             };
 
@@ -799,6 +877,11 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
                 return msgs.map((msg, i) => {
                     if (i !== idx) return msg;
+                    // A tool call already streaming settles what this text is: a mid-run
+                    // message, which belongs in the trajectory rather than the chat body.
+                    if (msg.thoughts?.some(t => t.isStreaming && t.type === 'tool_call')) {
+                        return { ...msg, thoughts: appendStreamedMessage(msg.thoughts, runId, delta) };
+                    }
                     return { ...msg, content: (msg.content || '') + delta };
                 });
             };
@@ -819,6 +902,95 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             };
         }
 
+        case 'REASONING_DELTA': {
+            const { conversationId, runId, delta } = action;
+            const isCurrentConversation = conversationId === state.conversationId;
+            const appendReasoning = (msgs: Message[]): Message[] => {
+                const idx = findRunAssistantIndex(msgs, runId);
+                if (idx === -1) return msgs;
+
+                return msgs.map((msg, i) => {
+                    if (i !== idx) return msg;
+                    return {
+                        ...msg,
+                        thoughts: appendStreamedReasoning(msg.thoughts, runId, delta),
+                    };
+                });
+            };
+
+            const conversationStates = new Map(state.conversationStates);
+            const existing = conversationStates.get(conversationId);
+            if (existing) {
+                conversationStates.set(conversationId, {
+                    ...existing,
+                    messages: appendReasoning(existing.messages),
+                });
+            }
+
+            return {
+                ...state,
+                messages: isCurrentConversation ? appendReasoning(state.messages) : state.messages,
+                conversationStates,
+            };
+        }
+
+        case 'TOOL_CALL_PROGRESS': {
+            const { conversationId, runId, callId, name, argChars } = action;
+            const isCurrentConversation = conversationId === state.conversationId;
+
+            const upsertToolCall = (msgs: Message[]): Message[] => {
+                const idx = findRunAssistantIndex(msgs, runId);
+                if (idx === -1) return msgs;
+
+                return msgs.map((msg, i) => {
+                    if (i !== idx) return msg;
+                    const thoughts = msg.thoughts || [];
+                    // Shares the call id with the eventual STEP_START tool call
+                    const existing = thoughts.findIndex(t => t.id === callId);
+                    if (existing === -1) {
+                        const streamed: Thought = {
+                            id: callId,
+                            type: 'tool_call',
+                            content: '',
+                            toolName: name,
+                            isPending: true,
+                            isStreaming: true,
+                            argChars,
+                            stepGroupId: streamedStepGroupId(runId),
+                        };
+                        // Text streamed before this call was a mid-run message. Move it into
+                        // the trajectory now rather than at step_start, so it does not jump
+                        // out of the chat body once the step lands.
+                        const withMessage = msg.content
+                            ? appendStreamedMessage(thoughts, runId, msg.content)
+                            : thoughts;
+                        return { ...msg, content: '', thoughts: [...withMessage, streamed] };
+                    }
+                    // The step already landed; its arguments supersede this count
+                    if (!thoughts[existing]!.isStreaming) return msg;
+                    return {
+                        ...msg,
+                        thoughts: thoughts.map((t, j) => (j === existing ? { ...t, argChars } : t)),
+                    };
+                });
+            };
+
+            const conversationStates = new Map(state.conversationStates);
+            const existing = conversationStates.get(conversationId);
+            if (existing) {
+                conversationStates.set(conversationId, {
+                    ...existing,
+                    messages: upsertToolCall(existing.messages),
+                });
+            }
+
+            return {
+                ...state,
+                messages: isCurrentConversation ? upsertToolCall(state.messages) : state.messages,
+                conversationStates,
+            };
+        }
+
         case 'STEP_START': {
             const { conversationId, runId, thought, message: reasoning, toolCalls } = action;
             const isCurrentConversation = conversationId === state.conversationId;
@@ -826,11 +998,14 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
             const newThoughts: Thought[] = [];
 
-            // Add reasoning thought if present
+            // Ordered as history renders an agent step: internal reasoning, then the
+            // message that accompanied the tool calls. Keeping both means a streamed
+            // reasoning preview settles in place instead of vanishing.
+            if (thought) {
+                newThoughts.push({ id: generateDeterministicId('thought', thought), type: 'thought', content: thought, isInternalThought: true, stepGroupId });
+            }
             if (reasoning && toolCalls?.length > 0) {
                 newThoughts.push({ id: generateDeterministicId('thought', reasoning), type: 'thought', content: reasoning, stepGroupId });
-            } else if (thought) {
-                newThoughts.push({ id: generateDeterministicId('thought', thought), type: 'thought', content: thought, isInternalThought: true, stepGroupId });
             }
 
             // Add pending tool calls
@@ -852,20 +1027,24 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 const assistant = msgs[idx];
                 if (!assistant) return msgs;
 
+                // Live previews of this step; the authoritative thoughts replace them
+                const settledThoughts = (assistant.thoughts || []).filter(t => !t.isStreaming);
+                const droppedStreamed = settledThoughts.length !== (assistant.thoughts?.length ?? 0);
+
                 // Dedupe thoughts and tool calls by stable ID to avoid duplicating
                 // history-loaded steps when the server replays events after a reload.
-                const existingThoughtIds = new Set((assistant.thoughts || []).map(t => t.id));
+                const existingThoughtIds = new Set(settledThoughts.map(t => t.id));
                 const dedupedNewThoughts = newThoughts.filter(t => !existingThoughtIds.has(t.id));
 
                 const shouldClearStreamedContent = !!reasoning && (toolCalls?.length ?? 0) > 0 && !!assistant.content;
-                if (dedupedNewThoughts.length === 0 && !shouldClearStreamedContent) return msgs;
+                if (dedupedNewThoughts.length === 0 && !droppedStreamed && !shouldClearStreamedContent) return msgs;
 
                 return msgs.map((msg, i) => {
                     if (i !== idx) return msg;
                     return {
                         ...msg,
                         content: shouldClearStreamedContent ? '' : msg.content,
-                        thoughts: [...(msg.thoughts || []), ...dedupedNewThoughts],
+                        thoughts: [...settledThoughts, ...dedupedNewThoughts],
                     };
                 });
             };
@@ -907,7 +1086,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
                 const assistant = msgs[idx];
                 if (!assistant) return msgs;
-                const updatedThoughts = (assistant.thoughts || []).map(thought => {
+                // A landed step supersedes any preview still on screen. STEP_START usually
+                // clears them first, but an iteration the director retries has none.
+                const updatedThoughts = (assistant.thoughts || []).filter(t => !t.isStreaming).map(thought => {
                     if (thought.type === 'tool_call' && thought.isPending) {
                         const result = toolResults.find((tr: any) => tr.source_call_id === thought.id)?.content;
                         if (result !== undefined) {
@@ -1586,6 +1767,30 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
 
             case 'text_delta':
                 enqueueDelta(convId, runId, message.data.delta);
+                break;
+
+            case 'reasoning_delta':
+                // Dispatched straight through rather than replayed at reading speed.
+                // Reasoning arrives at 300-500 chars/sec against a 150 chars/sec replay,
+                // so pacing it would trail the model by seconds. The outline samples it
+                // for readability instead, which needs the text to be current.
+                dispatch({
+                    type: 'REASONING_DELTA',
+                    conversationId: convId,
+                    runId,
+                    delta: message.data.delta,
+                });
+                break;
+
+            case 'tool_call_progress':
+                dispatch({
+                    type: 'TOOL_CALL_PROGRESS',
+                    conversationId: convId,
+                    runId,
+                    callId: message.data.callId,
+                    name: message.data.name,
+                    argChars: message.data.argChars,
+                });
                 break;
 
             case 'step_start':

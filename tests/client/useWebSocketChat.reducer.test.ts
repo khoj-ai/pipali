@@ -1,5 +1,6 @@
 import { test, expect } from 'bun:test';
 import { __test__, type ChatState } from '../../src/client/hooks/useWebSocketChat';
+import { getCollapsedPreviewThoughts } from '../../src/client/components/thoughts/ThoughtsSection';
 import type { ConversationState, Message } from '../../src/client/types';
 import { generateDeterministicId } from '../../src/client/utils/formatting';
 
@@ -483,4 +484,182 @@ test('RUN_STOPPED (error) replaces an empty streaming placeholder with a run err
     expect(next.messages).toHaveLength(2);
     expect(next.messages[1]?.stableId).toBe(`run-error-${runningRunId}`);
     expect(next.messages[1]?.runErrorInfo?.message).toContain('provider failed');
+});
+
+test('STEP_START replaces streamed reasoning and tool call previews', () => {
+    const conversationId = 'c1';
+    const runId = 'run-1';
+    const assistant: Message = {
+        id: runId,
+        stableId: runId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        thoughts: [],
+    };
+
+    const state = makeState({
+        conversationId,
+        messages: [assistant],
+        conversationState: {
+            isProcessing: true,
+            isStopped: false,
+            isCompleted: false,
+            messages: [assistant],
+        },
+    });
+
+    const streamed = [
+        { type: 'REASONING_DELTA', conversationId, runId, delta: 'Rewriting ' },
+        { type: 'REASONING_DELTA', conversationId, runId, delta: 'the config.' },
+        { type: 'TOOL_CALL_PROGRESS', conversationId, runId, callId: 'tool-1', name: 'write_file', argChars: 0 },
+        { type: 'TOOL_CALL_PROGRESS', conversationId, runId, callId: 'tool-1', name: 'write_file', argChars: 4800 },
+    ].reduce((acc, action) => __test__.chatReducer(acc, action as any), state as ChatState);
+
+    expect(streamed.messages[0]?.thoughts?.map(t => [t.type, t.isStreaming])).toEqual([
+        ['thought', true],
+        ['tool_call', true],
+    ]);
+    expect(streamed.messages[0]?.thoughts?.[1]?.argChars).toBe(4800);
+
+    const afterStepStart = __test__.chatReducer(streamed, {
+        type: 'STEP_START',
+        conversationId,
+        runId,
+        thought: 'Rewriting the config.',
+        toolCalls: [{ function_name: 'write_file', arguments: { file_path: '/tmp/a' }, tool_call_id: 'tool-1' }],
+    });
+
+    // The preview shares the call id with the real step, so it must be replaced, not deduped away
+    const thoughts = afterStepStart.messages[0]?.thoughts ?? [];
+    expect(thoughts.map(t => t.type)).toEqual(['thought', 'tool_call']);
+    expect(thoughts.every(t => !t.isStreaming)).toBe(true);
+    expect(thoughts[0]?.id).toBe(generateDeterministicId('thought', 'Rewriting the config.'));
+    expect(thoughts[1]?.toolArgs).toEqual({ file_path: '/tmp/a' });
+});
+
+test('RUN_COMPLETE keeps streamed reasoning and drops an unfinished tool call', () => {
+    const conversationId = 'c1';
+    const runId = 'run-1';
+    const assistant: Message = {
+        id: runId,
+        stableId: runId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        thoughts: [],
+    };
+
+    const state = makeState({
+        conversationId,
+        messages: [assistant],
+        conversationState: {
+            isProcessing: true,
+            isStopped: false,
+            isCompleted: false,
+            messages: [assistant],
+        },
+    });
+
+    const streamed = [
+        { type: 'REASONING_DELTA', conversationId, runId, delta: 'That covers it.' },
+        { type: 'TOOL_CALL_PROGRESS', conversationId, runId, callId: 'tool-1', name: 'write_file', argChars: 300 },
+    ].reduce((acc, action) => __test__.chatReducer(acc, action as any), state as ChatState);
+
+    const afterComplete = __test__.chatReducer(streamed, {
+        type: 'RUN_COMPLETE',
+        conversationId,
+        runId,
+        response: 'done',
+        stepId: 42,
+    });
+
+    // Reasoning settles into an ordinary thought; the call the model never finished writing goes away
+    const thoughts = afterComplete.messages[0]?.thoughts ?? [];
+    expect(thoughts.map(t => t.type)).toEqual(['thought']);
+    expect(thoughts[0]?.content).toBe('That covers it.');
+    expect(thoughts[0]?.isStreaming).toBe(false);
+});
+
+test('a starting tool call moves streamed text into the trajectory', () => {
+    const conversationId = 'c1';
+    const runId = 'run-1';
+    const assistant: Message = {
+        id: runId,
+        stableId: runId,
+        role: 'assistant',
+        content: '',
+        isStreaming: true,
+        thoughts: [],
+    };
+
+    const state = makeState({
+        conversationId,
+        messages: [assistant],
+        conversationState: {
+            isProcessing: true,
+            isStopped: false,
+            isCompleted: false,
+            messages: [assistant],
+        },
+    });
+
+    const apply = (from: ChatState, actions: unknown[]) =>
+        actions.reduce<ChatState>((acc, action) => __test__.chatReducer(acc, action as any), from);
+
+    // Reasoning, then prose: indistinguishable from a final answer until a tool call appears
+    const beforeToolCall = apply(state, [
+        { type: 'REASONING_DELTA', conversationId, runId, delta: 'The config needs a new key.' },
+        { type: 'TEXT_DELTA', conversationId, runId, delta: 'Rewriting ' },
+        { type: 'TEXT_DELTA', conversationId, runId, delta: 'the config.' },
+    ]);
+    expect(beforeToolCall.messages[0]?.content).toBe('Rewriting the config.');
+
+    // The first tool call settles it as a mid-run message, so it moves before the row
+    const afterToolCall = __test__.chatReducer(beforeToolCall, {
+        type: 'TOOL_CALL_PROGRESS',
+        conversationId,
+        runId,
+        callId: 'tool-1',
+        name: 'write_file',
+        argChars: 0,
+    });
+    expect(afterToolCall.messages[0]?.content).toBe('');
+    expect(afterToolCall.messages[0]?.thoughts?.map(t => [t.type, t.content])).toEqual([
+        ['thought', 'The config needs a new key.'],
+        ['thought', 'Rewriting the config.'],
+        ['tool_call', ''],
+    ]);
+
+    // Text still draining from the client's paced buffer follows it there
+    const afterTrailingText = __test__.chatReducer(afterToolCall, {
+        type: 'TEXT_DELTA',
+        conversationId,
+        runId,
+        delta: ' Then reloading.',
+    });
+    expect(afterTrailingText.messages[0]?.content).toBe('');
+    expect(afterTrailingText.messages[0]?.thoughts?.[1]?.content).toBe('Rewriting the config. Then reloading.');
+
+    // Collapsed views select a step by its last tool call's group, so the previews must
+    // share one or the message is dropped from the default view until the step lands
+    expect(getCollapsedPreviewThoughts(afterTrailingText.messages[0]?.thoughts ?? []).map(t => t.id))
+        .toEqual([`message-stream-${runId}`, 'tool-1']);
+
+    const afterStepStart = __test__.chatReducer(afterTrailingText, {
+        type: 'STEP_START',
+        conversationId,
+        runId,
+        thought: 'The config needs a new key.',
+        message: 'Rewriting the config. Then reloading.',
+        toolCalls: [{ function_name: 'write_file', arguments: { file_path: '/tmp/a' }, tool_call_id: 'tool-1' }],
+    });
+
+    // Same shape as before the step landed, so nothing moves when it does
+    expect(afterStepStart.messages[0]?.content).toBe('');
+    expect(afterStepStart.messages[0]?.thoughts?.map(t => [t.type, t.content, !!t.isInternalThought])).toEqual([
+        ['thought', 'The config needs a new key.', true],
+        ['thought', 'Rewriting the config. Then reloading.', false],
+        ['tool_call', '', false],
+    ]);
 });

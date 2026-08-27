@@ -33,5 +33,9 @@ export type Thought = {
     toolResult?: string;
     isInternalThought?: boolean; // True for model's internal reasoning (rendered in italics)
     isPending?: boolean; // True for tool calls that are currently executing (no results yet)
+    /** True while this is a live preview from the model's stream, superseded once the step lands */
+    isStreaming?: boolean;
+    /** Characters of tool call arguments the model has written so far */
+    argChars?: number;
     stepGroupId?: string; // Groups flattened thoughts/tool calls that came from the same trajectory step
 };

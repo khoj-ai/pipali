@@ -41,3 +41,19 @@ export interface ToolDefinition {
     /** Child tools of a namespace definition */
     tools?: ToolDefinition[];
 }
+
+/**
+ * Live signals from the model's response stream, surfaced so the UI can show
+ * progress before the response completes.
+ */
+export type LlmStreamEvent =
+    /** Assistant prose */
+    | { kind: 'text'; delta: string }
+    /** Model's reasoning summary */
+    | { kind: 'reasoning'; delta: string }
+    /**
+     * A tool call the model is emitting. Sent once when the call opens, then on
+     * each argument chunk. `argChars` is cumulative, so a late event supersedes
+     * every earlier one for the same call.
+     */
+    | { kind: 'tool_call'; callId: string; name: string; argChars: number };
