@@ -187,3 +187,30 @@ describe('delegated task trajectory labels', () => {
         expect(formatted).toContain(referencedId);
     });
 });
+
+describe('file tool formatting', () => {
+    test('hides the memory directory for every file operation across platforms', () => {
+        const unixMemory = '/Users/alex/.pipali/memory/prefers-short-replies.md';
+        const windowsMemory = 'C:\\Users\\alex\\.pipali\\memory\\prefers-short-replies.md';
+
+        for (const [toolName, args] of [
+            ['view_file', { path: unixMemory }],
+            ['edit_file', { file_path: unixMemory }],
+            ['write_file', { file_path: unixMemory }],
+            ['view_file', { path: windowsMemory }],
+        ] as const) {
+            expect(formatToolArgsRich(toolName, args)).toMatchObject({
+                text: 'prefers-short-replies.md',
+                secondary: 'in memories',
+            });
+        }
+    });
+
+    test('extracts and shortens ordinary file locations across platforms', () => {
+        expect(formatToolArgsRich('view_file', { path: '/work/notes.md' })?.secondary).toBe('in /work');
+        expect(formatToolArgsRich('view_file', { path: 'C:\\Users\\alex\\Documents\\notes.md' })).toMatchObject({
+            text: 'notes.md',
+            secondary: 'in Documents',
+        });
+    });
+});

@@ -15,6 +15,9 @@ import { PlatformAuthError } from '../http/platform-fetch';
 import { atifConversationService, type ConversationRole } from '../processor/conversation/atif/atif.service';
 import { buildSystemPrompt } from '../processor/director';
 import { loadUserContext } from '../user-context';
+import { loadMemorySettings } from '../memory/settings';
+import { loadCatalogue } from '../memory';
+import { maybeDream } from '../memory/dream';
 import { isFirstRunEasterEgg, maxIterations as defaultMaxIterations } from '../utils';
 import { setSessionActive, setSessionInactive, updateSessionReasoning } from '../sessions';
 import { createConfirmationCallback } from '../routes/ws/confirmation-manager';
@@ -82,6 +85,7 @@ function ensureUniqueRunId(
 async function ensureSystemPromptPersisted(
     conversationId: string,
     userId: number,
+    conversationRole: ConversationRole,
     userMessage?: string,
 ): Promise<string | undefined> {
     const conversation = await atifConversationService.getConversation(conversationId);
@@ -97,6 +101,7 @@ async function ensureSystemPromptPersisted(
         : undefined;
 
     const userContext = await loadUserContext();
+    const { memoriesEnabled } = await loadMemorySettings(userId);
     const now = new Date();
     const systemPrompt = await buildSystemPrompt({
         currentDate: now.toLocaleDateString('en-CA'),
@@ -107,6 +112,10 @@ async function ensureSystemPromptPersisted(
         userContext: userContext.instructions,
         provideUpdatesPreamble,
         isFirstEverConversation,
+        conversationRole,
+        // Only reached for a conversation without a system prompt, so this is its baseline
+        memoryCatalogue: memoriesEnabled ? await loadCatalogue() : undefined,
+        memoriesEnabled,
         now,
     });
 
@@ -186,7 +195,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
 
         let systemPromptOverride: string | undefined;
         try {
-            systemPromptOverride = await ensureSystemPromptPersisted(conversationId, user.id, userMessage);
+            systemPromptOverride = await ensureSystemPromptPersisted(conversationId, user.id, conversationRole, userMessage);
         } catch (error) {
             log.error({ err: error, conversationId }, 'Failed to persist system prompt');
         }
@@ -352,6 +361,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             }
 
             bus.onRunFinished();
+
+            // A settled run is the moment new material exists and nobody is waiting on
+            // the turn. Whether it is time to consolidate is the dream's own business.
+            void maybeDream(user);
             return;
         } catch (error) {
             if (error instanceof PlatformBillingError) {

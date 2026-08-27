@@ -7,6 +7,7 @@ import {
     requestOperationConfirmation,
 } from '../confirmation';
 import { isPathWithinAllowedWrite } from '../../sandbox';
+import { isMemoryFile, memoryWriteError, stampProvenance } from '../../memory';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'edit_file' });
@@ -100,6 +101,8 @@ export interface EditFileResult {
 export interface EditFileOptions {
     /** Confirmation context for requesting user approval */
     confirmationContext?: ConfirmationContext;
+    /** Conversation to credit as the origin of a new memory */
+    conversationId?: string;
 }
 
 /**
@@ -238,6 +241,15 @@ async function editResolvedFile(
         newContent = content.slice(0, index) + new_string + content.slice(index + old_string.length);
     }
 
+    let contentToWrite = newContent;
+    if (isMemoryFile(resolvedPath)) {
+        const rejection = memoryWriteError(newContent);
+        if (rejection) {
+            return { query, file: file_path, uri: file_path, compiled: rejection };
+        }
+        contentToWrite = stampProvenance(newContent, options?.conversationId);
+    }
+
     if (!isPathWithinAllowedWrite(resolvedPath) && options?.confirmationContext) {
         const confirmResult = await requestOperationConfirmation(
             'edit_file',
@@ -265,7 +277,7 @@ async function editResolvedFile(
         }
     }
 
-    await fs.writeFile(resolvedPath, newContent, 'utf-8');
+    await fs.writeFile(resolvedPath, contentToWrite, 'utf-8');
 
     const replacementCount = replace_all ? occurrences : 1;
     const message = `Successfully replaced ${replacementCount} occurrence${replacementCount > 1 ? 's' : ''} in ${file_path}`;

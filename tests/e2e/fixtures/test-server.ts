@@ -28,6 +28,7 @@ export class TestServer {
     private host: string;
     private dbPath: string;
     private skillsDir: string;
+    private memoryDir: string;
     private backgroundLogDir: string;
     private requestLogPath: string;
     private mockScenarios: MockScenario[];
@@ -38,9 +39,17 @@ export class TestServer {
         const testId = Date.now();
         this.dbPath = `/tmp/pipali/pipali-test-${testId}`;
         this.skillsDir = `/tmp/pipali/pipali-test-${testId}-skills`;
+        this.memoryDir = `/tmp/pipali/pipali-test-${testId}-memory`;
         this.backgroundLogDir = `/tmp/pipali/pipali-test-${testId}-background`;
         this.requestLogPath = `/tmp/pipali/pipali-test-${testId}-requests.jsonl`;
         this.mockScenarios = config.mockScenarios || [];
+    }
+
+    /**
+     * Get the memory directory for this test server
+     */
+    getMemoryDir(): string {
+        return this.memoryDir;
     }
 
     /**
@@ -77,12 +86,17 @@ export class TestServer {
             PIPALI_ANON_MODE: 'true',
             // Use isolated skills directory for testing
             PIPALI_SKILLS_DIR: this.skillsDir,
+            // Keep the developer's real memories out of catalogues and recall
+            PIPALI_MEMORY_DIR: this.memoryDir,
             // Keep background command logs out of the developer's real ~/.pipali
             PIPALI_BACKGROUND_LOG_DIR: this.backgroundLogDir,
             // Let specs assert on the request the mock LLM was handed
             PIPALI_MOCK_REQUEST_LOG: this.requestLogPath,
             // Disable sandbox for e2e tests so confirmation dialogs work as expected
             PIPALI_SANDBOX_DISABLED: 'true',
+            // A shell opened from the desktop app carries the Tauri bundle's resource
+            // dir, whose pglite assets can be stale - always use node_modules' copies
+            PIPALI_SERVER_RESOURCE_DIR: '',
         };
 
         // Pass mock scenarios if provided
@@ -167,6 +181,7 @@ export class TestServer {
         try {
             await rm(this.dbPath, { recursive: true, force: true });
             await rm(this.skillsDir, { recursive: true, force: true });
+            await rm(this.memoryDir, { recursive: true, force: true });
             await rm(this.backgroundLogDir, { recursive: true, force: true });
             await rm(this.requestLogPath, { force: true });
             console.log('[TestServer] Cleaned up test database and skills directory');

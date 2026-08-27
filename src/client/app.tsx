@@ -974,6 +974,25 @@ const App = () => {
             };
 
             for (const msg of data.history) {
+                // Memories recalled for this turn - render collapsed, like compaction.
+                // Blockquoted so bold lines inside memory bodies don't read as new thought headings.
+                if (msg.source === 'system' && msg.extra?.kind === 'memory_recall') {
+                    const recalled = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
+                    const count = Array.isArray(msg.extra?.memory_paths) ? msg.extra.memory_paths.length : 0;
+                    const quoted = recalled
+                        .replace(/^# Memory recalled\n/, '')
+                        .split('\n')
+                        .map((line: string) => line ? `> ${line}` : '>')
+                        .join('\n');
+                    thoughts.push({
+                        type: 'thought',
+                        content: `**${t('thoughts.recalledMemories', { count })}**\n${quoted}`,
+                        id: generateDeterministicId('memory-recall', recalled),
+                        isInternalThought: true,
+                    });
+                    continue;
+                }
+
                 if (msg.source === 'user') {
                     // Check if this is a compaction step - render as thought instead of user message
                     if (msg.extra?.is_compaction === true) {

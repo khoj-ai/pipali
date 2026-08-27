@@ -6,6 +6,9 @@
  * quietly parsing a format nobody produces any more.
  */
 
+/** Pipali's persistent memory directory, relative to the user's home directory. */
+export const PIPALI_MEMORY_RELATIVE_DIR = '.pipali/memory';
+
 /** Leads every task summary, and is how a delegate step finds the task it started */
 export function formatConversationHeader(conversationId: string): string {
     return `Conversation: ${conversationId}`;

@@ -101,6 +101,13 @@ export const User = pgTable('user', {
   ...dbBaseModel,
 });
 
+export const MemorySettings = pgTable('memory_settings', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }).unique(),
+    memoriesEnabled: boolean('memories_enabled').default(true).notNull(),
+    ...dbBaseModel,
+});
+
 export const GoogleUser = pgTable('google_user', {
     id: serial('id').primaryKey(),
     userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),

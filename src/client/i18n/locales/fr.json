@@ -90,7 +90,9 @@
         "delegationModel": "au mod\u00e8le {{tier}}",
         "delegationBackground": "en arri\u00e8re-plan",
         "waitForTasks": "pour {{tasks}}",
-        "noRunInProgress": "Aucune t\u00e2che n\u2019\u00e9tait en cours."
+        "noRunInProgress": "Aucune t\u00e2che n\u2019\u00e9tait en cours.",
+        "recalledMemories_one": "{{count}} souvenir rappel\u00e9.",
+        "recalledMemories_other": "{{count}} souvenirs rappel\u00e9s."
     },
     "home": {
         "greetings": {
@@ -301,6 +303,21 @@
         "tabPermissions": "Autorisations",
         "aboutYou": "\u00c0 propos de toi",
         "aboutYouDescription": "Ces infos aident Pipali \u00e0 personnaliser ses r\u00e9ponses et \u00e0 comprendre ton contexte.",
+        "memories": "Souvenirs",
+        "memoriesDescription": "Permets \u00e0 Pipali de retenir des informations utiles d\u2019une conversation \u00e0 l\u2019autre. D\u00e9sactive cette option pour emp\u00eacher le chargement automatique des souvenirs dans les prochaines conversations. Les fichiers de m\u00e9moire et les conversations existants restent inchang\u00e9s.",
+        "failedToSaveMemories": "\u00c9chec de la mise \u00e0 jour des param\u00e8tres de m\u00e9moire",
+        "storedMemories": "Souvenirs enregistr\u00e9s ({{count}})",
+        "deleteAllMemories": "Tout supprimer",
+        "deleteAllMemoriesConfirm": "Supprimer tous les souvenirs ? Cette action est irr\u00e9versible.",
+        "deleteMemory": "Supprimer {{name}}",
+        "deleteMemoryConfirm": "Supprimer ce souvenir ?",
+        "viewMemory": "Afficher {{name}}",
+        "loadingMemories": "Chargement des souvenirs...",
+        "loadingMemory": "Chargement...",
+        "emptyMemory": "Ce souvenir est vide.",
+        "noMemories": "Aucun souvenir enregistr\u00e9",
+        "failedToLoadMemories": "\u00c9chec du chargement des souvenirs",
+        "failedToDeleteMemories": "\u00c9chec de la suppression des souvenirs",
         "labelName": "Nom",
         "placeholderName": "Ton nom",
         "labelLocation": "Localisation",

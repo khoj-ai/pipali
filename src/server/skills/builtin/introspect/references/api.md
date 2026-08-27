@@ -85,3 +85,9 @@ started them. Read one with `inspect_task`, or pull just the parts you need from
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/user/sandbox` | Sandbox config (allowed/denied paths, domains) |
+
+## Memory
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/memory/settings` | Get memory settings, including `memoriesEnabled` |
+| PUT | `/memory/settings` | Update memory settings |

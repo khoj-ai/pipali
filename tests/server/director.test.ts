@@ -1,6 +1,7 @@
 import { test, expect, describe } from 'bun:test';
 import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research } from '../../src/server/processor/director';
 import { isFirstRunEasterEgg } from '../../src/server/utils';
+import { MEMORY_RECALL_KIND } from '../../src/server/memory';
 import type { ATIFTrajectory, ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
 
 type MultimodalContent = Array<{ type: string; [key: string]: string }>;
@@ -117,6 +118,20 @@ describe('truncateToolOutput', () => {
 });
 
 describe('buildSystemPrompt', () => {
+    test('keeps memories on by default and removes the entire memory surface when disabled', async () => {
+        const catalogue = 'prefers-short-answers.md (feedback): Prefer concise answers';
+        const enabled = await buildSystemPrompt({ memoryCatalogue: catalogue });
+        const disabled = await buildSystemPrompt({ memoryCatalogue: catalogue, memoriesEnabled: false });
+
+        expect(enabled).toContain('persistent file-based memory');
+        expect(enabled).toContain(catalogue);
+        expect(enabled).toContain('write fact files');
+        expect(disabled).not.toContain('persistent file-based memory');
+        expect(disabled).not.toContain(catalogue);
+        expect(disabled).not.toContain('write fact files');
+        expect(disabled).not.toContain('<memory_catalogue>');
+    });
+
     test('should include first conversation instructions when isFirstEverConversation is true', async () => {
         const prompt = await buildSystemPrompt({
             isFirstEverConversation: true,
@@ -164,6 +179,38 @@ const trajectory = (steps: Array<Partial<ATIFStep>>): ATIFTrajectory => ({
         source: 'user',
         ...step,
     })) as ATIFStep[],
+});
+
+describe('research first iteration', () => {
+    const firstIterationSystemPrompt = async (steps: Array<Partial<ATIFStep>>) => {
+        const previousMock = globalThis.__pipaliMockLLM;
+        globalThis.__pipaliMockLLM = () => ({ message: 'Done.', raw: [] });
+        try {
+            for await (const iteration of research({ chatHistory: trajectory(steps), maxIterations: 2 })) {
+                if (iteration.isToolCallStart) continue;
+                return iteration.systemPrompt;
+            }
+            return undefined;
+        } finally {
+            globalThis.__pipaliMockLLM = previousMock;
+        }
+    };
+
+    test('yields the system prompt when only auxiliary system steps precede it', async () => {
+        // A recalled memory is a system step, but not the base system prompt - a new
+        // conversation carrying one must still get its system prompt persisted
+        await expect(firstIterationSystemPrompt([
+            { source: 'user', message: 'hi' },
+            { source: 'system', message: '# Memory recalled', extra: { kind: MEMORY_RECALL_KIND, memory_paths: ['a.md'] } },
+        ])).resolves.toBeDefined();
+    });
+
+    test('yields no system prompt when the conversation already carries one', async () => {
+        await expect(firstIterationSystemPrompt([
+            { source: 'system', message: 'You are Pipali.' },
+            { source: 'user', message: 'hi' },
+        ])).resolves.toBeUndefined();
+    });
 });
 
 describe('research request tracing', () => {

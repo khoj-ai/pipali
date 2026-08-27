@@ -24,6 +24,9 @@ import { PlatformAuthError } from '../http/platform-fetch';
 import { PlatformBillingError } from '../http/billing-errors';
 import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill, toggleSkillVisibility, resetBuiltinSkill } from '../skills';
 import { loadUserContext, saveUserContext } from '../user-context';
+import { deleteAllMemories, deleteMemory, getMemory, listMemories } from '../memory';
+import { loadMemorySettings, saveMemorySettings } from '../memory/settings';
+import { stopDreaming } from '../memory/dream';
 import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
 import { IS_COMPILED_BINARY, EMBEDDED_CHANGELOG } from '../embedded-assets';
@@ -626,6 +629,84 @@ api.put('/user/context', zValidator('json', userContextSchema), async (c) => {
     } catch (err) {
         log.error({ err }, 'Failed to save user context');
         return c.json({ error: 'Failed to save user context' }, 500);
+    }
+});
+
+api.get('/memory/settings', async (c) => {
+    const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
+    if (!user) {
+        return c.json({ error: 'User not found' }, 404);
+    }
+
+    try {
+        return c.json(await loadMemorySettings(user.id));
+    } catch (err) {
+        log.error({ err }, 'Failed to load memory settings');
+        return c.json({ error: 'Failed to load memory settings' }, 500);
+    }
+});
+
+const memorySettingsSchema = z.object({
+    memoriesEnabled: z.boolean().optional(),
+});
+
+api.put('/memory/settings', zValidator('json', memorySettingsSchema), async (c) => {
+    const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
+    if (!user) {
+        return c.json({ error: 'User not found' }, 404);
+    }
+
+    try {
+        const settings = await saveMemorySettings(user.id, c.req.valid('json'));
+        if (!settings.memoriesEnabled) {
+            await stopDreaming(user.id);
+        }
+        return c.json(settings);
+    } catch (err) {
+        log.error({ err }, 'Failed to save memory settings');
+        return c.json({ error: 'Failed to save memory settings' }, 500);
+    }
+});
+
+api.get('/memory', async (c) => {
+    try {
+        return c.json({ memories: await listMemories() });
+    } catch (err) {
+        log.error({ err }, 'Failed to list memories');
+        return c.json({ error: 'Failed to list memories' }, 500);
+    }
+});
+
+api.get('/memory/:file', async (c) => {
+    try {
+        const memory = await getMemory(c.req.param('file'));
+        return memory
+            ? c.json({ memory })
+            : c.json({ error: 'Memory not found' }, 404);
+    } catch (err) {
+        log.error({ err }, 'Failed to load memory');
+        return c.json({ error: 'Failed to load memory' }, 500);
+    }
+});
+
+api.delete('/memory', async (c) => {
+    try {
+        return c.json({ success: true, deleted: await deleteAllMemories() });
+    } catch (err) {
+        log.error({ err }, 'Failed to delete memories');
+        return c.json({ error: 'Failed to delete memories' }, 500);
+    }
+});
+
+api.delete('/memory/:file', async (c) => {
+    try {
+        const deleted = await deleteMemory(c.req.param('file'));
+        return deleted
+            ? c.json({ success: true })
+            : c.json({ error: 'Memory not found' }, 404);
+    } catch (err) {
+        log.error({ err }, 'Failed to delete memory');
+        return c.json({ error: 'Failed to delete memory' }, 500);
     }
 });
 
