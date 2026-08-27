@@ -607,56 +607,139 @@ async function installPatchedGtkPlugin() {
 }
 
 /**
- * Strip the build host's libwayland-client from the extracted AppDir.
+ * Enforce the AppImage bundle/host boundary at repack.
  *
- * The linuxdeploy build Tauri's bundler uses deploys libwayland-client from
- * the build host into AppDir/usr/lib. At runtime the AppImage's AppRun
- * wrapper prepends AppDir/usr/lib to LD_LIBRARY_PATH for the whole process
- * tree, so the host's Mesa libEGL — which links libwayland-client and is
- * correctly NOT bundled, like libGL/libgbm/libdrm — resolves that SONAME to
- * the bundled copy instead of the host's own. When the target distro's Mesa
- * was built against a newer libwayland than the build host's (wayland 1.20 on
- * our ubuntu-22.04 CI), symbol resolution fails (e.g. current Arch/Fedora
- * Mesa needs wl_fixes_interface, added in wayland 1.24), no EGL display can
- * be created, and WebKitWebProcess aborts with `Could not create default EGL
- * display: EGL_BAD_PARAMETER` — a blank white window while the backend keeps
- * running (khoj-ai/pipali#21). The canonical AppImage excludelist mandates
- * leaving exactly this library system-provided: "New version of Mesa has some
- * dependency issues with libwayland-client if it is bundled". Any host that
- * can render the app already ships it, because host Mesa's libEGL itself
- * links it (verified on Ubuntu 24.04 / Debian 13 / Fedora and Arch current).
+ * AppRun prepends AppDir/usr/lib to LD_LIBRARY_PATH for the whole process
+ * tree, so a bundled library shadows the host's copy — including for host
+ * libraries loaded later into the same process. Anything coupled to the
+ * kernel driver, GPU or compositor therefore has to come from the host:
+ * bundling it freezes it at the build host's version (ubuntu-22.04) and
+ * breaks on every distro that has moved on. khoj-ai/pipali#21 is exactly
+ * that — host Mesa's libEGL binds the bundled wayland 1.20 libwayland-client
+ * instead of the host's, misses symbols current Mesa needs, and no EGL
+ * display can be created, so WebKitWebProcess aborts into a blank window.
  *
- * The other three bundled Wayland libraries deliberately stay bundled:
- * - libwayland-server: the bundled libwebkit2gtk links it, and current Mesa
- *   (Arch 26.2 / Fedora 26.1 / Ubuntu 24.04) does NOT link it anymore, so the
- *   host provides no guarantee it is installed — stripping it makes the app
- *   fail to start on hosts without it (verified on a minimal Fedora with
- *   working X11+Mesa). Keeping it is safe: the only host library that may
- *   bind it (Debian 13's Mesa) uses long-stable wayland-server ABI that the
- *   bundled 1.20 copy fully exports (symbol-diffed).
- * - libwayland-cursor / libwayland-egl: the bundled libgdk-3 needs them at
- *   load time (stripping them would add a new host package requirement), and
- *   they only call the wayland client library's stable, additive public ABI,
- *   so they work fine against the host's newer copy.
+ * scripts/linux/appimage-excludelist.txt is the canonical list of libraries
+ * on the host's side of that line. linuxdeploy applies it too, but bakes it
+ * into its binary at its own build time, and Tauri serves linuxdeploy from a
+ * static, unversioned tag on its own mirror - the same URL in every Tauri
+ * version, last refreshed 2024-07-29, while libwayland-client was excluded
+ * upstream on 2024-11-03. No Tauri upgrade moves that list for us.
+ *
+ * So rather than strip the escapee by name and wait for the next one to be
+ * reported as a bug, classify every excludelist library that reaches the
+ * AppDir: strip it, or record why we ship it anyway. An unclassified one
+ * fails the build, so a linuxdeploy or WebKitGTK bump cannot quietly change
+ * what we ship, and checkExcludelistDrift covers entries added upstream
+ * after our own snapshot.
  */
-const BUILD_HOST_WAYLAND_LIB_PREFIXES = ["libwayland-client.so"];
 
-async function stripBundledWaylandClient(extractRoot: string) {
-    const removed: string[] = [];
+/** Where scripts/linux/appimage-excludelist.txt is vendored from. */
+const EXCLUDELIST_UPSTREAM_URL =
+    "https://raw.githubusercontent.com/AppImageCommunity/pkg2appimage/master/excludelist";
+
+/** Excludelist libraries deleted from the AppDir so the host's copy wins. */
+const STRIP_FROM_BUNDLE: Record<string, string> = {
+    "libwayland-client.so": "host Mesa's libEGL binds this SONAME and needs symbols the build host's 1.20 copy lacks (#21)",
+};
+
+/**
+ * Excludelist libraries we ship anyway, with the reason the excludelist's
+ * rationale does not apply to us. Empty today: libwayland-client is the only
+ * excludelist entry that reaches the AppDir.
+ */
+const KEEP_BUNDLED: Record<string, string> = {};
+
+/** "libwayland-client.so.0.20.0" -> "libwayland-client.so"; null if not a shared library. */
+function sharedLibraryStem(fileName: string): string | null {
+    return /^(.+\.so)(?:\.\d+)*$/.exec(fileName)?.[1] ?? null;
+}
+
+function parseExcludelistStems(raw: string): Set<string> {
+    const stems = new Set<string>();
+    for (const line of raw.split("\n")) {
+        const entry = line.trim();
+        if (!entry || entry.startsWith("#")) continue;
+        const stem = sharedLibraryStem(entry);
+        if (stem) stems.add(stem);
+    }
+    return stems;
+}
+
+async function loadExcludelistStems(): Promise<Set<string>> {
+    const listPath = path.join(ROOT_DIR, "scripts", "linux", "appimage-excludelist.txt");
+    const stems = parseExcludelistStems(await Bun.file(listPath).text());
+    if (stems.size === 0) throw new Error(`No entries parsed from ${listPath}`);
+    return stems;
+}
+
+/**
+ * Fail the build when upstream has excluded a library we are still bundling.
+ *
+ * The vendored snapshot decides what gets stripped, so the artifact stays
+ * reproducible and offline builds keep working. Upstream is consulted only to
+ * answer the question the snapshot cannot: is our copy behind in a way that
+ * matters? A newly excluded library that is not in our bundle is a note to
+ * refresh the file; one that IS in our bundle is khoj-ai/pipali#21 happening
+ * again, so it stops the build. A fetch that does not land says nothing about
+ * us and is logged, not fatal.
+ */
+async function checkExcludelistDrift(bundled: Set<string>, vendored: Set<string>) {
+    let upstream: Set<string>;
+    try {
+        const resp = await fetch(EXCLUDELIST_UPSTREAM_URL, { signal: AbortSignal.timeout(15_000) });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+        upstream = parseExcludelistStems(await resp.text());
+        if (upstream.size === 0) throw new Error("no entries parsed");
+    } catch (err) {
+        console.log(`   ⚠️  Could not compare the excludelist against upstream: ${err}`);
+        return;
+    }
+
+    const added = [...upstream].filter((stem) => !vendored.has(stem)).sort();
+    if (added.length === 0) return;
+
+    console.log(`   Vendored excludelist is behind upstream: ${added.join(", ")}`);
+    const bundledAndNew = added.filter((stem) => bundled.has(stem));
+    if (bundledAndNew.length > 0) {
+        throw new Error(
+            `Upstream excludes ${bundledAndNew.join(", ")}, which this AppDir still bundles. ` +
+            "Refresh scripts/linux/appimage-excludelist.txt and classify them in " +
+            "STRIP_FROM_BUNDLE or KEEP_BUNDLED in scripts/build-tauri.ts.",
+        );
+    }
+    console.log("   None of them are in this bundle; refresh the file when convenient");
+}
+
+async function enforceAppImageExcludelist(extractRoot: string) {
+    const excluded = await loadExcludelistStems();
+    const bundled = new Set<string>();
+    const stripped: string[] = [];
+    const kept = new Set<string>();
+    const unclassified = new Set<string>();
 
     async function walk(dir: string) {
-        // Directory may not exist in this AppDir layout (e.g. usr/lib64)
         const entries = await fs.readdir(dir, { withFileTypes: true }).catch(() => null);
-        if (!entries) return;
+        if (!entries) return; // layout-dependent: usr/lib64 may not exist
         for (const entry of entries) {
             const entryPath = path.join(dir, entry.name);
             if (entry.isDirectory()) {
-                // usr/lib/Pipali holds the app's own resources, never linuxdeploy libs
+                // usr/lib/Pipali holds the app's own resources, never linuxdeploy's libs
                 if (entry.name === "Pipali") continue;
                 await walk(entryPath);
-            } else if (BUILD_HOST_WAYLAND_LIB_PREFIXES.some((prefix) => entry.name.startsWith(prefix))) {
+                continue;
+            }
+            const stem = sharedLibraryStem(entry.name);
+            if (!stem) continue;
+            bundled.add(stem);
+            if (!excluded.has(stem)) continue;
+            if (KEEP_BUNDLED[stem]) {
+                kept.add(stem);
+            } else if (STRIP_FROM_BUNDLE[stem]) {
                 await fs.rm(entryPath, { force: true });
-                removed.push(path.relative(extractRoot, entryPath));
+                stripped.push(path.relative(extractRoot, entryPath));
+            } else {
+                unclassified.add(stem);
             }
         }
     }
@@ -664,12 +747,20 @@ async function stripBundledWaylandClient(extractRoot: string) {
     await walk(path.join(extractRoot, "usr", "lib"));
     await walk(path.join(extractRoot, "usr", "lib64"));
 
-    if (removed.length === 0) {
-        console.log("   No bundled libwayland-client found to strip");
+    for (const lib of stripped) {
+        console.log(`   Stripped ${lib} — ${STRIP_FROM_BUNDLE[sharedLibraryStem(path.basename(lib))!]}`);
     }
-    for (const lib of removed) {
-        console.log(`   Stripped bundled ${lib} (host provides it, see khoj-ai/pipali#21)`);
+    for (const stem of kept) console.log(`   Kept bundled ${stem} — ${KEEP_BUNDLED[stem]}`);
+    if (stripped.length === 0) console.log("   No excludelist libraries to strip");
+
+    if (unclassified.size > 0) {
+        throw new Error(
+            `AppDir bundles unclassified excludelist libraries: ${[...unclassified].sort().join(", ")}. ` +
+            "Add each to STRIP_FROM_BUNDLE or KEEP_BUNDLED in scripts/build-tauri.ts.",
+        );
     }
+
+    await checkExcludelistDrift(bundled, excluded);
 }
 
 /** 
@@ -801,7 +892,7 @@ async function repackAppImageWithPristineSidecars(debug: boolean, platform: Plat
     }
 
     await installHostXdgOpenHandoff(extractRoot);
-    await stripBundledWaylandClient(extractRoot);
+    await enforceAppImageExcludelist(extractRoot);
 
     // Without this verify step the build could regress to silently shipping a
     // corrupted bun again — the original symptom only surfaces at app launch.
