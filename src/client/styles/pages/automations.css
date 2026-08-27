@@ -386,6 +386,12 @@
     min-width: 100px;
 }
 
+/* Model names are longer than a frequency, and the picker sits on its own row. */
+.automation-model-select {
+    min-width: 220px;
+    max-width: 100%;
+}
+
 .time-select {
     min-width: 120px;
 }
@@ -619,7 +625,8 @@
     margin: 0 0 8px 0;
 }
 
-.automation-detail-schedule {
+/* A line of detail under a heading: an icon and the value it labels. */
+.automation-detail-row {
     display: flex;
     align-items: center;
     gap: 8px;

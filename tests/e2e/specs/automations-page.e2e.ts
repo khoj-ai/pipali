@@ -837,4 +837,177 @@ test.describe('Automations Page', () => {
             await expect(card).toBeVisible();
         });
     });
+    test.describe('Automation Model', () => {
+        /** Models come from configured providers, so an unconfigured environment has none. */
+        async function availableModels(page: import('@playwright/test').Page) {
+            const response = await page.request.get('/api/models');
+            return response.ok() ? (await response.json()).models as { id: number; name: string; friendlyName?: string }[] : [];
+        }
+
+        async function readAutomation(page: import('@playwright/test').Page, id: string) {
+            const response = await page.request.get(`/api/automations/${id}`);
+            expect(response.ok()).toBe(true);
+            return (await response.json()).automation as { chatModelId: number | null; conversationId: string | null };
+        }
+
+        test('a routine follows the default model until one is chosen', async ({ page }) => {
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'Default Model Routine',
+                prompt: 'Test prompt',
+            });
+            testAutomationIds.push(automationId);
+
+            expect((await readAutomation(page, automationId)).chatModelId).toBeNull();
+
+            await automationsPage.goto();
+            await automationsPage.openAutomationDetail('Default Model Routine');
+
+            // Says so, rather than leaving the question to the chat model picker.
+            await expect(automationsPage.detailModal.locator('.automation-detail-model')).toContainText('My default model');
+        });
+
+        test('choosing a model pins the routine to it', async ({ page }) => {
+            const models = await availableModels(page);
+            test.skip(models.length === 0, 'no chat models configured in this environment');
+            const model = models[0]!;
+            const label = model.friendlyName || model.name;
+
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'Pinned Model Routine',
+                prompt: 'Test prompt',
+            });
+            testAutomationIds.push(automationId);
+
+            await automationsPage.goto();
+            await automationsPage.openAutomationDetail('Pinned Model Routine');
+            await automationsPage.clickEditButton();
+            await automationsPage.detailModal.locator('.automation-model-select').selectOption({ label });
+            await automationsPage.saveAutomation();
+
+            expect((await readAutomation(page, automationId)).chatModelId).toBe(model.id);
+
+            await automationsPage.openAutomationDetail('Pinned Model Routine');
+            await expect(automationsPage.detailModal.locator('.automation-detail-model')).toHaveText(label);
+        });
+
+        test('a routine can be created on a chosen model', async ({ page }) => {
+            const models = await availableModels(page);
+            test.skip(models.length === 0, 'no chat models configured in this environment');
+            const model = models[0]!;
+
+            await automationsPage.goto();
+            await automationsPage.createBtn.click();
+
+            const createModal = page.locator(Selectors.createAutomationModal);
+            await expect(createModal).toBeVisible();
+            await createModal.locator('.instructions-textarea').fill('Summarise the release notes each morning');
+            await createModal.locator('.automation-model-select').selectOption({ label: model.friendlyName || model.name });
+            await createModal.locator('button[type="submit"]').click();
+            await expect(createModal).toBeHidden({ timeout: 5000 });
+
+            const listed = await page.request.get('/api/automations');
+            const { automations } = await listed.json();
+            const created = automations.find((a: { prompt: string }) => a.prompt.includes('Summarise the release notes'));
+            expect(created).toBeDefined();
+            testAutomationIds.push(created.id);
+            expect(created.chatModelId).toBe(model.id);
+        });
+
+        /** Triggering is what gives a routine its conversation. */
+        async function triggerAndGetConversation(page: import('@playwright/test').Page, automationId: string) {
+            const response = await page.request.post(`/api/automations/${automationId}/trigger`);
+            expect(response.ok()).toBe(true);
+            const { conversationId } = await response.json();
+            expect(conversationId).toBeTruthy();
+            return conversationId as string;
+        }
+
+        async function conversationModel(page: import('@playwright/test').Page, conversationId: string) {
+            const response = await page.request.get(`/api/chat/${conversationId}/history`);
+            expect(response.ok()).toBe(true);
+            return (await response.json()).chatModelId as number | null;
+        }
+
+        test("setting a routine's model moves its conversation's picker with it", async ({ page }) => {
+            const models = await availableModels(page);
+            test.skip(models.length < 2, 'needs two chat models to tell them apart');
+
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'Mirrored Model Routine',
+                prompt: 'Test prompt',
+            });
+            testAutomationIds.push(automationId);
+            const conversationId = await triggerAndGetConversation(page, automationId);
+
+            await page.request.put(`/api/automations/${automationId}`, { data: { chatModelId: models[0]!.id } });
+            expect(await conversationModel(page, conversationId)).toBe(models[0]!.id);
+
+            await page.request.put(`/api/automations/${automationId}`, { data: { chatModelId: models[1]!.id } });
+            expect(await conversationModel(page, conversationId)).toBe(models[1]!.id);
+
+            // Back to the default, which the conversation follows the same way the routine does.
+            await page.request.put(`/api/automations/${automationId}`, { data: { chatModelId: null } });
+            expect(await conversationModel(page, conversationId)).toBeNull();
+        });
+
+        test("editing a routine's name leaves its model alone", async ({ page }) => {
+            const models = await availableModels(page);
+            test.skip(models.length === 0, 'no chat models configured in this environment');
+
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'Renamed Routine',
+                prompt: 'Test prompt',
+            });
+            testAutomationIds.push(automationId);
+            const conversationId = await triggerAndGetConversation(page, automationId);
+            await page.request.put(`/api/automations/${automationId}`, { data: { chatModelId: models[0]!.id } });
+
+            await page.request.put(`/api/automations/${automationId}`, { data: { name: 'Renamed Routine II' } });
+
+            expect((await readAutomation(page, automationId)).chatModelId).toBe(models[0]!.id);
+            expect(await conversationModel(page, conversationId)).toBe(models[0]!.id);
+        });
+
+        test("a routine's first conversation starts on the routine's model", async ({ page }) => {
+            const models = await availableModels(page);
+            test.skip(models.length === 0, 'no chat models configured in this environment');
+
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'First Run Model Routine',
+                prompt: 'Test prompt',
+            });
+            testAutomationIds.push(automationId);
+            // Pinned before the routine has ever run, so the conversation is born with it.
+            await page.request.put(`/api/automations/${automationId}`, { data: { chatModelId: models[0]!.id } });
+
+            const conversationId = await triggerAndGetConversation(page, automationId);
+
+            expect(await conversationModel(page, conversationId)).toBe(models[0]!.id);
+        });
+
+        test('a pinned routine can be put back on the default', async ({ page }) => {
+            const models = await availableModels(page);
+            test.skip(models.length === 0, 'no chat models configured in this environment');
+
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'Unpinned Model Routine',
+                prompt: 'Test prompt',
+            });
+            testAutomationIds.push(automationId);
+
+            const pinned = await page.request.put(`/api/automations/${automationId}`, {
+                data: { chatModelId: models[0]!.id },
+            });
+            expect(pinned.ok()).toBe(true);
+            expect((await readAutomation(page, automationId)).chatModelId).toBe(models[0]!.id);
+
+            await automationsPage.goto();
+            await automationsPage.openAutomationDetail('Unpinned Model Routine');
+            await automationsPage.clickEditButton();
+            await automationsPage.detailModal.locator('.automation-model-select').selectOption({ value: '' });
+            await automationsPage.saveAutomation();
+
+            expect((await readAutomation(page, automationId)).chatModelId).toBeNull();
+        });
+    });
 });

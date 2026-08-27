@@ -1,0 +1,2 @@
+ALTER TABLE "automation" ADD COLUMN "chat_model_id" integer;--> statement-breakpoint
+ALTER TABLE "automation" ADD CONSTRAINT "automation_chat_model_id_chat_model_id_fk" FOREIGN KEY ("chat_model_id") REFERENCES "public"."chat_model"("id") ON DELETE set null ON UPDATE no action;

@@ -6,6 +6,7 @@ import { X, Loader2, Calendar, Clock, ChevronDown, ChevronRight } from 'lucide-r
 import type { FrequencyType, DayOfWeek } from '../../types/automations';
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
 import { apiFetch } from '../../utils/api';
+import { useModels } from '../../hooks/useModels';
 
 interface CreateAutomationModalProps {
     onClose: () => void;
@@ -43,8 +44,15 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
     const [time, setTime] = useState('12:00');
 
     // Form state
+    const [chatModelId, setChatModelId] = useState<number | null>(null);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
+
+    const { models, defaultModel } = useModels();
+    const defaultModelName = defaultModel?.friendlyName || defaultModel?.name;
+    const defaultModelLabel = defaultModelName
+        ? t('automations.defaultModel', { model: defaultModelName })
+        : t('automations.defaultModelUnknown');
 
     const canSubmit = instructions.trim().length > 0 && !isCreating;
 
@@ -92,6 +100,7 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
             const body: Record<string, unknown> = {
                 name,
                 prompt: instructions,
+                chatModelId,
             };
 
             // Only include trigger config if schedule is enabled
@@ -171,6 +180,25 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
                             rows={4}
                             className="instructions-textarea"
                         />
+                    </div>
+
+                    {/* Model Section - defaults to whichever model the user is on */}
+                    <div className="form-section">
+                        <div className="form-section-header">
+                            <h3>{t('automations.model')}</h3>
+                        </div>
+                        <select
+                            value={chatModelId ?? ''}
+                            onChange={(e) => setChatModelId(e.target.value ? Number(e.target.value) : null)}
+                            className="automation-model-select"
+                        >
+                            <option value="">{defaultModelLabel}</option>
+                            {models.map(model => (
+                                <option key={model.id} value={model.id}>
+                                    {model.friendlyName || model.name}
+                                </option>
+                            ))}
+                        </select>
                     </div>
 
                     {/* Schedule Section - Optional, collapsible */}

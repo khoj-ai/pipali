@@ -56,6 +56,8 @@ const createAutomationSchema = z.object({
     triggerConfig: triggerConfigSchema.nullable().optional(),
     maxExecutionsPerDay: z.number().min(1).optional(),
     maxExecutionsPerHour: z.number().min(1).optional(),
+    // Null follows the user's default model.
+    chatModelId: z.number().nullable().optional(),
 });
 
 const confirmationResponseSchema = z.object({
@@ -154,6 +156,7 @@ automations.get('/', async (c) => {
         conversationId: automation.conversationId,
         maxExecutionsPerDay: automation.maxExecutionsPerDay,
         maxExecutionsPerHour: automation.maxExecutionsPerHour,
+        chatModelId: automation.chatModelId,
         lastExecutedAt: automation.lastExecutedAt?.toISOString(),
         nextScheduledAt: automation.nextScheduledAt?.toISOString(),
         createdAt: automation.createdAt.toISOString(),
@@ -198,6 +201,7 @@ automations.post('/', zValidator('json', createAutomationSchema), async (c) => {
             triggerConfig: (data.triggerConfig as TriggerConfig) || null,
             maxExecutionsPerDay: data.maxExecutionsPerDay,
             maxExecutionsPerHour: data.maxExecutionsPerHour,
+            chatModelId: data.chatModelId ?? null,
             status: 'active',
         })
         .returning();
@@ -238,6 +242,14 @@ automations.put('/:id', zValidator('json', createAutomationSchema.partial()), as
     if (data.name && automation.conversationId) {
         await db.update(Conversation)
             .set({ title: `Routine: ${automation.name}` })
+            .where(eq(Conversation.id, automation.conversationId));
+    }
+
+    // And its model when that changes, so the picker in the routine's conversation does
+    // not contradict the routine. Absent leaves it alone; null follows the user's default.
+    if (data.chatModelId !== undefined && automation.conversationId) {
+        await db.update(Conversation)
+            .set({ chatModelId: automation.chatModelId })
             .where(eq(Conversation.id, automation.conversationId));
     }
 

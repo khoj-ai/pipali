@@ -273,7 +273,10 @@ export class AutomationsPage {
      * Select frequency in edit mode
      */
     async selectFrequency(frequency: 'Hour' | 'Day' | 'Week' | 'Month'): Promise<void> {
-        const frequencySelect = this.detailModal.locator(Selectors.frequencySelect).first();
+        // The frequency itself sits directly in the selector; the day and minute pickers
+        // that share its class are nested a level deeper.
+        const frequencySelect = this.detailModal
+            .locator(`.frequency-selector > .frequency-row > ${Selectors.frequencySelect}`);
         await frequencySelect.selectOption({ label: frequency });
     }
 

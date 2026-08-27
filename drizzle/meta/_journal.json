@@ -183,6 +183,13 @@
       "when": 1786090355464,
       "tag": "0025_polite_arachne",
       "breakpoints": true
+    },
+    {
+      "idx": 26,
+      "version": "7",
+      "when": 1787823861980,
+      "tag": "0026_automation_chat_model",
+      "breakpoints": true
     }
   ]
 }

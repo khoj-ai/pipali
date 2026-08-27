@@ -34,6 +34,8 @@ export type AutomationInfo = {
     maxIterations?: number;
     maxExecutionsPerDay?: number;
     maxExecutionsPerHour?: number;
+    /** Model this routine runs on. Null or absent follows the user's default. */
+    chatModelId?: number | null;
     lastExecutedAt?: string;
     nextScheduledAt?: string;
     createdAt: string;

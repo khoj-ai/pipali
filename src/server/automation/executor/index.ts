@@ -339,7 +339,8 @@ async function getOrCreateAutomationConversation(
         'pipali-automation',
         '1.0.0',
         'default',
-        `Routine: ${automation.name}`
+        `Routine: ${automation.name}`,
+        automation.chatModelId ?? undefined,
     );
 
     // Link the conversation to the automation (bidirectional)
@@ -428,6 +429,8 @@ async function runExecution(
             clientMessageId: executionId,
             confirmationPreferences: createEmptyPreferences(),
             confirmationPersistence,
+            // Unset follows the user's default, resolved per run rather than pinned here.
+            chatModelId: automation.chatModelId ?? undefined,
         });
 
         // Update execution as completed

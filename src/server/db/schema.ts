@@ -299,6 +299,10 @@ export const Automation = pgTable('automation', {
     // The conversation stores the ATIF trajectory, giving the agent context across runs
     conversationId: uuid('conversation_id').references(() => Conversation.id, { onDelete: 'set null' }),
 
+    // Model this routine runs on. Null follows the user's default, so a routine only
+    // pins a model when asked to. Cleared if that model goes away.
+    chatModelId: integer('chat_model_id').references(() => ChatModel.id, { onDelete: 'set null' }),
+
     // Execution limits
     maxExecutionsPerDay: integer('max_executions_per_day'),
     maxExecutionsPerHour: integer('max_executions_per_hour'),

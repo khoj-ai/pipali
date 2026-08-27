@@ -1,13 +1,14 @@
 // Modal for viewing, editing, and deleting an automation
 
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, Trash2, Calendar, Clock, Pencil, Save, AlertCircle, Send, MessageSquare, Zap, ChevronDown, ChevronRight } from 'lucide-react';
+import { X, Loader2, Trash2, Calendar, Clock, Pencil, Save, AlertCircle, Send, MessageSquare, Zap, ChevronDown, ChevronRight, Bot } from 'lucide-react';
 import type { AutomationInfo, FrequencyType, DayOfWeek, AutomationPendingConfirmation } from '../../types/automations';
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
 import { DiffView } from '../tool-views/DiffView';
 import { shortenHomePath } from '../../utils/formatting';
 import { apiFetch } from '../../utils/api';
 import { useTranslation } from 'react-i18next';
+import { useModels } from '../../hooks/useModels';
 import type { TFunction } from 'i18next';
 import { formatTime, formatDayOfWeek, formatDayOfMonth } from './utils';
 
@@ -181,9 +182,18 @@ export function AutomationDetailModal({
     const [time, setTime] = useState(initialParsed.time);
     const [name, setName] = useState(automation.name);
     const [instructions, setInstructions] = useState(automation.prompt);
+    const [chatModelId, setChatModelId] = useState<number | null>(automation.chatModelId ?? null);
 
     // Schedule toggle for edit mode (initialized from automation's current state)
     const [editHasSchedule, setEditHasSchedule] = useState(!!automation.triggerType && !!automation.triggerConfig);
+
+    const { models, defaultModel } = useModels();
+    const defaultModelName = defaultModel?.friendlyName || defaultModel?.name;
+    const defaultModelLabel = defaultModelName
+        ? t('automations.defaultModel', { model: defaultModelName })
+        : t('automations.defaultModelUnknown');
+    const pinnedModel = models.find(model => model.id === automation.chatModelId);
+    const modelLabel = pinnedModel ? pinnedModel.friendlyName || pinnedModel.name : defaultModelLabel;
 
     const isActive = automation.status === 'active';
     const hasSchedule = automation.triggerType && automation.triggerConfig;
@@ -221,6 +231,7 @@ export function AutomationDetailModal({
             const body: Record<string, unknown> = {
                 name: name.trim().slice(0, 100),
                 prompt: instructions,
+                chatModelId,
             };
 
             // Only include trigger config if schedule is enabled
@@ -430,8 +441,16 @@ export function AutomationDetailModal({
                             </div>
 
                             <div className="automation-detail-section">
+                                <h3>{t('automations.model')}</h3>
+                                <div className="automation-detail-row automation-detail-model">
+                                    <Bot size={16} />
+                                    <span>{modelLabel}</span>
+                                </div>
+                            </div>
+
+                            <div className="automation-detail-section">
                                 <h3>{t('automations.schedule')}</h3>
-                                <div className="automation-detail-schedule">
+                                <div className="automation-detail-row automation-detail-schedule">
                                     <Calendar size={16} />
                                     <span>{formatSchedule(automation, t)}</span>
                                 </div>
@@ -474,6 +493,22 @@ export function AutomationDetailModal({
                                     rows={4}
                                     className="instructions-textarea"
                                 />
+                            </div>
+
+                            <div className="automation-detail-section">
+                                <h3>{t('automations.model')}</h3>
+                                <select
+                                    value={chatModelId ?? ''}
+                                    onChange={(e) => setChatModelId(e.target.value ? Number(e.target.value) : null)}
+                                    className="automation-model-select"
+                                >
+                                    <option value="">{defaultModelLabel}</option>
+                                    {models.map(model => (
+                                        <option key={model.id} value={model.id}>
+                                            {model.friendlyName || model.name}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
 
                             {/* Schedule Section - Optional, collapsible */}
