@@ -6,7 +6,7 @@
  */
 
 import type { User } from '../db/schema';
-import type { ConfirmationPreferences, ConfirmationContext } from '../processor/confirmation';
+import type { ConfirmationPreferences, ConfirmationContext, ConfirmationPersistence } from '../processor/confirmation';
 import type { QueuedMessage, StopReason } from '../routes/ws/message-types';
 import { type ConversationEventBus, type RunHandle, createRunHandle } from './conversation-event-bus';
 import { runResearchWithConversation, ResearchPausedError } from '../processor/research-runner';
@@ -36,8 +36,8 @@ export interface ExecuteRunOptions {
     confirmationPreferences: ConfirmationPreferences;
     chatModelId?: number;
     chatModelAlias?: string;
-    /** Override the confirmation context (e.g., for automation hybrid confirmations) */
-    confirmationContextOverride?: ConfirmationContext;
+    /** Record this run's confirmations so they outlive the socket carrying them (automations) */
+    confirmationPersistence?: ConfirmationPersistence;
 }
 
 /**
@@ -146,7 +146,7 @@ async function persistUserMessage(
  * Handles queued messages by looping internally.
  */
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
-    const { bus, conversationId, user, confirmationPreferences, confirmationContextOverride } = options;
+    const { bus, conversationId, user, confirmationPreferences, confirmationPersistence } = options;
     let userMessage: string | undefined = options.userMessage;
     let runId = options.runId;
     let clientMessageId = options.clientMessageId;
@@ -205,8 +205,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             userMessage = undefined;
         }
 
-        const confirmationContext: ConfirmationContext = confirmationContextOverride ?? {
-            requestConfirmation: createConfirmationCallback(bus, conversationId, runHandle),
+        const confirmationContext: ConfirmationContext = {
+            requestConfirmation: createConfirmationCallback(bus, conversationId, runHandle, confirmationPersistence),
             preferences: confirmationPreferences,
         };
 

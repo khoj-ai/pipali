@@ -8,7 +8,7 @@
 import type { Command, CommandContext } from './index';
 import type { ClientMessage, ConfirmationResponseCommand } from '../message-types';
 import { getBus } from '../../../events/conversation-event-bus';
-import { handleConfirmationResponse } from '../confirmation-manager';
+import { resolveConfirmationOnBus } from '../confirmation-manager';
 import { createChildLogger } from '../../../logger';
 
 const log = createChildLogger({ component: 'confirmation-response' });
@@ -38,18 +38,6 @@ export const ConfirmationResponseHandler: Command<ConfirmationResponseCommand> =
             return;
         }
 
-        const resolvedIds = handleConfirmationResponse(runHandle, response);
-        for (const requestId of resolvedIds) {
-            bus.publish({
-                type: 'confirmation_resolved',
-                conversationId,
-                runId: runHandle.runId,
-                data: {
-                    requestId,
-                    selectedOptionId: response.selectedOptionId,
-                    timestamp: response.timestamp,
-                },
-            });
-        }
+        resolveConfirmationOnBus(bus, runHandle, response);
     },
 };

@@ -92,14 +92,25 @@ mock.module(dbSchemaModule, () => {
             serverId: 'mcp_oauth_state.server_id',
             $inferSelect: {},
         },
-        Automation: { $inferSelect: {} },
-        AutomationExecution: { $inferSelect: {} },
+        Automation: {
+            id: 'automation.id',
+            userId: 'automation.userId',
+            conversationId: 'automation.conversationId',
+            $inferSelect: {},
+        },
+        AutomationExecution: {
+            id: 'automation_execution.id',
+            automationId: 'automation_execution.automationId',
+            status: 'automation_execution.status',
+            $inferSelect: {},
+        },
         PendingConfirmation: {
             id: 'id',
             executionId: 'executionId',
             request: 'request',
             status: 'status',
             expiresAt: 'expiresAt',
+            respondedAt: 'respondedAt',
             $inferSelect: {},
         },
         // Sandbox settings table with column references
@@ -142,7 +153,13 @@ mock.module(dbModule, () => {
             select() {
                 return {
                     from(table: unknown) {
-                        return {
+                        const builder = {
+                            innerJoin() {
+                                return builder;
+                            },
+                            leftJoin() {
+                                return builder;
+                            },
                             where(condition: unknown) {
                                 const adapter = getUnitDb();
                                 if (adapter?.select) {
@@ -151,6 +168,7 @@ mock.module(dbModule, () => {
                                 throw new Error('DB disabled in unit tests');
                             },
                         };
+                        return builder;
                     },
                 };
             },

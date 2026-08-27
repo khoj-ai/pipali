@@ -13,6 +13,8 @@ import {
     type ConfirmationRequest,
     type ConfirmationResponse,
     type ConfirmationCallback,
+    type ConfirmationOutcome,
+    type ConfirmationPersistence,
     CONFIRMATION_OPTIONS,
     CONFIRMATION_TIMEOUT_MS,
 } from '../../processor/confirmation';
@@ -33,13 +35,49 @@ function getConfirmationKey(request: ConfirmationRequest): string {
 /**
  * Create a confirmation callback that publishes requests to the bus.
  * All subscribers see the request; first response wins.
+ *
+ * A run that also persists its confirmations passes a `persistence` hook. Recording is a
+ * side effect of the one request path, never a replacement for it, so a persisted
+ * confirmation still reaches a watching client in the same tick it is raised.
  */
 export function createConfirmationCallback(
     bus: ConversationEventBus,
     conversationId: string,
     runHandle: RunHandle,
+    persistence?: ConfirmationPersistence,
 ): ConfirmationCallback {
     return async (request: ConfirmationRequest): Promise<ConfirmationResponse> => {
+        if (persistence) {
+            try {
+                await persistence.onRequest(request);
+            } catch (err) {
+                // Losing the record costs the routines page its copy. It must not also
+                // cost the watching client their dialog.
+                log.error({
+                    err,
+                    requestId: request.requestId,
+                    conversationId,
+                }, 'Could not record confirmation request');
+            }
+        }
+
+        const settle = (outcome: ConfirmationOutcome) => {
+            persistence?.onSettled(request, outcome).catch(err => log.error({
+                err,
+                requestId: request.requestId,
+                conversationId,
+            }, 'Could not record confirmation outcome'));
+        };
+
+        // Recording holds the request for a moment, and a stop landing in that window sweeps
+        // the pending confirmations before this one joins them. Registering it now would
+        // leave a dialog nothing is waiting on.
+        if (runHandle.abortController.signal.aborted) {
+            const stopped = new Error('Research stopped');
+            settle({ status: 'abandoned', reason: stopped.message });
+            throw stopped;
+        }
+
         return new Promise((resolve, reject) => {
             // Nobody may be watching - a delegated task can still be going after the app
             // is closed - so give up eventually rather than holding the run forever.
@@ -50,6 +88,7 @@ export function createConfirmationCallback(
                     conversationId,
                     runId: runHandle.runId,
                 }, 'Confirmation timed out');
+                settle({ status: 'expired' });
                 reject(new Error('Confirmation timeout expired'));
             }, CONFIRMATION_TIMEOUT_MS);
 
@@ -58,10 +97,12 @@ export function createConfirmationCallback(
                 request,
                 resolve: (response) => {
                     clearTimeout(timeout);
+                    settle({ status: 'answered', response });
                     resolve(response);
                 },
                 reject: (error) => {
                     clearTimeout(timeout);
+                    settle({ status: 'abandoned', reason: error.message });
                     reject(error);
                 },
             });
@@ -140,6 +181,38 @@ export function handleConfirmationResponse(
                 });
             }
         }
+    }
+
+    return resolvedIds;
+}
+
+/**
+ * Answer a confirmation and tell everyone watching the conversation it is settled.
+ *
+ * Both doors onto a confirmation - the WebSocket the dialog answers on, and the HTTP
+ * endpoint the routines page answers on - come through here, so whichever arrives second
+ * finds nothing left to resolve.
+ *
+ * Returns the requests that were settled, including any auto-approved alongside.
+ */
+export function resolveConfirmationOnBus(
+    bus: ConversationEventBus,
+    runHandle: RunHandle,
+    response: ConfirmationResponse,
+): string[] {
+    const resolvedIds = handleConfirmationResponse(runHandle, response);
+
+    for (const requestId of resolvedIds) {
+        bus.publish({
+            type: 'confirmation_resolved',
+            conversationId: bus.conversationId,
+            runId: runHandle.runId,
+            data: {
+                requestId,
+                selectedOptionId: response.selectedOptionId,
+                timestamp: response.timestamp,
+            },
+        });
     }
 
     return resolvedIds;

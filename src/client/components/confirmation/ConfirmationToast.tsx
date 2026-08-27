@@ -28,7 +28,10 @@ export function ConfirmationToast({
     const [guidanceText, setGuidanceText] = useState('');
 
     const { request, source, expiresAt, key } = confirmation;
-    const isAutomation = source.type === 'automation';
+    // A routine's confirmation reads as the routine's whether it arrived live on the
+    // conversation or was polled for from the routines page.
+    const isAutomation = source.type === 'automation' || (source.type === 'chat' && !!source.isRoutine);
+    const sourceLabel = source.type === 'automation' ? source.automationName : source.conversationTitle;
     const isAgentQuestion = request.operation === 'ask_user';
 
     // Get structured command info from context (for shell_command operations)
@@ -82,7 +85,7 @@ export function ConfirmationToast({
                             onKeyDown={isClickable ? (e) => { if (e.key === 'Enter') handleNavigate(); } : undefined}
                         >
                             <Bot size={12} />
-                            {source.automationName}
+                            {sourceLabel}
                         </span>
                     ) : (
                         <span

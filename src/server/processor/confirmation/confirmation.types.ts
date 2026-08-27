@@ -202,3 +202,22 @@ export interface ConfirmationPreferences {
     /** Operations that user has chosen to skip confirmations for */
     skipConfirmationFor: Set<string>;
 }
+
+/**
+ * How a confirmation request ended.
+ */
+export type ConfirmationOutcome =
+    | { status: 'answered'; response: ConfirmationResponse }
+    | { status: 'expired' }
+    | { status: 'abandoned'; reason: string };
+
+/**
+ * Side effects a run attaches to its confirmations so a request outlives the socket
+ * carrying it. Automations record theirs, which is how the routines page can answer a
+ * confirmation raised by a run nobody is watching. Delivery and resolution stay on the
+ * conversation's event bus either way.
+ */
+export interface ConfirmationPersistence {
+    onRequest(request: ConfirmationRequest): Promise<void>;
+    onSettled(request: ConfirmationRequest, outcome: ConfirmationOutcome): Promise<void>;
+}

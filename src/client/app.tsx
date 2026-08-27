@@ -252,6 +252,12 @@ const App = () => {
             voiceCompanionRef.current?.onConfirmationRequest(request, convId, runId);
         },
         onConfirmationResolved: (requestId, convId) => {
+            // Drop the polled copy of a routine's confirmation too, so answering the live
+            // one doesn't leave the dialog to reappear until the next poll.
+            setAutomationConfirmations(prev => {
+                const remaining = prev.filter(c => c.request.requestId !== requestId);
+                return remaining.length === prev.length ? prev : remaining;
+            });
             voiceCompanionRef.current?.onConfirmationResponded(requestId, convId);
         },
         onRunStarted: (convId) => {
@@ -827,11 +833,18 @@ const App = () => {
                 const data = await res.json();
                 const newConfirmations: AutomationPendingConfirmation[] = data.confirmations || [];
 
+                // A confirmation from a routine this client is watching already announced
+                // itself live, so the poll finding it again is not news.
+                const announcedLive = new Set<string>();
+                for (const queue of pendingConfirmationsRef.current.values()) {
+                    for (const item of queue) announcedLive.add(item.request.requestId);
+                }
+
                 // Notify for any new confirmations that weren't in the previous state
                 setAutomationConfirmations(prev => {
                     const prevIds = new Set(prev.map(c => c.id));
                     for (const confirmation of newConfirmations) {
-                        if (!prevIds.has(confirmation.id)) {
+                        if (!prevIds.has(confirmation.id) && !announcedLive.has(confirmation.request.requestId)) {
                             // New confirmation - send OS notification with conversation ID for navigation
                             notifyConfirmationRequest(
                                 confirmation.request,
@@ -1599,10 +1612,10 @@ const App = () => {
     };
 
     // Transform chat confirmation to standard format
-    const toChatConfirmation = useCallback((convId: string, request: ConfirmationRequest, convTitle: string): PendingConfirmation => ({
+    const toChatConfirmation = useCallback((convId: string, request: ConfirmationRequest, convTitle: string, isRoutine: boolean): PendingConfirmation => ({
         key: `chat-${convId}-${request.requestId}`,
         request,
-        source: { type: 'chat', conversationId: convId, conversationTitle: convTitle },
+        source: { type: 'chat', conversationId: convId, conversationTitle: convTitle, isRoutine },
     }), []);
 
     // Transform automation confirmation to standard format
@@ -1628,10 +1641,16 @@ const App = () => {
             const conv = conversations.find(c => c.id === convId);
             const convTitle = conv?.title || t('tasks.backgroundTask');
             for (const item of queue) {
-                chatConfirmations.push(toChatConfirmation(convId, item.request, convTitle));
+                chatConfirmations.push(toChatConfirmation(convId, item.request, convTitle, !!conv?.isAutomation));
             }
         }
-        const automationConfirmationsList = automationConfirmations.map(toAutomationConfirmation);
+        // A routine's confirmation arrives live on its conversation and is polled for
+        // separately, so the same request can show up twice. The live copy is answerable
+        // over the open socket, so it wins.
+        const liveRequestIds = new Set(chatConfirmations.map(c => c.request.requestId));
+        const automationConfirmationsList = automationConfirmations
+            .filter(c => !liveRequestIds.has(c.request.requestId))
+            .map(toAutomationConfirmation);
         return [...chatConfirmations, ...automationConfirmationsList];
     }, [pendingConfirmations, automationConfirmations, conversations, toChatConfirmation, toAutomationConfirmation]);
 

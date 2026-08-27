@@ -10,11 +10,12 @@ import { Automation, AutomationExecution, Conversation, PendingConfirmation, Use
 import { eq, and, gte, sql } from 'drizzle-orm';
 import { atifConversationService } from '../../processor/conversation/atif/atif.service';
 import type { TriggerEventData } from '../types';
-import type { ConfirmationContext } from '../../processor/confirmation';
-import { createEmptyPreferences, CONFIRMATION_TIMEOUT_MS } from '../../processor/confirmation';
+import type { ConfirmationOutcome, ConfirmationPersistence } from '../../processor/confirmation';
+import { createEmptyPreferences, CONFIRMATION_OPTIONS, CONFIRMATION_TIMEOUT_MS } from '../../processor/confirmation';
 import type { ConfirmationRequest, ConfirmationResponse } from '../../processor/confirmation/confirmation.types';
-import { createStandardConfirmationOptions } from '../../processor/confirmation/confirmation.types';
-import { getOrCreateBus } from '../../events/conversation-event-bus';
+import { getBus, getOrCreateBus } from '../../events/conversation-event-bus';
+import { stopConversationRun } from '../../events/conversation-runs';
+import { resolveConfirmationOnBus } from '../../routes/ws/confirmation-manager';
 import { executeRun } from '../../events/run-executor';
 import { createChildLogger } from '../../logger';
 
@@ -27,8 +28,6 @@ const MAX_CONCURRENT = 3;
 const MAX_RETRIES = 2;
 const RETRY_DELAYS = [15000, 30000]; // 15s, 30s
 
-// Confirmation timeout (24 hours)
-
 // Execution queue (in-memory for MVP)
 interface QueuedExecution {
     automationId: string;
@@ -38,16 +37,9 @@ interface QueuedExecution {
 
 const executionQueue: QueuedExecution[] = [];
 
-// Currently running executions
-const runningExecutions = new Map<string, AbortController>();
-
-// Pending confirmations waiting for user response
-const pendingConfirmations = new Map<string, {
-    resolve: (response: ConfirmationResponse) => void;
-    reject: (error: Error) => void;
-    executionId: string;
-    automationId: string;
-}>();
+// Currently running executions, by automation. The conversation lands once the run has
+// one, and is how cancelling reaches the run and the confirmations it is blocked on.
+const runningExecutions = new Map<string, { conversationId?: string }>();
 
 /**
  * Check if automation has exceeded rate limits
@@ -199,8 +191,7 @@ async function runExecutionWithRetry(
             if (
                 errorMessage === 'Confirmation timeout expired' ||
                 errorMessage === 'Automation not found' ||
-                errorMessage === 'User not found' ||
-                errorMessage === 'Automation cancelled'
+                errorMessage === 'User not found'
             ) {
                 log.info(`Non-retryable error for ${executionId}: ${errorMessage}`);
                 return;
@@ -248,71 +239,79 @@ function buildPromptWithContext(
 }
 
 /**
- * Create confirmation context that queues confirmations for user approval
+ * Record an automation's confirmations, so one raised while nobody is watching the run is
+ * still answerable later from the routines page.
+ *
+ * The request itself travels the conversation's event bus like any other, so a client
+ * watching the routine gets the dialog the moment the run asks.
  */
-function createAutomationConfirmationContext(executionId: string, automationId: string): ConfirmationContext {
-    // Create preferences for this automation execution
-    // Automations start with empty preferences (always ask for confirmation)
-    const preferences = createEmptyPreferences();
+export function createAutomationConfirmationPersistence(executionId: string): ConfirmationPersistence {
+    const rowByRequest = new Map<string, string>();
 
     return {
-        preferences,
-        requestConfirmation: async (request: ConfirmationRequest): Promise<ConfirmationResponse> => {
-            log.info(`Confirmation requested for execution ${executionId}`);
-
-            // Update execution status
+        async onRequest(request: ConfirmationRequest): Promise<void> {
             await db.update(AutomationExecution)
                 .set({ status: 'awaiting_confirmation' })
                 .where(eq(AutomationExecution.id, executionId));
 
-            // Use standard options (guidance is now sent independently via the guidance field)
-            const automationRequest: ConfirmationRequest = {
-                ...request,
-                options: createStandardConfirmationOptions(),
-            };
-
-            // Store pending confirmation in database
-            const expiresAt = new Date(Date.now() + CONFIRMATION_TIMEOUT_MS);
-            const insertResult = await db.insert(PendingConfirmation)
+            const [row] = await db.insert(PendingConfirmation)
                 .values({
                     executionId,
-                    request: automationRequest,
+                    request,
                     status: 'pending',
-                    expiresAt,
+                    expiresAt: new Date(Date.now() + CONFIRMATION_TIMEOUT_MS),
                 })
-                .returning();
+                .returning({ id: PendingConfirmation.id });
 
-            const pendingConfirmation = insertResult[0];
-            if (!pendingConfirmation) {
-                throw new Error('Failed to create pending confirmation');
-            }
+            if (row) rowByRequest.set(request.requestId, row.id);
+        },
 
-            // Create promise that will be resolved when user responds
-            return new Promise((resolve, reject) => {
-                pendingConfirmations.set(pendingConfirmation.id, {
-                    resolve,
-                    reject,
-                    executionId,
-                    automationId,
-                });
-
-                // Set timeout for expiration
-                setTimeout(async () => {
-                    const pending = pendingConfirmations.get(pendingConfirmation.id);
-                    if (pending) {
-                        pendingConfirmations.delete(pendingConfirmation.id);
-
-                        // Update database
-                        await db.update(PendingConfirmation)
-                            .set({ status: 'expired' })
-                            .where(eq(PendingConfirmation.id, pendingConfirmation.id));
-
-                        pending.reject(new Error('Confirmation timeout expired'));
-                    }
-                }, CONFIRMATION_TIMEOUT_MS);
-            });
+        async onSettled(request: ConfirmationRequest, outcome: ConfirmationOutcome): Promise<void> {
+            const rowId = rowByRequest.get(request.requestId);
+            if (!rowId) return;
+            rowByRequest.delete(request.requestId);
+            await recordConfirmationOutcome(rowId, executionId, outcome);
         },
     };
+}
+
+/**
+ * Close out a recorded confirmation and move its execution on.
+ *
+ * A run abandons its confirmations when it is stopped or interrupted; the row is no longer
+ * actionable either way, so it retires as expired.
+ */
+async function recordConfirmationOutcome(
+    confirmationId: string,
+    executionId: string,
+    outcome: ConfirmationOutcome,
+): Promise<void> {
+    const answered = outcome.status === 'answered';
+    const selectedOptionId = answered ? outcome.response.selectedOptionId : undefined;
+    // Guidance declines the operation but keeps the run going, so only a hard denial ends it.
+    const proceeding = selectedOptionId === CONFIRMATION_OPTIONS.YES
+        || selectedOptionId === CONFIRMATION_OPTIONS.YES_DONT_ASK
+        || selectedOptionId === CONFIRMATION_OPTIONS.GUIDANCE;
+
+    // The row is the lock between the two doors onto this confirmation: whichever answer
+    // lands second leaves it already settled and stops here.
+    const [settled] = await db.update(PendingConfirmation)
+        .set(answered
+            ? { status: proceeding ? 'approved' : 'denied', respondedAt: new Date() }
+            : { status: 'expired' })
+        .where(and(
+            eq(PendingConfirmation.id, confirmationId),
+            eq(PendingConfirmation.status, 'pending'),
+        ))
+        .returning({ id: PendingConfirmation.id });
+
+    if (!settled || !answered) return;
+
+    await db.update(AutomationExecution)
+        .set(proceeding
+            ? { status: 'running' }
+            : { status: 'cancelled', completedAt: new Date(), errorMessage: 'User denied confirmation' })
+        .where(eq(AutomationExecution.id, executionId));
 }
 
 /**
@@ -370,8 +369,8 @@ async function runExecution(
         return;
     }
 
-    const abortController = new AbortController();
-    runningExecutions.set(automationId, abortController);
+    const running: { conversationId?: string } = {};
+    runningExecutions.set(automationId, running);
 
     try {
         // Get automation details
@@ -405,6 +404,7 @@ async function runExecution(
 
         // Get or create the automation's conversation
         const conversationId = await getOrCreateAutomationConversation(automation, user);
+        running.conversationId = conversationId;
 
         // Build the prompt with trigger context
         const contextualPrompt = buildPromptWithContext(automation.prompt, triggerData);
@@ -412,8 +412,9 @@ async function runExecution(
         // Always create bus so WS observers can subscribe mid-run
         const bus = getOrCreateBus(conversationId);
 
-        // Use DB-based confirmations for automations (24h timeout, persisted across restarts)
-        const confirmationContext = createAutomationConfirmationContext(executionId, automationId);
+        // Automations record their confirmations (24h window, answerable from the routines
+        // page) on top of the bus every run publishes them on.
+        const confirmationPersistence = createAutomationConfirmationPersistence(executionId);
 
         const runId = crypto.randomUUID();
         await executeRun({
@@ -426,7 +427,7 @@ async function runExecution(
             runId,
             clientMessageId: executionId,
             confirmationPreferences: createEmptyPreferences(),
-            confirmationContextOverride: confirmationContext,
+            confirmationPersistence,
         });
 
         // Update execution as completed
@@ -482,62 +483,49 @@ async function markExecutionFailed(executionId: string, errorMessage: string): P
 }
 
 /**
- * Respond to a pending confirmation
+ * Answer a recorded confirmation, by its row id, from outside the run's conversation.
+ *
+ * The waiting run owns the promise, so the answer is handed to it on the bus and settles
+ * the row through the same path a dialog's answer takes. Without a run still waiting -
+ * the server restarted under it, or it moved on - only the record is closed out.
  */
 export async function respondToConfirmation(
     confirmationId: string,
     response: ConfirmationResponse
 ): Promise<boolean> {
-    // Check if it exists in DB first
-    const [dbPending] = await db.select()
+    const [pending] = await db.select({
+        status: PendingConfirmation.status,
+        request: PendingConfirmation.request,
+        executionId: PendingConfirmation.executionId,
+        conversationId: Automation.conversationId,
+    })
         .from(PendingConfirmation)
+        .innerJoin(AutomationExecution, eq(PendingConfirmation.executionId, AutomationExecution.id))
+        .innerJoin(Automation, eq(AutomationExecution.automationId, Automation.id))
         .where(eq(PendingConfirmation.id, confirmationId));
 
-    if (!dbPending) {
+    if (!pending) {
         log.error(`Confirmation not found: ${confirmationId}`);
         return false;
     }
 
-    if (dbPending.status !== 'pending') {
+    if (pending.status !== 'pending') {
         log.error(`Confirmation already processed: ${confirmationId}`);
         return false;
     }
 
-    // Determine status based on response
-    const isApproved = response.selectedOptionId === 'yes' || response.selectedOptionId === 'yes_dont_ask';
-    const hasGuidance = response.selectedOptionId === 'guidance';
-    const confirmationStatus = isApproved || hasGuidance ? 'approved' : 'denied';
+    // Callers address the row; the run knows the request it raised.
+    const answer: ConfirmationResponse = { ...response, requestId: pending.request.requestId };
 
-    await db.update(PendingConfirmation)
-        .set({
-            status: confirmationStatus,
-            respondedAt: new Date(),
-        })
-        .where(eq(PendingConfirmation.id, confirmationId));
-
-    // Update execution status based on response
-    if (isApproved || hasGuidance) {
-        // Either approved or has guidance - continue execution
-        await db.update(AutomationExecution)
-            .set({ status: 'running' })
-            .where(eq(AutomationExecution.id, dbPending.executionId));
-    } else {
-        // Hard denial - mark execution as cancelled
-        await db.update(AutomationExecution)
-            .set({ status: 'cancelled', completedAt: new Date(), errorMessage: 'User denied confirmation' })
-            .where(eq(AutomationExecution.id, dbPending.executionId));
+    const bus = pending.conversationId ? getBus(pending.conversationId) : undefined;
+    const runHandle = bus?.activeRun;
+    if (bus && runHandle?.pendingConfirmations.has(answer.requestId)) {
+        resolveConfirmationOnBus(bus, runHandle, answer);
+        return true;
     }
 
-    // If we have an in-memory promise waiting, resolve it
-    const pending = pendingConfirmations.get(confirmationId);
-    if (pending) {
-        pendingConfirmations.delete(confirmationId);
-        pending.resolve(response);
-    } else {
-        // Server may have restarted - the execution is orphaned but DB is updated
-        log.info(`Confirmation ${confirmationId} responded but no in-memory promise (server restart?)`);
-    }
-
+    log.info(`Confirmation ${confirmationId} answered with no run waiting on it`);
+    await recordConfirmationOutcome(confirmationId, pending.executionId, { status: 'answered', response: answer });
     return true;
 }
 
@@ -582,26 +570,20 @@ export async function getPendingConfirmations(userId: number): Promise<Array<{
 }
 
 /**
- * Cancel a running execution and clean up any pending confirmations
+ * Cancel a running execution.
+ *
+ * Stopping the run is what reaches its confirmations: a run blocked on one can only be
+ * freed by rejecting it, which the shared stop path does.
  */
 export function cancelExecution(automationId: string): boolean {
-    // Reject any pending confirmations for this automation
-    for (const [confirmationId, pending] of pendingConfirmations.entries()) {
-        if (pending.automationId === automationId) {
-            pendingConfirmations.delete(confirmationId);
-            pending.reject(new Error('Automation cancelled'));
-        }
-    }
+    const running = runningExecutions.get(automationId);
+    if (!running) return false;
 
-    // Abort the running execution
-    const controller = runningExecutions.get(automationId);
-    if (controller) {
-        controller.abort();
-        // Also remove from running executions immediately to free up the slot
-        runningExecutions.delete(automationId);
-        return true;
-    }
-    return false;
+    // Free the slot immediately so a queued execution can take it.
+    runningExecutions.delete(automationId);
+
+    if (running.conversationId) stopConversationRun(running.conversationId);
+    return true;
 }
 
 /**

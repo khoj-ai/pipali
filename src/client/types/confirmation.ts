@@ -45,7 +45,9 @@ export type ConfirmationRequest = {
 
 // Source of the confirmation - determines visual treatment and response channel
 export type ConfirmationSource =
-    | { type: 'chat'; conversationId: string; conversationTitle: string }
+    // A routine's run raises its confirmations on its conversation like any other run, so a
+    // chat-sourced one can still belong to a routine and is shown as the routine's.
+    | { type: 'chat'; conversationId: string; conversationTitle: string; isRoutine?: boolean }
     | { type: 'automation'; confirmationId: string; automationId: string; automationName: string; executionId: string; conversationId: string | null };
 
 // Pending confirmation type for both chat and automation confirmations
