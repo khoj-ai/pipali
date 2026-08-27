@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.9.0
+
+### 🎁 New
+- Memory — Pipali now remembers things across conversations, so it will tune itself to your preferences, use-cases and environment over time. Review, delete, or turn memories entirely off from Settings → Permissions.
+
+### 🧪 Improve
+- Built-in skills now stay up to date with new app releases (your own edits are kept)
+- Shorter, more readable file paths shown on Windows
+
+### 🛠️ Fix
+- Fix blank app window on newer Linux distros (Arch, Fedora, Debian 13)
+- Fix sign-in and browser links not opening from the Linux app on some desktops
+- Access Pipali over Tailscale or a reverse proxy again (start app with `PIPALI_TRUSTED_HOSTS` env var set to server name)
+- Chats sync after app reconnects (e.g. when your Pipali phone progressive web app wakes from sleep)
+
 ## 0.8.0
 
 ### 🎁 New

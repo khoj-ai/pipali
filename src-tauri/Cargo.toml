@@ -1,6 +1,6 @@
 [package]
 name = "pipali"
-version = "0.8.0"
+version = "0.9.0"
 description = "Pipali - Personal AI for knowledge work. Make work easy."
 authors = ["Khoj"]
 edition = "2021"
