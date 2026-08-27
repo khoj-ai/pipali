@@ -1,5 +1,6 @@
 // Formatting utilities for tool names, arguments, and display
 
+import { CONVERSATION_HEADER, PIPALI_MEMORY_RELATIVE_DIR } from '../../shared';
 import { resolveUidLabel } from './snapshotParser';
 
 /** Format bytes to a human-readable file size string. */
@@ -60,6 +61,12 @@ export function formatToolArgs(toolName: string, args: any): string {
         case 'search_web':
             return args.query ? `${args.query}` : '';
 
+        case 'delegate_task':
+            return args.title || args.message || '';
+
+        case 'stop_process':
+            return args.pid ? `pid ${args.pid}` : '';
+
         default:
             return Object.entries(args)
                 .filter(([k, v]) => v !== undefined && v !== null && v !== '' && k !== 'operation_type')
@@ -73,13 +80,30 @@ export function formatToolArgs(toolName: string, args: any): string {
     }
 }
 
-/**
- * Extract filename from path
- */
+/** Normalize path separators for platform-independent display parsing. */
+function normalizePathSeparators(path: string): string {
+    return path.replace(/\\/g, '/');
+}
+
+/** Extract filename from path. */
 export function getFileName(path: string): string {
     if (!path) return '';
-    const parts = path.split('/');
+    const parts = normalizePathSeparators(path).split('/');
     return parts[parts.length - 1] || path;
+}
+
+const MEMORY_FILE_TOOLS = new Set(['view_file', 'edit_file', 'write_file']);
+
+/** Whether a file tool is operating on Pipali's persistent memory store. */
+function isMemoryFileToolCall(toolName: string, args: any): boolean {
+    if (!MEMORY_FILE_TOOLS.has(toolName) || !args || typeof args !== 'object') return false;
+
+    const filePath = toolName === 'view_file' ? args.path : args.file_path;
+    if (typeof filePath !== 'string') return false;
+
+    const normalized = normalizePathSeparators(filePath).replace(/\/+/g, '/');
+    return normalized.endsWith('.md')
+        && `/${normalized}`.includes(`/${PIPALI_MEMORY_RELATIVE_DIR}/`);
 }
 
 /**
@@ -117,6 +141,12 @@ export function formatToolCallsForSidebar(toolCalls: any[]): string {
                 break;
             case 'search_web':
                 detail = args.query ? ` ${args.query}` : '';
+                break;
+            case 'delegate_task':
+                detail = args.title ? ` ${args.title}` : '';
+                break;
+            case 'stop_process':
+                detail = args.pid ? ` pid ${args.pid}` : '';
                 break;
             case 'generate_image':
                 if (args.prompt) {
@@ -190,7 +220,14 @@ export function getToolCategory(toolName: string): ToolCategory {
         case 'email_user':
             return 'write';
         case 'shell_command':
+        case 'stop_process':
             return 'execute';
+        case 'delegate_task':
+        case 'stop_task':
+            return 'execute';
+        case 'inspect_task':
+        case 'wait_for_tasks':
+            return 'read';
         default:
             if (toolName.startsWith('chrome') || toolName.startsWith('browser'))
                 return 'web';
@@ -210,9 +247,14 @@ export function getFriendlyToolName(toolName: string): string {
         "edit_file": "Edit",
         "write_file": "Write",
         "shell_command": "Shell",
+        "stop_process": "Stop",
         "search_web": "Search",
         "read_webpage": "Read",
         "generate_image": "Generate",
+        "delegate_task": "Delegate",
+        "inspect_task": "Check",
+        "stop_task": "Stop",
+        "wait_for_tasks": "Wait",
     };
     if (friendlyNames[toolName]) return friendlyNames[toolName];
 
@@ -228,6 +270,13 @@ export interface RichToolArgs {
     secondary?: string; // De-emphasized context like "in folder/path"
     url?: string;
     hoverText?: string;
+}
+
+export interface DelegationToolText {
+    background: string;
+    modelTier: (tier: string) => string;
+    waitForTasks: (tasks: string) => string;
+    noRunInProgress: string;
 }
 
 /**
@@ -250,7 +299,14 @@ function splitPath(fullPath: string): [string, string] {
  * File tools return structured primary/secondary text at all detail levels.
  * In outline mode, primary is basename; in full mode, primary includes more context.
  */
-export function formatToolArgsRich(toolName: string, args: any, outline = false, uidMap?: Map<string, { role: string; label: string }>): RichToolArgs | null {
+export function formatToolArgsRich(
+    toolName: string,
+    args: any,
+    outline = false,
+    uidMap?: Map<string, { role: string; label: string }>,
+    delegatedTaskTitles?: Map<string, string>,
+    delegationText?: DelegationToolText,
+): RichToolArgs | null {
     if (!args || typeof args !== 'object') return null;
 
     switch (toolName) {
@@ -263,13 +319,19 @@ export function formatToolArgsRich(toolName: string, args: any, outline = false,
                 const limitStr = args.limit ? `${args.offset + args.limit}` : '';
                 text += ` (lines ${[offsetStr, limitStr].filter(Boolean).join('-')})`;
             }
-            return { text, secondary: folder ? `in ${folder}` : undefined, url: `file://${args.path}`, hoverText: args.path };
+            const secondary = isMemoryFileToolCall(toolName, args)
+                ? 'in memories'
+                : folder ? `in ${folder}` : undefined;
+            return { text, secondary, url: `file://${args.path}`, hoverText: args.path };
         }
         case 'edit_file':
         case 'write_file': {
             if (!args.file_path) return null;
             const [basename, folder] = splitPath(args.file_path);
-            return { text: basename, secondary: folder ? `in ${folder}` : undefined, url: `file://${args.file_path}`, hoverText: args.file_path };
+            const secondary = isMemoryFileToolCall(toolName, args)
+                ? 'in memories'
+                : folder ? `in ${folder}` : undefined;
+            return { text: basename, secondary, url: `file://${args.file_path}`, hoverText: args.file_path };
         }
         case 'list_files': {
             if (!args.path) return null;
@@ -303,6 +365,40 @@ export function formatToolArgsRich(toolName: string, args: any, outline = false,
                 text: displayUrl,
                 url: args.url,
                 hoverText: hoverParts.join(' '),
+            };
+        }
+
+        case 'delegate_task': {
+            // title is a required argument, so the fallback is for a model that skipped it
+            const text = args.title || args.message?.split('\n')[0];
+            if (!text) return null;
+            const secondary = [
+                typeof args.model_tier === 'string'
+                    ? delegationText?.modelTier(args.model_tier) ?? args.model_tier
+                    : undefined,
+                args.run_in_background !== false ? delegationText?.background : undefined,
+            ].filter(Boolean).join(' ');
+            return { text, secondary: secondary || undefined, hoverText: args.message };
+        }
+        case 'wait_for_tasks': {
+            const ids: string[] = Array.isArray(args.conversation_ids)
+                ? args.conversation_ids.filter((id: unknown): id is string => typeof id === 'string')
+                : [];
+            if (ids.length === 0) return null;
+            const tasks = ids.map(id => delegatedTaskTitles?.get(id) ?? id).join(', ');
+            return {
+                text: delegationText?.waitForTasks(tasks) ?? tasks,
+                hoverText: ids.join(', '),
+            };
+        }
+
+        case 'inspect_task':
+        case 'stop_task': {
+            if (typeof args.conversation_id !== 'string') return null;
+            const title = delegatedTaskTitles?.get(args.conversation_id);
+            return {
+                text: title ?? args.conversation_id,
+                hoverText: args.conversation_id,
             };
         }
 
@@ -406,7 +502,11 @@ export function formatToolArgsRich(toolName: string, args: any, outline = false,
  * Shorten home directory path for display
  */
 export function shortenHomePath(path: string | undefined): string {
-    return path?.replace(/^\/Users\/[^/]+/, '~') || '~';
+    if (!path) return '~';
+    return normalizePathSeparators(path).replace(
+        /^(?:[a-zA-Z]:\/Users|\/(?:Users|home))\/[^/]+/,
+        '~',
+    );
 }
 
 // UUID generator that works in non-secure contexts (e.g., HTTP on non-localhost)
@@ -435,4 +535,81 @@ export function generateDeterministicId(prefix: string, content: string): string
     }
     // Append string length to get ~43 bit (vs 32) collision resistance
     return `${prefix}-${hash >>> 0}-${content.length}`;
+}
+
+/**
+ * The conversation a delegate_task step started, so the step can link to it.
+ *
+ * A backgrounded task reports back as JSON; one waited on in the foreground comes
+ * back as the same text summary inspect_task produces, led by its conversation id.
+ * That header's pattern comes from the module that writes it, so the two cannot drift.
+ */
+export function getDelegatedConversationId(toolName: string, toolResult?: string): string | undefined {
+    if (toolName !== 'delegate_task' || !toolResult) {
+        return undefined;
+    }
+
+    try {
+        const started = JSON.parse(toolResult) as { conversation_id?: unknown };
+        if (typeof started.conversation_id === 'string') {
+            return started.conversation_id;
+        }
+    } catch {
+        // Not the JSON shape, so it is the text summary below
+    }
+
+    return toolResult.match(CONVERSATION_HEADER)?.[1];
+}
+
+/** Match delegated conversation handles in tool results back to their user-facing titles. */
+export function buildDelegatedTaskTitleMap(thoughts: Array<{
+    type: string;
+    toolName?: string;
+    toolArgs?: Record<string, unknown>;
+    toolResult?: string;
+}>): Map<string, string> {
+    const titles = new Map<string, string>();
+    for (const thought of thoughts) {
+        if (thought.type !== 'tool_call' || thought.toolName !== 'delegate_task') continue;
+        const conversationId = getDelegatedConversationId(thought.toolName, thought.toolResult);
+        const title = thought.toolArgs?.title;
+        if (conversationId && typeof title === 'string' && title.trim()) {
+            titles.set(conversationId, title);
+        }
+    }
+    return titles;
+}
+
+/** Remove internal handles and redundant acknowledgements from delegation tool output. */
+export function formatDelegationToolResult(
+    toolName: string,
+    result?: string,
+    noRunInProgress?: string,
+): string | null | undefined {
+    if (!result || !['delegate_task', 'inspect_task', 'wait_for_tasks', 'stop_task'].includes(toolName)) {
+        return result;
+    }
+
+    if (toolName === 'delegate_task') {
+        try {
+            const parsed = JSON.parse(result) as { status?: unknown; conversation_id?: unknown };
+            if (parsed.status === 'started' && typeof parsed.conversation_id === 'string') return null;
+        } catch {
+            // Foreground delegation returns the same readable summary as wait_for_tasks.
+        }
+    }
+
+    if (/^Stopped conversation [0-9a-f-]+\.$/i.test(result)) return null;
+    if (/^Conversation [0-9a-f-]+ had no run in progress\.$/i.test(result)) {
+        return noRunInProgress ?? result;
+    }
+
+    return result
+        .split('\n\n---\n\n')
+        .map(summary => {
+            const [firstLine, ...rest] = summary.split('\n');
+            return firstLine && CONVERSATION_HEADER.test(firstLine) ? rest.join('\n') : summary;
+        })
+        .join('\n\n---\n\n')
+        .trim();
 }

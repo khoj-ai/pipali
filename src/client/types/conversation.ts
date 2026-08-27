@@ -11,6 +11,8 @@ export type ConversationSummary = {
     chatModelId?: number | null;
     isActive?: boolean;
     isAutomation?: boolean;
+    /** Set when this conversation is a task delegated by another conversation. */
+    parentConversationId?: string | null;
     isPinned?: boolean;
     latestReasoning?: string;
     matchSnippet?: string;

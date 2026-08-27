@@ -69,6 +69,7 @@ export function generateChatmlMessagesWithContext(
     fastMode?: boolean,
 ): ChatMessage[] {
     const messages: ChatMessage[] = [];
+    let hasProcessedConversationStep = false;
 
     if (systemMessage) {
         messages.push({
@@ -90,13 +91,23 @@ export function generateChatmlMessagesWithContext(
     }
 
     for (const msg of stepsToProcess) {
-        if (msg.source === 'user') {
+        if (msg.source === 'system') {
+            // Skip base system messages. They're injected via `systemMessage`, not inline in conversation history.
+            if (!hasProcessedConversationStep) continue;
+            messages.push({
+                type: 'message',
+                role: 'system',
+                content: msg.message || '',
+            } as Responses.EasyInputMessage);
+        } else if (msg.source === 'user') {
+            if (!hasProcessedConversationStep) hasProcessedConversationStep = true;
             messages.push({
                 type: 'message',
                 role: 'user',
                 content: msg.message || '',
             } as Responses.EasyInputMessage);
         } else if (msg.source === 'agent') {
+            if (!hasProcessedConversationStep) hasProcessedConversationStep = true;
             // Include raw output items from previous response for multi-turn passthrough
             const rawOutput = msg.extra?.raw_output as Responses.ResponseOutputItem[] | undefined;
             if (rawOutput && Array.isArray(rawOutput) && rawOutput.length > 0) {

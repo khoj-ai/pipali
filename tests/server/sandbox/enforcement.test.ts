@@ -200,6 +200,31 @@ describe('Sandbox OS Enforcement', () => {
         await SandboxManager.reset();
     });
 
+    testFn('should let curl run under the default config', async () => {
+        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
+        const { getDefaultConfig, buildRuntimeConfig } = await import('../../../src/server/sandbox/config');
+
+        // Uses the real default config: macOS curl links LibreSSL, which reads
+        // /etc/ssl/openssl.cnf on startup even for plain HTTP
+        const defaultConfig = buildRuntimeConfig(getDefaultConfig());
+        await SandboxManager.initialize(defaultConfig);
+
+        const command = 'curl -sS -o /dev/null -w "%{http_code}" https://api.github.com';
+        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', defaultConfig);
+
+        const proc = Bun.spawn(['bash', '-c', wrappedCmd], { stdout: 'pipe', stderr: 'pipe' });
+        const exitCode = await proc.exited;
+        const stdout = await new Response(proc.stdout).text();
+        const stderr = await new Response(proc.stderr).text();
+
+        expect(stderr).not.toContain('openssl.cnf');
+        expect(stderr).not.toContain('certificate verify locations');
+        expect(exitCode).toBe(0);
+        expect(stdout.trim()).toBe('200');
+
+        await SandboxManager.reset();
+    });
+
     testFn('should annotate stderr with sandbox violation info', async () => {
         const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
 

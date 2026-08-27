@@ -672,6 +672,51 @@ async function stripBundledWaylandClient(extractRoot: string) {
     }
 }
 
+/** 
+ * Replace the bundled xdg-open with a hand-off to the host's own xdg-open.
+ *
+ * Tauri's bundler copies /usr/bin/xdg-open from the CI build host into the
+ * AppImage when the opener API is enabled (tauri-apps/tauri#4265), and AppRun
+ * puts AppDir/usr/bin first on PATH, so every "open in browser" in the app
+ * (Tauri opener plugin, the auth flows' Bun.spawn('xdg-open'), MCP OAuth)
+ * runs that ubuntu-22.04 copy inside the AppImage's runtime environment.
+ * Two things go wrong (khoj-ai/pipali#52):
+ * - xdg-utils 1.1.x predates Plasma 6: with KDE_SESSION_VERSION=6 its KDE
+ *   branch matches no case and reports success without launching anything,
+ *   so "Continue with Google" waits forever.
+ * - Whatever xdg-open launches inherits the AppImage's LD_LIBRARY_PATH, GTK
+ *   theme/backend and module caches: host helpers crash on the bundled
+ *   libraries (kde-open, gio: symbol lookup errors) and the browser gets the
+ *   bundled GTK setup.
+ * scripts/appimage/xdg-open strips the AppImage additions from the
+ * environment and execs the host's xdg-open, keeping the build host's copy
+ * (renamed xdg-open.bundled) only as a fallback for hosts without xdg-utils.
+ */
+async function installHostXdgOpenHandoff(extractRoot: string) {
+    const binDir = path.join(extractRoot, "usr", "bin");
+    const xdgOpen = path.join(binDir, "xdg-open");
+    const bundledFallback = path.join(binDir, "xdg-open.bundled");
+
+    const hasBundled = await fs
+        .access(xdgOpen)
+        .then(() => true)
+        .catch(() => false);
+    if (hasBundled) {
+        await fs.rename(xdgOpen, bundledFallback);
+    }
+    await fs.copyFile(path.join(ROOT_DIR, "scripts", "appimage", "xdg-open"), xdgOpen);
+    await fs.chmod(xdgOpen, 0o755);
+
+    // A hand-off that does not even parse would silently break every browser
+    // open in the AppImage; catch that at build time.
+    const checkProc = Bun.spawn(["sh", "-n", xdgOpen], { stdout: "ignore", stderr: "inherit" });
+    if ((await checkProc.exited) !== 0) throw new Error("Installed xdg-open hand-off failed to parse");
+
+    console.log(
+        `   Installed host xdg-open hand-off${hasBundled ? " (build-host copy kept as usr/bin/xdg-open.bundled)" : ""}`,
+    );
+}
+
 /**
  * Repack the produced AppImage with pristine sidecar binaries (bun, uv, uvx).
  *
@@ -755,6 +800,7 @@ async function repackAppImageWithPristineSidecars(debug: boolean, platform: Plat
         console.log(`   Restored pristine ${name}`);
     }
 
+    await installHostXdgOpenHandoff(extractRoot);
     await stripBundledWaylandClient(extractRoot);
 
     // Without this verify step the build could regress to silently shipping a

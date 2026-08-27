@@ -101,6 +101,13 @@ export const User = pgTable('user', {
   ...dbBaseModel,
 });
 
+export const MemorySettings = pgTable('memory_settings', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }).unique(),
+    memoriesEnabled: boolean('memories_enabled').default(true).notNull(),
+    ...dbBaseModel,
+});
+
 export const GoogleUser = pgTable('google_user', {
     id: serial('id').primaryKey(),
     userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
@@ -215,10 +222,14 @@ export const Conversation = pgTable('conversation', {
     title: text('title'),
     // Optional link to automation - if set, this conversation belongs to an automation
     automationId: uuid('automation_id'),
+    // Set when an agent delegated this conversation. Doubles as the delegated marker.
+    parentConversationId: uuid('parent_conversation_id'),
     chatModelId: integer('chat_model_id').references(() => ChatModel.id),
     isPinned: boolean('is_pinned').default(false).notNull(),
     ...dbBaseModel,
-});
+}, (table) => [
+    index('conversation_parent_conversation_id_idx').on(table.parentConversationId),
+]);
 
 export const ConversationStep = pgTable('conversation_step', {
     conversationId: uuid('conversation_id').notNull().references(() => Conversation.id, { onDelete: 'cascade' }),

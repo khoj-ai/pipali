@@ -8,6 +8,7 @@
 import path from 'path';
 import os from 'os';
 import { mkdir } from 'fs/promises';
+import { parseFrontmatter } from '../frontmatter';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'user-context' });
@@ -19,69 +20,11 @@ export interface UserContext {
     instructions?: string;
 }
 
-interface UserContextFrontmatter {
-    name?: string;
-    location?: string;
-    language?: string;
-}
-
 /**
  * Get the path to the USER.md file (~/.pipali/USER.md)
  */
 export function getUserContextPath(): string {
     return process.env.PIPALI_USER_CONTEXT_PATH || path.join(os.homedir(), '.pipali', 'USER.md');
-}
-
-/**
- * Parse YAML frontmatter from USER.md content
- * Uses simple regex-based parsing for name and location fields
- */
-function parseFrontmatter(content: string): UserContextFrontmatter | null {
-    // Match frontmatter between --- markers
-    const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!frontmatterMatch) {
-        return null;
-    }
-
-    const yaml = frontmatterMatch[1];
-    if (!yaml) {
-        return null;
-    }
-
-    const result: UserContextFrontmatter = {};
-
-    // Parse name field - handles quoted and unquoted values
-    const nameMatch = yaml.match(/^name:\s*["']?([^"'\n]+?)["']?\s*$/m);
-    if (nameMatch && nameMatch[1]) {
-        result.name = nameMatch[1].trim();
-    }
-
-    // Parse location field - handles quoted and unquoted values
-    const locationMatch = yaml.match(/^location:\s*["']?([^"'\n]+?)["']?\s*$/m);
-    if (locationMatch && locationMatch[1]) {
-        result.location = locationMatch[1].trim();
-    }
-
-    // Parse language field
-    const languageMatch = yaml.match(/^language:\s*["']?([^"'\n]+?)["']?\s*$/m);
-    if (languageMatch && languageMatch[1]) {
-        result.language = languageMatch[1].trim();
-    }
-
-    return result;
-}
-
-/**
- * Extract instructions (markdown body) from USER.md content
- */
-function extractInstructions(content: string): string {
-    // Find the end of frontmatter
-    const frontmatterEnd = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
-    if (frontmatterEnd) {
-        return content.slice(frontmatterEnd[0].length).trim();
-    }
-    // No frontmatter, entire content is instructions
-    return content.trim();
 }
 
 /**
@@ -97,14 +40,14 @@ export async function loadUserContext(): Promise<UserContext> {
 
     try {
         const content = await file.text();
-        const frontmatter = parseFrontmatter(content);
-        const instructions = extractInstructions(content);
+        const parsed = parseFrontmatter(content);
 
         return {
-            name: frontmatter?.name,
-            location: frontmatter?.location,
-            language: frontmatter?.language,
-            instructions: instructions || undefined,
+            name: parsed?.fields.name,
+            location: parsed?.fields.location,
+            language: parsed?.fields.language,
+            // Without frontmatter the whole file is instructions
+            instructions: (parsed ? parsed.body : content.trim()) || undefined,
         };
     } catch (err) {
         log.error({ err, path: userContextPath }, 'Failed to load user context');

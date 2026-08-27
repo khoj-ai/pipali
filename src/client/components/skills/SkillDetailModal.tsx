@@ -1,7 +1,7 @@
-// Modal for viewing and editing skill details with delete option
+// Modal for viewing and editing skill details, with delete and reset-to-default options
 
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, Trash2, FileText, Save } from 'lucide-react';
+import { X, Loader2, Trash2, FileText, Save, RotateCcw } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import type { SkillInfo } from '../../types/skills';
 import { apiFetch } from '../../utils/api';
@@ -16,8 +16,10 @@ interface SkillDetailModalProps {
 export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: SkillDetailModalProps) {
     const { t } = useTranslation();
     const [isDeleting, setIsDeleting] = useState(false);
+    const [isResetting, setIsResetting] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+    // Both destructive actions confirm in the footer, so one at a time can be pending
+    const [confirming, setConfirming] = useState<'delete' | 'reset' | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [isLoadingInstructions, setIsLoadingInstructions] = useState(true);
 
@@ -94,13 +96,38 @@ export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: Skill
             } else {
                 const data = await res.json();
                 setError(data.error || t('skills.failedToDelete'));
-                setShowDeleteConfirm(false);
+                setConfirming(null);
             }
         } catch (e) {
             setError(t('skills.failedToDelete'));
-            setShowDeleteConfirm(false);
+            setConfirming(null);
         } finally {
             setIsDeleting(false);
+        }
+    };
+
+    const handleReset = async () => {
+        setIsResetting(true);
+        setError(null);
+
+        try {
+            const res = await apiFetch(`/api/skills/${encodeURIComponent(skill.name)}/reset`, {
+                method: 'POST',
+            });
+
+            if (res.ok) {
+                onUpdated?.();
+                onClose();
+            } else {
+                const data = await res.json();
+                setError(data.error || t('skills.failedToReset'));
+                setConfirming(null);
+            }
+        } catch (e) {
+            setError(t('skills.failedToReset'));
+            setConfirming(null);
+        } finally {
+            setIsResetting(false);
         }
     };
 
@@ -114,8 +141,8 @@ export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: Skill
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
             if (e.key === 'Escape') {
-                if (showDeleteConfirm) {
-                    setShowDeleteConfirm(false);
+                if (confirming) {
+                    setConfirming(null);
                 } else {
                     onClose();
                 }
@@ -123,7 +150,7 @@ export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: Skill
         };
         document.addEventListener('keydown', handleKeyDown);
         return () => document.removeEventListener('keydown', handleKeyDown);
-    }, [onClose, showDeleteConfirm]);
+    }, [onClose, confirming]);
 
     return (
         <div className="modal-backdrop" onClick={handleBackdropClick}>
@@ -181,46 +208,79 @@ export function SkillDetailModal({ skill, onClose, onDeleted, onUpdated }: Skill
                 </div>
 
                 <div className="modal-actions skill-detail-actions">
-                    {showDeleteConfirm ? (
+                    {confirming ? (
                         <>
-                            <span className="delete-confirm-text">{t('skills.deleteSkillConfirm')}</span>
+                            <span className="delete-confirm-text">
+                                {confirming === 'delete' ? t('skills.deleteSkillConfirm') : t('skills.resetSkillConfirm')}
+                            </span>
                             <button
                                 type="button"
-                                onClick={() => setShowDeleteConfirm(false)}
+                                onClick={() => setConfirming(null)}
                                 className="btn-secondary"
-                                disabled={isDeleting}
+                                disabled={isDeleting || isResetting}
                             >
                                 {t('common.cancel')}
                             </button>
-                            <button
-                                type="button"
-                                onClick={handleDelete}
-                                className="btn-danger"
-                                disabled={isDeleting}
-                            >
-                                {isDeleting ? (
-                                    <>
-                                        <Loader2 size={16} className="spinning" />
-                                        <span>{t('skills.deleting')}</span>
-                                    </>
-                                ) : (
-                                    <>
-                                        <Trash2 size={16} />
-                                        <span>{t('common.delete')}</span>
-                                    </>
-                                )}
-                            </button>
+                            {confirming === 'delete' ? (
+                                <button
+                                    type="button"
+                                    onClick={handleDelete}
+                                    className="btn-danger"
+                                    disabled={isDeleting}
+                                >
+                                    {isDeleting ? (
+                                        <>
+                                            <Loader2 size={16} className="spinning" />
+                                            <span>{t('skills.deleting')}</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <Trash2 size={16} />
+                                            <span>{t('common.delete')}</span>
+                                        </>
+                                    )}
+                                </button>
+                            ) : (
+                                <button
+                                    type="button"
+                                    onClick={handleReset}
+                                    className="btn-danger"
+                                    disabled={isResetting}
+                                >
+                                    {isResetting ? (
+                                        <>
+                                            <Loader2 size={16} className="spinning" />
+                                            <span>{t('skills.resetting')}</span>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <RotateCcw size={16} />
+                                            <span>{t('skills.resetToDefault')}</span>
+                                        </>
+                                    )}
+                                </button>
+                            )}
                         </>
                     ) : (
                         <>
                             <button
                                 type="button"
-                                onClick={() => setShowDeleteConfirm(true)}
+                                onClick={() => setConfirming('delete')}
                                 className="btn-danger-outline"
                             >
                                 <Trash2 size={16} />
                                 <span>{t('common.delete')}</span>
                             </button>
+                            {skill.modified && (
+                                <button
+                                    type="button"
+                                    onClick={() => setConfirming('reset')}
+                                    className="btn-secondary"
+                                >
+                                    <RotateCcw size={16} />
+                                    <span>{t('skills.resetToDefault')}</span>
+                                </button>
+                            )}
                             <button
                                 type="button"
                                 onClick={handleSave}

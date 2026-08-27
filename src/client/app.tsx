@@ -29,6 +29,7 @@ import { useFocusManagement, useFileDrop, useModels, useSidecar, useWebSocketCha
 import { setApiBaseUrl, apiFetch } from "./utils/api";
 import { generateUUID, generateDeterministicId, getToolCategory, type ToolCategory } from "./utils/formatting";
 import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupNotificationClickListener, warmAudioContext } from "./utils/notifications";
+import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
 import { useVoiceSettings } from "./hooks/useVoiceSettings";
 import { useVoiceCompanion } from "./hooks/useVoiceCompanion";
 import type { VoiceMode } from "./utils/voice/voice-config";
@@ -51,6 +52,20 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 
 // Page types
 type PageType = 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools' | 'settings';
+
+/** The page a URL names, for both the first render and any history entry returned to */
+function pageFromUrl(): PageType {
+    const params = new URLSearchParams(window.location.search);
+    // Show chat page if conversationId is present (takes priority over path)
+    if (params.get('conversationId') || params.get('q')) return 'chat';
+    switch (window.location.pathname) {
+        case '/skills': return 'skills';
+        case '/automations': return 'automations';
+        case '/tools': return 'mcp-tools';
+        case '/settings': return 'settings';
+        default: return 'home';
+    }
+}
 type ConversationModelId = number | null;
 
 // Sidebar starts collapsed to an icon rail; the user's choice sticks across sessions
@@ -58,6 +73,7 @@ const SIDEBAR_STORAGE_KEY = 'pipali-sidebar-open';
 
 const App = () => {
     const { t } = useTranslation();
+    const [mainViewZoom, setMainViewZoom] = useState(1);
 
     // Sidecar configuration (for Tauri desktop app)
     const { baseUrl, wsBaseUrl } = useSidecar();
@@ -95,17 +111,11 @@ const App = () => {
     const [authStatus, setAuthStatus] = useState<AuthStatus | null>(null);
     const [userName, setUserName] = useState<string | undefined>(undefined);
     // Current page state - determine from URL
-    const [currentPage, setCurrentPage] = useState<PageType>(() => {
-        const params = new URLSearchParams(window.location.search);
-        // Show chat page if conversationId is present (takes priority over path)
-        if (params.get('conversationId') || params.get('q')) return 'chat';
-        const path = window.location.pathname;
-        if (path === '/skills') return 'skills';
-        if (path === '/automations') return 'automations';
-        if (path === '/tools') return 'mcp-tools';
-        if (path === '/settings') return 'settings';
-        return 'home';
-    });
+    const [currentPage, setCurrentPage] = useState<PageType>(pageFromUrl);
+
+    // Set while restoring from a history entry, so the effect that mirrors the
+    // conversation into the URL does not push the entry back on and trap the user
+    const restoringFromHistoryRef = useRef(false);
 
     const updateSidebarOpen = useCallback((open: boolean) => {
         setSidebarOpen(open);
@@ -153,6 +163,8 @@ const App = () => {
     const defaultModelRef = useRef<ChatModelInfo | null>(null);
     // Track isConnected for callbacks that may close over stale state
     const isConnectedRef = useRef(false);
+    // Distinguishes the first connect from a reconnect
+    const hasConnectedRef = useRef(false);
     // When on home page, observe active conversations so confirmations and live state
     // (e.g., needs_input) can appear without opening the conversation.
     const observedActiveConversationsRef = useRef<Set<string>>(new Set());
@@ -175,6 +187,7 @@ const App = () => {
     // WebSocket callbacks below reach them without a forward reference.
     const voiceCompanionRef = useRef<{
         onConfirmationRequest: (request: ConfirmationRequest, convId: string, runId: string) => void;
+        onConfirmationResponded: (requestId: string, convId: string) => void;
         onTaskComplete: (response: string, convId: string) => void;
         onStepStart: (convId: string) => void;
     } | null>(null);
@@ -238,10 +251,21 @@ const App = () => {
             notifyConfirmationRequest(request, conv?.title, convId);
             voiceCompanionRef.current?.onConfirmationRequest(request, convId, runId);
         },
+        onConfirmationResolved: (requestId, convId) => {
+            voiceCompanionRef.current?.onConfirmationResponded(requestId, convId);
+        },
+        onRunStarted: (convId) => {
+            // Delegated tasks and routines create their conversation server-side, so a run
+            // on an unknown conversation is the sidebar's first sight of it.
+            if (!conversationsRef.current.some(c => c.id === convId)) fetchConversations();
+        },
         onTaskComplete: (_request, response, convId) => {
             const state = conversationStatesRef.current.get(convId);
             const userRequest = state?.messages.filter(m => m.role === 'user').pop()?.content;
-            notifyTaskComplete(userRequest, response, convId);
+            // A delegated task reports back to the conversation that started it, which
+            // announces itself when it responds. Only that end result is news to the user.
+            const isDelegated = !!conversationsRef.current.find(c => c.id === convId)?.parentConversationId;
+            if (!isDelegated) notifyTaskComplete(userRequest, response, convId);
             voiceCompanionRef.current?.onTaskComplete(response, convId);
             setBillingAlerts([]);
             fetchConversations();
@@ -580,6 +604,37 @@ const App = () => {
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [scheduleTextareaFocus, syncSelectedModelForConversation]);
 
+    useEffect(() => {
+        const updateZoom = (change?: number) => setMainViewZoom(current => {
+            if (change === undefined) return 1;
+            return Math.min(Math.max(Math.round((current + change) * 10) / 10, 0.2), 10);
+        });
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (!(event.metaKey || event.ctrlKey)) return;
+
+            const change = event.key === '-' || event.key === '_' ? -0.2
+                : event.key === '=' || event.key === '+' ? 0.2
+                    : event.key === '0' ? undefined
+                        : null;
+            if (change === null) return;
+
+            event.preventDefault();
+            updateZoom(change);
+        };
+        const handleWheel = (event: WheelEvent) => {
+            if (!event.ctrlKey) return;
+            event.preventDefault();
+            updateZoom(event.deltaY < 0 ? 0.2 : -0.2);
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        window.addEventListener('wheel', handleWheel, { passive: false });
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            window.removeEventListener('wheel', handleWheel);
+        };
+    }, []);
+
     // Focus textarea on various state changes
     useEffect(() => { scheduleTextareaFocus(); }, [conversationId]);
     useEffect(() => {
@@ -592,8 +647,12 @@ const App = () => {
     useEffect(() => {
         const prevId = prevConversationIdRef.current;
 
-        // Update URL - when viewing a conversation, always use root path
-        if (conversationId) {
+        // Update URL - when viewing a conversation, always use root path.
+        // A conversation restored by going back is already the URL we are on; pushing
+        // it again would re-add the entry the user just left and strand them there.
+        if (restoringFromHistoryRef.current) {
+            restoringFromHistoryRef.current = false;
+        } else if (conversationId) {
             const url = new URL(window.location.href);
             url.pathname = '/';
             url.searchParams.set('conversationId', conversationId);
@@ -637,6 +696,18 @@ const App = () => {
         if (!conversationId || !isConnected) return;
         observe(conversationId);
     }, [conversationId, isConnected, observe]);
+
+    // A dropped connection misses every event published while it was down, and the bus replays
+    // nothing once the run it belonged to has finished. Re-read persisted state on reconnect.
+    useEffect(() => {
+        if (!isConnected) return;
+        const isReconnect = hasConnectedRef.current;
+        hasConnectedRef.current = true;
+        if (!isReconnect) return; // the first connect is covered by the fetches on mount
+
+        fetchConversations();
+        if (conversationIdRef.current) void fetchHistory(conversationIdRef.current);
+    }, [isConnected]);
 
     useEffect(() => {
         if (!isConnected) return;
@@ -903,6 +974,25 @@ const App = () => {
             };
 
             for (const msg of data.history) {
+                // Memories recalled for this turn - render collapsed, like compaction.
+                // Blockquoted so bold lines inside memory bodies don't read as new thought headings.
+                if (msg.source === 'system' && msg.extra?.kind === 'memory_recall') {
+                    const recalled = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
+                    const count = Array.isArray(msg.extra?.memory_paths) ? msg.extra.memory_paths.length : 0;
+                    const quoted = recalled
+                        .replace(/^# Memory recalled\n/, '')
+                        .split('\n')
+                        .map((line: string) => line ? `> ${line}` : '>')
+                        .join('\n');
+                    thoughts.push({
+                        type: 'thought',
+                        content: `**${t('thoughts.recalledMemories', { count })}**\n${quoted}`,
+                        id: generateDeterministicId('memory-recall', recalled),
+                        isInternalThought: true,
+                    });
+                    continue;
+                }
+
                 if (msg.source === 'user') {
                     // Check if this is a compaction step - render as thought instead of user message
                     if (msg.extra?.is_compaction === true) {
@@ -1132,6 +1222,13 @@ const App = () => {
     // ===== Conversation Actions =====
 
     // Derive active tasks from conversationStates for home page display
+    // Delegated conversations are reached from the step that started them, not the
+    // sidebar. The open one stays listed so navigating into it does not leave the
+    // sidebar showing nothing for where you are.
+    const sidebarConversations = conversations.filter(
+        conv => !conv.parentConversationId || conv.id === conversationId,
+    );
+
     const getActiveTasks = (): ActiveTask[] => {
         const activeTasks: ActiveTask[] = [];
 
@@ -1139,6 +1236,9 @@ const App = () => {
             const hasPendingConfirmation = (pendingConfirmations.get(convId)?.length ?? 0) > 0;
             if (state.isProcessing || state.isStopped || state.isCompleted || hasPendingConfirmation) {
                 const conv = conversations.find(c => c.id === convId);
+                // A delegated task belongs to the conversation that started it, and shows
+                // there as a step. Home lists work the user began.
+                if (conv?.parentConversationId) return;
                 // Get latest user message from conversation messages or title
                 const latestUserMessage = state.messages
                     .filter(m => m.role === 'user')
@@ -1254,6 +1354,29 @@ const App = () => {
         // Update URL to /settings
         window.history.pushState({}, '', '/settings');
     };
+
+    // Back and forward move between conversations and pages. Without this the URL
+    // changes and the view does not, so leaving a conversation appears to do nothing.
+    useEffect(() => {
+        const restoreFromHistory = () => {
+            const urlConversationId = new URLSearchParams(window.location.search).get('conversationId') || undefined;
+            setCurrentPage(pageFromUrl());
+
+            if (urlConversationId === conversationIdRef.current) return;
+
+            restoringFromHistoryRef.current = true;
+            conversationIdRef.current = urlConversationId;
+            if (urlConversationId) {
+                setChatConversationId(urlConversationId);
+                syncSelectedModelForConversation(urlConversationId);
+            } else {
+                clearConversation();
+            }
+        };
+
+        window.addEventListener('popstate', restoreFromHistory);
+        return () => window.removeEventListener('popstate', restoreFromHistory);
+    }, [setChatConversationId, clearConversation, syncSelectedModelForConversation]);
 
     const selectConversation = (id: string, highlightTerm?: string) => {
         setCurrentPage('chat');
@@ -1436,7 +1559,8 @@ const App = () => {
         const queue = pendingConfirmations.get(convId);
         const pendingConfirmation = queue?.find(c => c.request.requestId === requestId);
         if (!pendingConfirmation || !isConnected) return;
-        respondToConfirmation(convId, pendingConfirmation.runId, requestId, optionId, guidance, attachments);
+        const sent = respondToConfirmation(convId, pendingConfirmation.runId, requestId, optionId, guidance, attachments);
+        if (sent) voiceCompanionRef.current?.onConfirmationResponded(requestId, convId);
     };
 
     const sendCurrentConfirmationResponse = (optionId: string, guidance?: string) => {
@@ -1669,11 +1793,12 @@ const App = () => {
     }
 
     return (
+        <ConversationNavigationContext.Provider value={selectConversation}>
         <ErrorBoundary>
             <div className="app-wrapper">
                 <Sidebar
                     isOpen={sidebarOpen}
-                    conversations={conversations}
+                    conversations={sidebarConversations}
                     conversationStates={conversationStates}
                     pendingConfirmations={sidebarPendingConfirmations}
                     currentConversationId={conversationId}
@@ -1743,7 +1868,7 @@ const App = () => {
                     )}
                     {currentPage === 'chat' && (
                         <ErrorBoundary>
-                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} />
+                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} zoom={mainViewZoom} />
                         </ErrorBoundary>
                     )}
 
@@ -1828,6 +1953,7 @@ const App = () => {
                 />
             </div>
         </ErrorBoundary>
+        </ConversationNavigationContext.Provider>
     );
 };
 

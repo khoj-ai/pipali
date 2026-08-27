@@ -12,9 +12,12 @@ import { type ConversationEventBus, type RunHandle, createRunHandle } from './co
 import { runResearchWithConversation, ResearchPausedError } from '../processor/research-runner';
 import { PlatformBillingError } from '../http/billing-errors';
 import { PlatformAuthError } from '../http/platform-fetch';
-import { atifConversationService } from '../processor/conversation/atif/atif.service';
+import { atifConversationService, type ConversationRole } from '../processor/conversation/atif/atif.service';
 import { buildSystemPrompt } from '../processor/director';
 import { loadUserContext } from '../user-context';
+import { loadMemorySettings } from '../memory/settings';
+import { loadCatalogue } from '../memory';
+import { maybeDream } from '../memory/dream';
 import { isFirstRunEasterEgg, maxIterations as defaultMaxIterations } from '../utils';
 import { setSessionActive, setSessionInactive, updateSessionReasoning } from '../sessions';
 import { createConfirmationCallback } from '../routes/ws/confirmation-manager';
@@ -32,6 +35,7 @@ export interface ExecuteRunOptions {
     clientMessageId: string;
     confirmationPreferences: ConfirmationPreferences;
     chatModelId?: number;
+    chatModelAlias?: string;
     /** Override the confirmation context (e.g., for automation hybrid confirmations) */
     confirmationContextOverride?: ConfirmationContext;
 }
@@ -55,6 +59,14 @@ function isNonEmptyString(value: unknown): value is string {
     return typeof value === 'string' && value.trim().length > 0;
 }
 
+/** A model alias belongs to one queued run; omitting it explicitly returns to the concrete model. */
+function resolveQueuedModel(
+    currentChatModelId: number | undefined,
+    next: Pick<QueuedMessage, 'chatModelId' | 'chatModelAlias'>,
+): [chatModelId: number | undefined, chatModelAlias: string | undefined] {
+    return [next.chatModelId ?? currentChatModelId, next.chatModelAlias];
+}
+
 function ensureUniqueRunId(
     runHandle: RunHandle,
 ): { runId: string; suggestedRunId?: string } {
@@ -73,6 +85,7 @@ function ensureUniqueRunId(
 async function ensureSystemPromptPersisted(
     conversationId: string,
     userId: number,
+    conversationRole: ConversationRole,
     userMessage?: string,
 ): Promise<string | undefined> {
     const conversation = await atifConversationService.getConversation(conversationId);
@@ -88,6 +101,7 @@ async function ensureSystemPromptPersisted(
         : undefined;
 
     const userContext = await loadUserContext();
+    const { memoriesEnabled } = await loadMemorySettings(userId);
     const now = new Date();
     const systemPrompt = await buildSystemPrompt({
         currentDate: now.toLocaleDateString('en-CA'),
@@ -98,6 +112,10 @@ async function ensureSystemPromptPersisted(
         userContext: userContext.instructions,
         provideUpdatesPreamble,
         isFirstEverConversation,
+        conversationRole,
+        // Only reached for a conversation without a system prompt, so this is its baseline
+        memoryCatalogue: memoriesEnabled ? await loadCatalogue() : undefined,
+        memoriesEnabled,
         now,
     });
 
@@ -133,6 +151,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
     let runId = options.runId;
     let clientMessageId = options.clientMessageId;
     let currentChatModelId = options.chatModelId;
+    let currentChatModelAlias = options.chatModelAlias;
     let carryOverQueue: QueuedMessage[] = [];
 
     while (true) {
@@ -168,9 +187,15 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
 
         setSessionActive(conversationId);
 
+        // Resolved per run rather than once, so a conversation that becomes Home or a
+        // delegated task picks up the right framing on its next run.
+        const conversationRole = await atifConversationService
+            .getConversationRole(conversationId, user)
+            .catch(() => 'manual' as ConversationRole);
+
         let systemPromptOverride: string | undefined;
         try {
-            systemPromptOverride = await ensureSystemPromptPersisted(conversationId, user.id, userMessage);
+            systemPromptOverride = await ensureSystemPromptPersisted(conversationId, user.id, conversationRole, userMessage);
         } catch (error) {
             log.error({ err: error, conversationId }, 'Failed to persist system prompt');
         }
@@ -198,7 +223,12 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 confirmationContext,
                 systemPrompt: systemPromptOverride,
                 chatModelId: currentChatModelId,
+                chatModelAlias: currentChatModelAlias,
+                conversationRole,
                 runId: runIdAuthoritative,
+                // Claimed, not copied: what a run leaves unclaimed is what wakes the
+                // conversation once it settles (see parent-inbox).
+                drainInjectedSteps: () => runHandle.injectedSteps.splice(0),
                 onTextDelta: (delta) => {
                     bus.publish({
                         type: 'text_delta',
@@ -287,7 +317,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                     runId = next.runId;
                     clientMessageId = next.clientMessageId;
                     userMessage = next.message;
-                    currentChatModelId = next.chatModelId ?? currentChatModelId;
+                    [currentChatModelId, currentChatModelAlias] = resolveQueuedModel(currentChatModelId, next);
                     carryOverQueue = rest;
                     continue;
                 }
@@ -324,13 +354,17 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                     runId = next.runId;
                     clientMessageId = next.clientMessageId;
                     userMessage = next.message;
-                    currentChatModelId = next.chatModelId ?? currentChatModelId;
+                    [currentChatModelId, currentChatModelAlias] = resolveQueuedModel(currentChatModelId, next);
                     carryOverQueue = rest;
                     continue;
                 }
             }
 
             bus.onRunFinished();
+
+            // A settled run is the moment new material exists and nobody is waiting on
+            // the turn. Whether it is time to consolidate is the dream's own business.
+            void maybeDream(user);
             return;
         } catch (error) {
             if (error instanceof PlatformBillingError) {
@@ -380,7 +414,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                         runId = next.runId;
                         clientMessageId = next.clientMessageId;
                         userMessage = next.message;
-                        currentChatModelId = next.chatModelId ?? currentChatModelId;
+                        [currentChatModelId, currentChatModelAlias] = resolveQueuedModel(currentChatModelId, next);
                         carryOverQueue = rest;
                         continue;
                     }

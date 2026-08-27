@@ -86,6 +86,14 @@
         "tierOther": "其他",
         "recommended": "推荐"
     },
+    "thoughts": {
+        "delegationModel": "交给{{tier}}模型",
+        "delegationBackground": "在后台",
+        "waitForTasks": "等待{{tasks}}",
+        "noRunInProgress": "没有正在运行的任务。",
+        "recalledMemories_one": "已调用 {{count}} 条记忆。",
+        "recalledMemories_other": "已调用 {{count}} 条记忆。"
+    },
     "home": {
         "greetings": {
             "default": [
@@ -295,6 +303,21 @@
         "tabPermissions": "权限",
         "aboutYou": "关于你",
         "aboutYouDescription": "这些信息帮助 Pipali 个性化回复并理解你的情境。",
+        "memories": "记忆",
+        "memoriesDescription": "让 Pipali 记住不同对话中的有用信息。关闭后，今后的对话将不再自动加载记忆。现有的记忆文件和对话不会改变。",
+        "failedToSaveMemories": "无法更新记忆设置",
+        "storedMemories": "已存储的记忆（{{count}} 条）",
+        "deleteAllMemories": "全部删除",
+        "deleteAllMemoriesConfirm": "删除所有记忆？此操作无法撤销。",
+        "deleteMemory": "删除 {{name}}",
+        "deleteMemoryConfirm": "删除这条记忆？",
+        "viewMemory": "查看 {{name}}",
+        "loadingMemories": "正在加载记忆...",
+        "loadingMemory": "正在加载...",
+        "emptyMemory": "这条记忆为空。",
+        "noMemories": "暂无已存储的记忆",
+        "failedToLoadMemories": "无法加载记忆",
+        "failedToDeleteMemories": "无法删除记忆",
         "labelName": "名字",
         "placeholderName": "你的名字",
         "labelLocation": "位置",
@@ -356,7 +379,12 @@
         "saving": "保存中...",
         "save": "保存",
         "failedToSave": "保存技能失败",
-        "failedToDelete": "删除技能失败"
+        "failedToDelete": "删除技能失败",
+        "modified": "已修改",
+        "resetToDefault": "恢复默认",
+        "resetSkillConfirm": "用默认技能替换你的修改？",
+        "resetting": "恢复中...",
+        "failedToReset": "恢复技能失败"
     },
     "automations": {
         "title": "例行任务",

@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, ChevronUp, Globe, FileSearch, Pencil, Terminal, Wrench } from 'lucide-react';
 import type { Thought } from '../../types';
 import { ThoughtItem } from './ThoughtItem';
-import { getToolCategory, type ToolCategory } from '../../utils/formatting';
+import { buildDelegatedTaskTitleMap, getToolCategory, type ToolCategory } from '../../utils/formatting';
 import { parseSnapshotUids } from '../../utils/snapshotParser';
 
 const CATEGORY_ICONS: Record<ToolCategory, React.ComponentType<{ size?: number }>> = {
@@ -126,6 +126,8 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
         return map.size > 0 ? map : undefined;
     }, [thoughts]);
 
+    const delegatedTaskTitles = useMemo(() => buildDelegatedTaskTitleMap(thoughts), [thoughts]);
+
     const collapsedPreviewThoughts = useMemo(() => (
         isStreaming && expandLevel === 0
             ? getCollapsedPreviewThoughts(splitMultiHeadingThoughts(thoughts))
@@ -223,6 +225,7 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
                                     isPreview={true}
                                     showResult={false}
                                     uidMap={uidMap}
+                                    delegatedTaskTitles={delegatedTaskTitles}
                                 />
                             );
                         })}
@@ -251,6 +254,7 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
                                     showResult={showResult}
                                     onToggle={() => toggleItem(thought.id)}
                                     uidMap={uidMap}
+                                    delegatedTaskTitles={delegatedTaskTitles}
                                 />
                             );
                         })}

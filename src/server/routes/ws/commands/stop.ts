@@ -8,8 +8,9 @@
 import type { Command, CommandContext } from './index';
 import type { ClientMessage, StopCommand } from '../message-types';
 import { getBus } from '../../../events/conversation-event-bus';
-import { rejectAllConfirmations } from '../confirmation-manager';
-import { setSessionInactive } from '../../../sessions/activeSessionsStore';
+import { stopConversationRun, stopDelegatedChildren } from '../../../events/conversation-runs';
+import { stopBackgroundProcessesFor } from '../../../events/background-processes';
+import { suspendAutoStart } from '../../../events/parent-inbox';
 import { createChildLogger } from '../../../logger';
 
 const log = createChildLogger({ component: 'stop-command' });
@@ -45,15 +46,21 @@ export const StopCommandHandler: Command<StopCommand> = {
             runId: runHandle.runId,
         }, 'Hard stop requested');
 
-        runHandle.stopMode = 'hard';
-        runHandle.stopReason = 'user_stop';
-        runHandle.queuedMessages = [];
-        runHandle.abortController.abort();
-        rejectAllConfirmations(runHandle, 'Research stopped');
+        // Before stopping: the cascade below makes each child report that it did not
+        // finish, and an unattended conversation wakes to relay that.
+        suspendAutoStart(conversationId);
+        stopConversationRun(conversationId);
 
-        // Immediately mark as inactive so refresh/observe sees no active run.
-        // The run-executor will call these again when it catches the abort — both are idempotent.
-        setSessionInactive(conversationId);
-        bus.activeRun = null;
+        // Stopping is the user's only handle on work Pipali started on its own, so it
+        // reaches delegated children too. Soft interrupts and normal completion do not.
+        const stoppedChildren = await stopDelegatedChildren(conversationId);
+        if (stoppedChildren.length > 0) {
+            log.info({ conversationId, stoppedChildren }, 'Stopped delegated children');
+        }
+
+        const stoppedProcesses = stopBackgroundProcessesFor(conversationId);
+        if (stoppedProcesses.length > 0) {
+            log.info({ conversationId, stoppedProcesses }, 'Stopped background commands');
+        }
     },
 };

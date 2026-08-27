@@ -65,6 +65,154 @@ export function createMcpToolDefinition(tool: McpToolInfo): ToolDefinition {
 }
 
 /**
+ * What one connection attempt tells us about whether to attempt again.
+ * 'retryable' is the network, a server that is down, a machine that just woke:
+ * causes that heal on their own. 'unauthorized' and 'auth_pending' need the user.
+ */
+type McpAttemptOutcome = 'connected' | 'auth_pending' | 'unauthorized' | 'retryable';
+
+/**
+ * Backoff before re-attempting a server that failed, following the retry
+ * schedule the automation executor already uses. The last delay repeats for as
+ * long as the app runs: the user has no way to know a connection died, so
+ * giving up would leave their tools gone until they happened to look.
+ */
+const MCP_RETRY_DELAYS = [5_000, 20_000, 60_000, 300_000]; // 5s, 20s, 1m, 5m
+
+/** Never due again, until a user action clears the entry */
+const PARKED = Number.POSITIVE_INFINITY;
+
+type McpRetryState = { attempts: number; dueAt: number };
+
+/** When each server that is not connected may be attempted again */
+const retrySchedule = new Map<string, McpRetryState>();
+
+/**
+ * Servers with an attempt in flight. Connecting closes any existing client
+ * first, so a sweep landing on a server the startup pass is still working
+ * through would tear down the handshake it is waiting on.
+ */
+const connecting = new Set<string>();
+
+/** Delay before attempt number `attempt` (0-based); the last delay repeats */
+export function mcpRetryDelay(attempt: number): number {
+    return MCP_RETRY_DELAYS[attempt] ?? MCP_RETRY_DELAYS[MCP_RETRY_DELAYS.length - 1]!;
+}
+
+/**
+ * How loudly to report an attempt, given the server's state going into it.
+ *
+ * Only state changes are worth a line. A server that is down all day is
+ * retried on every sweep tick, and one identical error per tick would bury
+ * everything else in the log; the transition into failure already carries the
+ * error, and the transition back out reports the recovery.
+ */
+export function mcpAttemptLogLevel(
+    outcome: McpAttemptOutcome,
+    previous?: McpRetryState,
+): 'info' | 'error' | 'debug' {
+    if (outcome === 'connected') {
+        return 'info';
+    }
+    // Parked servers wait on the user, so re-reporting them says nothing new
+    if (outcome === 'unauthorized' || outcome === 'auth_pending') {
+        if (previous?.dueAt === PARKED) return 'debug';
+        return outcome === 'unauthorized' ? 'error' : 'info';
+    }
+    return previous ? 'debug' : 'error';
+}
+
+/** Report an attempt at the volume its state change warrants */
+function logMcpAttempt(
+    server: McpServerConfig,
+    outcome: McpAttemptOutcome,
+    previous: McpRetryState | undefined,
+    error?: unknown,
+): void {
+    const context = { server: server.name, attempts: (previous?.attempts ?? 0) + 1 };
+    switch (outcome) {
+        case 'connected':
+            if (previous) {
+                log.info(context, 'MCP server reconnected');
+            } else {
+                log.info(`Connected to server: ${server.name}`);
+            }
+            return;
+        case 'auth_pending':
+            log[mcpAttemptLogLevel(outcome, previous)](
+                context, `OAuth authorization pending for server: ${server.name}`);
+            return;
+        case 'unauthorized':
+            log[mcpAttemptLogLevel(outcome, previous)](
+                { err: error, ...context },
+                'MCP server needs authorization; not retrying until it is reconnected from the Tools page');
+            return;
+        case 'retryable':
+            log[mcpAttemptLogLevel(outcome, previous)](
+                { err: error, ...context }, 'Failed to connect to MCP server');
+    }
+}
+
+/** Record what an attempt cost, so the next sweep knows when to try again */
+function noteMcpAttempt(serverName: string, outcome: McpAttemptOutcome, now: number): void {
+    if (outcome === 'connected') {
+        retrySchedule.delete(serverName);
+        return;
+    }
+    const attempts = (retrySchedule.get(serverName)?.attempts ?? 0) + 1;
+    const dueAt = outcome === 'retryable' ? now + mcpRetryDelay(attempts - 1) : PARKED;
+    retrySchedule.set(serverName, { attempts, dueAt });
+}
+
+/**
+ * Connect one server and record the outcome against it.
+ *
+ * Shared by the startup pass and the reconnect sweep so both write the same
+ * lastError and lastConnectedAt, and both classify failures the same way.
+ */
+async function attemptMcpConnection(server: McpServerConfig): Promise<McpAttemptOutcome> {
+    const previous = retrySchedule.get(server.name);
+    connecting.add(server.name);
+    try {
+        const result = await connectMcpServer(server, { oauthInteractive: false });
+        if (result === 'auth_pending') {
+            logMcpAttempt(server, 'auth_pending', previous);
+            return 'auth_pending';
+        }
+
+        await db
+            .update(McpServer)
+            .set({ lastConnectedAt: new Date(), lastError: null })
+            .where(eq(McpServer.id, server.id));
+        logMcpAttempt(server, 'connected', previous);
+        return 'connected';
+    } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        const causeMessage = error instanceof Error && error.cause
+            ? (error.cause instanceof Error ? error.cause.message : String(error.cause))
+            : undefined;
+        const fullError = causeMessage ? `${errorMessage}\nCause: ${causeMessage}` : errorMessage;
+
+        const unauthorized = isMcpOAuthUnauthorizedError(error);
+        const oauthUpdate = unauthorized || server.authType === 'oauth'
+            ? { oauthStatus: 'auth_required' as const }
+            : {};
+
+        // Store the error in the database
+        await db
+            .update(McpServer)
+            .set({ lastError: fullError, ...oauthUpdate })
+            .where(eq(McpServer.id, server.id));
+
+        const outcome = unauthorized ? 'unauthorized' : 'retryable';
+        logMcpAttempt(server, outcome, previous, error);
+        return outcome;
+    } finally {
+        connecting.delete(server.name);
+    }
+}
+
+/**
  * Load and connect to all enabled MCP servers
  */
 export async function loadEnabledMcpServers(): Promise<void> {
@@ -76,41 +224,116 @@ export async function loadEnabledMcpServers(): Promise<void> {
 
     log.info(`Loading ${servers.length} enabled MCP server(s)...`);
 
-    // Connect to each server
-    const connectPromises = servers.map(async (server) => {
-        try {
-            const result = await connectMcpServer(server, { oauthInteractive: false });
-            if (result === 'auth_pending') {
-                log.info(`OAuth authorization pending for server: ${server.name}`);
-                return;
-            }
+    const now = Date.now();
+    await Promise.allSettled(servers.map(async (server) => {
+        noteMcpAttempt(server.name, await attemptMcpConnection(server), now);
+    }));
+}
 
-            log.info(`Connected to server: ${server.name}`);
-            await db
-                .update(McpServer)
-                .set({ lastConnectedAt: new Date(), lastError: null })
-                .where(eq(McpServer.id, server.id));
-        } catch (error) {
-            const errorMessage = error instanceof Error ? error.message : String(error);
-            const causeMessage = error instanceof Error && error.cause
-                ? (error.cause instanceof Error ? error.cause.message : String(error.cause))
-                : undefined;
-            const fullError = causeMessage ? `${errorMessage}\nCause: ${causeMessage}` : errorMessage;
-            log.error({ err: error, server: server.name }, 'Failed to connect to MCP server');
+/**
+ * Re-attempt every enabled server that is not connected and is due another try.
+ *
+ * A failed connection used to be terminal. The server stays out of
+ * activeClients, so every tool snapshot from then on reports - truthfully, and
+ * uselessly - that the user's tools do not exist, and the only ways back were
+ * the Tools page's Reload button and editing the server. A transient network
+ * failure at startup therefore cost the user their MCP tools for as long as it
+ * took them to notice and reconnect by hand.
+ *
+ * Servers already connected are left alone, so this also picks up a connection
+ * that dropped after a successful start. Returns the servers it reconnected.
+ */
+export async function reconnectFailedMcpServers(now: number = Date.now()): Promise<string[]> {
+    const servers = await db
+        .select()
+        .from(McpServer)
+        .where(eq(McpServer.enabled, true));
 
-            const oauthUpdate = isMcpOAuthUnauthorizedError(error) || server.authType === 'oauth'
-                ? { oauthStatus: 'auth_required' as const }
-                : {};
-
-            // Store the error in the database
-            await db
-                .update(McpServer)
-                .set({ lastError: fullError, ...oauthUpdate })
-                .where(eq(McpServer.id, server.id));
-        }
+    const due = servers.filter(server => {
+        if (connecting.has(server.name)) return false;
+        if (activeClients.get(server.name)?.status === 'connected') return false;
+        return (retrySchedule.get(server.name)?.dueAt ?? 0) <= now;
     });
 
-    await Promise.allSettled(connectPromises);
+    const reconnected: string[] = [];
+    await Promise.allSettled(due.map(async (server) => {
+        const outcome = await attemptMcpConnection(server);
+        noteMcpAttempt(server.name, outcome, now);
+        if (outcome === 'connected') {
+            reconnected.push(server.name);
+        }
+    }));
+
+    return reconnected;
+}
+
+/**
+ * Make every server that is merely waiting out a backoff due immediately.
+ *
+ * Backoff assumes the delay was spent trying. Time the machine spent asleep was
+ * not, so a lid opened after eight hours would otherwise leave the user without
+ * their tools for another five minutes while a rung that accrued over sleep
+ * runs down. Parked servers are left alone: waking does not sign anyone in.
+ */
+export function resetMcpRetryBackoff(): void {
+    for (const [serverName, state] of retrySchedule) {
+        if (state.dueAt !== PARKED) {
+            retrySchedule.delete(serverName);
+        }
+    }
+}
+
+/** How often to look for MCP servers that need reconnecting */
+const MCP_RETRY_SWEEP_MS = 15_000;
+
+/**
+ * How many missed sweeps mean the process was not running, rather than merely
+ * running late. Ordinary scheduler jitter under load is a fraction of one
+ * interval; a machine that slept skips many.
+ */
+const MCP_WAKE_GAP_TICKS = 4;
+
+/** Whether the gap between two sweep ticks is too long to be scheduler jitter */
+export function isWakeGap(gapMs: number, intervalMs: number): boolean {
+    return gapMs > intervalMs * MCP_WAKE_GAP_TICKS;
+}
+
+let retrySweep: ReturnType<typeof setInterval> | undefined;
+let sweepInFlight = false;
+
+/**
+ * Start healing MCP connections in the background. Idempotent, so a second
+ * caller cannot leave two sweeps running against the same schedule.
+ */
+export function startMcpRetrySweep(intervalMs: number = MCP_RETRY_SWEEP_MS): void {
+    if (retrySweep) return;
+    let lastTickAt = Date.now();
+    retrySweep = setInterval(() => {
+        const now = Date.now();
+        const gap = now - lastTickAt;
+        lastTickAt = now;
+        // Ticks this far apart mean the process was not running - the machine
+        // slept, or the app was suspended. Whatever the network was doing then,
+        // it is worth one immediate try now rather than after the backoff.
+        if (isWakeGap(gap, intervalMs)) {
+            log.info({ gapMs: gap }, 'Resumed after a gap; retrying failed MCP servers now');
+            resetMcpRetryBackoff();
+        }
+
+        // A slow server must not let the next tick start a second pass over it
+        if (sweepInFlight) return;
+        sweepInFlight = true;
+        reconnectFailedMcpServers()
+            .catch(error => log.warn({ err: error }, 'MCP reconnect sweep failed'))
+            .finally(() => { sweepInFlight = false; });
+    }, intervalMs);
+    retrySweep.unref?.();
+}
+
+export function stopMcpRetrySweep(): void {
+    if (!retrySweep) return;
+    clearInterval(retrySweep);
+    retrySweep = undefined;
 }
 
 /**
@@ -473,6 +696,8 @@ export async function closeMcpClients(): Promise<void> {
 
     await Promise.allSettled(closePromises);
     activeClients.clear();
+    // A manual reload goes through here; let it retry servers the sweep parked
+    retrySchedule.clear();
 }
 
 /**

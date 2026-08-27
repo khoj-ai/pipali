@@ -61,12 +61,6 @@ async function getLocalOpenAi(): Promise<OpenAI> {
     return new OpenAI({ apiKey: row.apiKey, baseURL: row.apiBaseUrl || 'https://api.openai.com/v1' });
 }
 
-function toArrayBufferBacked(bytes: Uint8Array): Uint8Array<ArrayBuffer> {
-    const out = new Uint8Array(bytes.byteLength);
-    out.set(bytes);
-    return out;
-}
-
 export interface TranscribeResult {
     text: string;
     model: string;
@@ -106,7 +100,7 @@ export async function transcribeAudio(params: {
 }
 
 export interface SpeechResult {
-    audio: Uint8Array<ArrayBuffer>;
+    stream: ReadableStream<Uint8Array>;
     contentType: string;
     model: string;
 }
@@ -123,8 +117,10 @@ export async function synthesizeSpeech(params: {
     const contentType = SPEECH_FORMAT_CONTENT_TYPES[format]!;
 
     if (await isAuthenticated()) {
-        // platformFetch JSON-parses, so use withTokenRefresh + raw fetch for binary audio.
-        const bytes = await withTokenRefresh(async (token) => {
+        // platformFetch JSON-parses, so use withTokenRefresh + raw fetch for binary
+        // audio. The response body is left unconsumed and streamed to the client;
+        // error statuses throw here, before any audio byte is forwarded.
+        const res = await withTokenRefresh(async (token) => {
             const res = await fetch(`${getPlatformUrl()}/voice/speech`, {
                 method: 'POST',
                 headers: {
@@ -140,9 +136,10 @@ export async function synthesizeSpeech(params: {
                 err.status = res.status;
                 throw err;
             }
-            return new Uint8Array(await res.arrayBuffer());
+            return res;
         });
-        return { audio: toArrayBufferBacked(bytes), contentType, model: params.model ?? 'platform-default' };
+        if (!res.body) throw new Error('Platform speech response had no body');
+        return { stream: res.body, contentType, model: params.model ?? 'platform-default' };
     }
 
     const model = params.model || DEFAULT_TTS_MODEL;
@@ -155,9 +152,9 @@ export async function synthesizeSpeech(params: {
         response_format: format,
         ...(voice ? { voice } : {}),
     } as Parameters<typeof client.audio.speech.create>[0]);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    log.info({ model, chars: params.text.length, bytes: bytes.length }, 'Synthesized speech (local)');
-    return { audio: toArrayBufferBacked(bytes), contentType, model };
+    if (!response.body) throw new Error(`TTS model '${model}' returned an empty response body`);
+    log.info({ model, chars: params.text.length }, 'Synthesizing speech (local)');
+    return { stream: response.body, contentType, model };
 }
 
 // Prompt to rephrase written text into a natural, spoken style.

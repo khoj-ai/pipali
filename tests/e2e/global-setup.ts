@@ -25,6 +25,8 @@ async function globalSetup(config: FullConfig): Promise<void> {
     // Export skills directory for tests to use
     // This is set as environment variable so tests can access it
     process.env.TEST_SKILLS_DIR = server.getSkillsDir();
+    process.env.TEST_MEMORY_DIR = server.getMemoryDir();
+    process.env.TEST_REQUEST_LOG = server.getRequestLogPath();
 
     console.log('[E2E Setup] Test server ready\n');
 }

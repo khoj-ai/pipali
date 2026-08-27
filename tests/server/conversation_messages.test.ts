@@ -117,6 +117,31 @@ describe('generateChatmlMessagesWithContext', () => {
             expect((messages[1] as any).role).toBe('user');
             expect((messages[1] as any).content).toBe('Hello');
         });
+
+        test('should skip leading ATIF system steps and preserve later system steps in order', () => {
+            const history: Partial<ATIFStep>[] = [
+                { step_id: 1, source: 'system', message: 'Persisted base prompt' },
+                { step_id: 2, source: 'system', message: 'Persisted base extension' },
+                { step_id: 3, source: 'user', message: 'First question' },
+                { step_id: 4, source: 'agent', message: 'First answer' },
+                { step_id: 5, source: 'system', message: 'New system context' },
+                { step_id: 6, source: 'user', message: 'Follow up' },
+            ];
+
+            const messages = generateChatmlMessagesWithContext(
+                '',
+                history as ATIFStep[],
+                'Current base prompt',
+            );
+
+            expect(messages.map((message: any) => [message.role, message.content])).toEqual([
+                ['system', 'Current base prompt'],
+                ['user', 'First question'],
+                ['assistant', 'First answer'],
+                ['system', 'New system context'],
+                ['user', 'Follow up'],
+            ]);
+        });
     });
 
     describe('user history', () => {
@@ -587,6 +612,28 @@ describe('generateChatmlMessagesWithContext', () => {
             expect((messages[0] as any).content).toBe('You are a helpful assistant');
             expect((messages[1] as any).content).toBe('[Handoff Context] Summary');
             expect((messages[2] as any).content).toBe('New answer');
+        });
+
+        test('should discard injected system steps before the latest compaction', () => {
+            const history: Partial<ATIFStep>[] = [
+                { source: 'user', message: 'Old question' },
+                { source: 'system', message: 'Temporary instruction' },
+                { source: 'agent', message: 'Old answer' },
+                { source: 'user', message: '[Handoff Context] Summary', extra: { is_compaction: true } },
+                { source: 'agent', message: 'New answer' },
+            ];
+
+            const messages = generateChatmlMessagesWithContext(
+                '',
+                history as ATIFStep[],
+                'Base prompt',
+            );
+
+            expect(messages.map((message: any) => message.content)).toEqual([
+                'Base prompt',
+                '[Handoff Context] Summary',
+                'New answer',
+            ]);
         });
     });
 

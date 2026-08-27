@@ -14,6 +14,13 @@ describe('isShellFindCommand', () => {
         expect(isShellFindCommand('grep -r "find" .')).toBe(false);
         expect(isShellFindCommand('mdfind -name test')).toBe(false);
     });
+
+    test('ignores heredoc bodies, which are interpreter payloads not shell syntax', () => {
+        expect(isShellFindCommand("python3 << 'EOF'\n# parse the payload; find target_query\nEOF")).toBe(false);
+        expect(isShellFindCommand('cat <<EOF\nrun this; find ~ -name "*.md"\nEOF')).toBe(false);
+        // A real find still wins when it precedes the heredoc
+        expect(isShellFindCommand("find ~ -type f && python3 << 'EOF'\npass\nEOF")).toBe(true);
+    });
 });
 
 describe('extractFindPath', () => {
@@ -34,5 +41,9 @@ describe('extractFindPath', () => {
 
     test('returns undefined for non-find commands', () => {
         expect(extractFindPath('ls -la')).toBeUndefined();
+    });
+
+    test('returns undefined for find-like text inside a heredoc body', () => {
+        expect(extractFindPath("python3 << 'EOF'\n# parse the payload; find target_query\nEOF")).toBeUndefined();
     });
 });

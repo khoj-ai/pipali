@@ -12,6 +12,12 @@ import {
 } from '../../sandbox';
 import { createChildLogger } from '../../logger';
 import { buildBundledRuntimeEnv } from '../../bundled-runtimes';
+import {
+    getBackgroundProcess,
+    startBackgroundProcess,
+    stopBackgroundProcess,
+} from '../../events/background-processes';
+import type { User } from '../../db/schema';
 
 const log = createChildLogger({ component: 'shell' });
 
@@ -51,6 +57,13 @@ export interface ShellCommandArgs {
     cwd?: string;
     /** Optional timeout in milliseconds (defaults to 30000ms / 30 seconds) */
     timeout?: number;
+    /** Return the command's pid and log path instead of waiting for it to finish. */
+    run_in_background?: boolean;
+}
+
+/** Arguments for the stop_process tool. */
+export interface StopProcessArgs {
+    pid: number;
 }
 
 /**
@@ -69,6 +82,10 @@ export interface ShellCommandResult {
 export interface ShellCommandOptions {
     /** Confirmation context for requesting user approval */
     confirmationContext?: ConfirmationContext;
+    /** Conversation a backgrounded command reports its exit to */
+    conversationId?: string;
+    /** Owner of the run, needed to wake that conversation when the command exits */
+    user?: typeof User.$inferSelect;
 }
 
 /** Default timeout for command execution (30 seconds) */
@@ -231,6 +248,10 @@ export async function shellCommand(
             : process.env;
         const env = await buildBundledRuntimeEnv(baseEnv);
 
+        if (args.run_in_background) {
+            return startInBackground({ command, workingDir, shellCmd, env, query }, options);
+        }
+
         const proc = Bun.spawn({
             cmd: shellCmd,
             cwd: workingDir,
@@ -333,4 +354,66 @@ export async function shellCommand(
             compiled: errorMsg,
         };
     }
+}
+
+/**
+ * Hand the command off and return its handle. Output goes to a log file the agent
+ * reads with tail/grep, and the conversation is told when the command exits.
+ */
+function startInBackground(
+    prepared: { command: string; workingDir: string; shellCmd: string[]; env: Record<string, string | undefined>; query: string },
+    options?: ShellCommandOptions,
+): ShellCommandResult {
+    const { command, workingDir, shellCmd, env, query } = prepared;
+    const base = { query, file: workingDir, uri: workingDir };
+
+    if (!options?.conversationId || !options?.user) {
+        return { ...base, compiled: 'Error: a background command needs a conversation to report back to' };
+    }
+
+    try {
+        const record = startBackgroundProcess({
+            cmd: shellCmd,
+            cwd: workingDir,
+            env,
+            command,
+            conversationId: options.conversationId,
+            user: options.user,
+        });
+
+        return {
+            ...base,
+            compiled: [
+                `Running in the background as pid ${record.pid}.`,
+                `Output is appended to ${record.logPath} - read it with tail or grep through shell_command.`,
+                'You will be told when it exits. Use stop_process to end it early.',
+            ].join('\n'),
+        };
+    } catch (error) {
+        const errorMsg = `Error starting background command: ${error instanceof Error ? error.message : String(error)}`;
+        log.error({ err: error, command }, errorMsg);
+        return { ...base, compiled: errorMsg };
+    }
+}
+
+/**
+ * Stop a background command and everything it spawned.
+ *
+ * A tool rather than a `kill` the agent could run itself: the sandbox permits signals
+ * only within the same sandbox instance, and each shell_command is its own, so a
+ * sandboxed kill fails with "Operation not permitted". The alternative would be
+ * escalating to direct mode and prompting the user to stop Pipali's own process.
+ */
+export function stopProcess(args: StopProcessArgs): { compiled: string } {
+    const pid = Number(args?.pid);
+    if (!Number.isInteger(pid)) return { compiled: 'Error: pid is required' };
+
+    const record = getBackgroundProcess(pid);
+    if (!record) return { compiled: `Error: no background command with pid ${pid}` };
+    if (!record.running) {
+        return { compiled: `pid ${pid} already exited with code ${record.exitCode}. Its output is at ${record.logPath}.` };
+    }
+
+    stopBackgroundProcess(pid);
+    return { compiled: `Stopped pid ${pid}. Its output so far is at ${record.logPath}.` };
 }

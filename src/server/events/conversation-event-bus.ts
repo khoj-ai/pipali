@@ -7,6 +7,7 @@
 
 import type { ServerMessage, QueuedMessage, PendingConfirmation, StopReason } from '../routes/ws/message-types';
 import type { ConfirmationPreferences } from '../processor/confirmation';
+import type { ATIFStep } from '../processor/conversation/atif/atif.types';
 import type { User } from '../db/schema';
 import { createChildLogger } from '../logger';
 
@@ -24,6 +25,11 @@ export interface RunHandle {
     stopReason?: StopReason;
     queuedMessages: QueuedMessage[];
     pendingConfirmations: Map<string, PendingConfirmation>;
+    /**
+     * Steps delivered to this conversation mid-run (e.g. a delegated task finishing).
+     * Already persisted; queued here so the running loop can pick them up.
+     */
+    injectedSteps: ATIFStep[];
 }
 
 export function createRunHandle(runId: string, clientMessageId: string, conversationId: string): RunHandle {
@@ -36,6 +42,7 @@ export function createRunHandle(runId: string, clientMessageId: string, conversa
         stopReason: undefined,
         queuedMessages: [],
         pendingConfirmations: new Map(),
+        injectedSteps: [],
     };
 }
 

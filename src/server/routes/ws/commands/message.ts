@@ -7,7 +7,7 @@
  */
 
 import type { Command, CommandContext } from './index';
-import type { ClientMessage, MessageCommand, QueuedMessage } from '../message-types';
+import type { ClientMessage, MessageCommand } from '../message-types';
 import { createSession, createRunningState } from '../session-state';
 import { createEmptyPreferences } from '../../../processor/confirmation';
 import { db, getDefaultChatModel, getChatModelById } from '../../../db';
@@ -15,7 +15,8 @@ import { Conversation } from '../../../db/schema';
 import { eq } from 'drizzle-orm';
 import { atifConversationService } from '../../../processor/conversation/atif/atif.service';
 import { getBus } from '../../../events/conversation-event-bus';
-import { rejectAllConfirmations } from '../confirmation-manager';
+import { queueMessageOnActiveRun } from '../../../events/conversation-runs';
+import { resumeAutoStart } from '../../../events/parent-inbox';
 import { createChildLogger } from '../../../logger';
 
 const log = createChildLogger({ component: 'message-command' });
@@ -40,36 +41,25 @@ export const MessageCommandHandler: Command<MessageCommand> = {
             runId,
         }, 'New message received');
 
+        // The user is present again: unattended chains start over, and an earlier stop
+        // no longer holds the conversation back.
+        if (conversationId) resumeAutoStart(conversationId);
+
         // Check if there's an active run on the bus for this conversation
-        if (conversationId) {
-            const bus = getBus(conversationId);
-            if (bus?.activeRun) {
-                const runHandle = bus.activeRun;
+        if (conversationId && getBus(conversationId)?.activeRun) {
+            log.info({ conversationId, runId }, 'Soft interrupt: queuing message on bus');
 
-                log.info({ conversationId, runId }, 'Soft interrupt: queuing message on bus');
-
-                if (chatModelId !== undefined) {
-                    const selectedModel = await getChatModelById(chatModelId);
-                    if (!selectedModel) {
-                        ctx.sendError('Selected chat model not found', conversationId);
-                        return;
-                    }
-                    await db.update(Conversation).set({ chatModelId }).where(eq(Conversation.id, conversationId));
+            if (chatModelId !== undefined) {
+                const selectedModel = await getChatModelById(chatModelId);
+                if (!selectedModel) {
+                    ctx.sendError('Selected chat model not found', conversationId);
+                    return;
                 }
-
-                const queuedMessage: QueuedMessage = { runId, clientMessageId, message: userQuery, chatModelId };
-                runHandle.queuedMessages.push(queuedMessage);
-                runHandle.stopMode = 'soft';
-                runHandle.stopReason = 'soft_interrupt';
-
-                // If blocked on confirmation, abort to unblock
-                if (runHandle.pendingConfirmations.size > 0) {
-                    runHandle.stopMode = 'hard';
-                    runHandle.abortController.abort();
-                    rejectAllConfirmations(runHandle, 'Research interrupted');
-                }
-                return;
+                await db.update(Conversation).set({ chatModelId }).where(eq(Conversation.id, conversationId));
             }
+
+            queueMessageOnActiveRun(conversationId, { runId, clientMessageId, message: userQuery, chatModelId });
+            return;
         }
 
         // No active run — start a new one

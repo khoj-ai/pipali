@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../../utils/api';
 import { SUPPORTED_LANGUAGES } from '../../i18n';
 import { PathListEditor } from './PathListEditor';
+import { MemorySettingsSection } from './MemorySettingsSection';
 import { useVoiceSettings } from '../../hooks/useVoiceSettings';
 
 type SettingsTab = 'profile' | 'permissions';
@@ -62,7 +63,6 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
     const [isLoading, setIsLoading] = useState(true);
     const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
     const [error, setError] = useState<string | null>(null);
-
     // Voice feature flag (beta, per-device). Session mode lives in the chat-input menu.
     const { enabled: voiceFeatureEnabled, setEnabled: setVoiceEnabled } = useVoiceSettings();
 
@@ -229,24 +229,22 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                 <div className="settings-page">
                     <div className="settings-header">
                         <h2>{t('settings.title')}</h2>
-                        {sandboxStatus?.supported && (
-                            <div className="settings-tabs">
-                                <button
-                                    className={`settings-tab ${activeTab === 'profile' ? 'active' : ''}`}
-                                    onClick={() => setActiveTab('profile')}
-                                >
-                                    <User size={16} />
-                                    <span>{t('settings.tabProfile')}</span>
-                                </button>
-                                <button
-                                    className={`settings-tab ${activeTab === 'permissions' ? 'active' : ''}`}
-                                    onClick={() => setActiveTab('permissions')}
-                                >
-                                    <Shield size={16} />
-                                    <span>{t('settings.tabPermissions')}</span>
-                                </button>
-                            </div>
-                        )}
+                        <div className="settings-tabs">
+                            <button
+                                className={`settings-tab ${activeTab === 'profile' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('profile')}
+                            >
+                                <User size={16} />
+                                <span>{t('settings.tabProfile')}</span>
+                            </button>
+                            <button
+                                className={`settings-tab ${activeTab === 'permissions' ? 'active' : ''}`}
+                                onClick={() => setActiveTab('permissions')}
+                            >
+                                <Shield size={16} />
+                                <span>{t('settings.tabPermissions')}</span>
+                            </button>
+                        </div>
                     </div>
 
                     {error && (
@@ -370,6 +368,8 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                             </div>
                         )}
 
+                        <MemorySettingsSection />
+
                         {/* Voice mode (beta) — gates all voice UI and the mic session */}
                         <div className="settings-section">
                             <div className="settings-section-header">
@@ -398,7 +398,7 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                         </div>
 
                         {/* Sandbox toggle */}
-                        <div className="settings-section">
+                        {sandboxStatus?.supported && <div className="settings-section">
                             <div className="settings-section-header">
                                 <div>
                                     <h3 className="settings-section-title">
@@ -421,10 +421,10 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                                     </label>
                                 )}
                             </div>
-                        </div>
+                        </div>}
 
                         {/* File permissions */}
-                        {sandboxConfig && (
+                        {sandboxStatus?.supported && sandboxConfig && (
                         <div className="settings-section">
                             <h3 className="settings-section-title">
                                 <FolderLock size={18} />

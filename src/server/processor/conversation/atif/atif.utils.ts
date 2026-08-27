@@ -84,6 +84,7 @@ export function calculateFinalMetrics(steps: ATIFStep[]): ATIFFinalMetrics {
   let totalPromptTokens = 0;
   let totalCompletionTokens = 0;
   let totalCachedTokens = 0;
+  let totalCacheWriteTokens = 0;
   let totalCostUsd = 0;
 
   steps.forEach((step) => {
@@ -91,6 +92,7 @@ export function calculateFinalMetrics(steps: ATIFStep[]): ATIFFinalMetrics {
       totalPromptTokens += step.metrics.prompt_tokens || 0;
       totalCompletionTokens += step.metrics.completion_tokens || 0;
       totalCachedTokens += step.metrics.cached_tokens || 0;
+      totalCacheWriteTokens += step.metrics.cache_write_tokens || 0;
       totalCostUsd += step.metrics.cost_usd || 0;
     }
   });
@@ -99,8 +101,42 @@ export function calculateFinalMetrics(steps: ATIFStep[]): ATIFFinalMetrics {
     total_prompt_tokens: totalPromptTokens,
     total_completion_tokens: totalCompletionTokens,
     total_cached_tokens: totalCachedTokens || undefined,
+    total_cache_write_tokens: totalCacheWriteTokens || undefined,
     total_cost_usd: totalCostUsd,
     total_steps: steps.length,
+  };
+}
+
+/**
+ * Sums two sets of step metrics, e.g. a director iteration's own LLM usage and
+ * the usage its tools racked up while executing.
+ */
+export function addMetrics(previous: ATIFMetrics | undefined, next: ATIFMetrics): ATIFMetrics {
+  return {
+    prompt_tokens: (previous?.prompt_tokens ?? 0) + next.prompt_tokens,
+    completion_tokens: (previous?.completion_tokens ?? 0) + next.completion_tokens,
+    cached_tokens: (previous?.cached_tokens ?? 0) + (next.cached_tokens ?? 0) || undefined,
+    cache_write_tokens: (previous?.cache_write_tokens ?? 0) + (next.cache_write_tokens ?? 0) || undefined,
+    cost_usd: (previous?.cost_usd ?? 0) + next.cost_usd,
+  };
+}
+
+/**
+ * Folds one step's metrics into a running total, for callers that persist steps
+ * incrementally and never hold the whole trajectory in memory.
+ */
+export function accumulateFinalMetrics(
+  running: ATIFFinalMetrics | null | undefined,
+  step: ATIFMetrics | undefined,
+  totalSteps: number,
+): ATIFFinalMetrics {
+  return {
+    total_prompt_tokens: (running?.total_prompt_tokens ?? 0) + (step?.prompt_tokens ?? 0),
+    total_completion_tokens: (running?.total_completion_tokens ?? 0) + (step?.completion_tokens ?? 0),
+    total_cached_tokens: (running?.total_cached_tokens ?? 0) + (step?.cached_tokens ?? 0) || undefined,
+    total_cache_write_tokens: (running?.total_cache_write_tokens ?? 0) + (step?.cache_write_tokens ?? 0) || undefined,
+    total_cost_usd: (running?.total_cost_usd ?? 0) + (step?.cost_usd ?? 0),
+    total_steps: totalSteps,
   };
 }
 
@@ -200,8 +236,8 @@ export function removeStepFromTrajectory(
 
 /**
  * Removes a user message and the following assistant message (all agent steps until the
- * next user message) from the trajectory. Also removes any intermediate user messages
- * between the deleted user message and the following assistant message's end.
+ * next user message) from the trajectory. Also removes inline system steps and any
+ * intermediate user messages within the deleted turn.
  * Returns the number of steps removed.
  */
 export function removeTurnFromTrajectory(
@@ -235,10 +271,11 @@ export function removeTurnFromTrajectory(
       }
       // Include intermediate user messages before any agent response
       endIndex = i;
+    } else if (step?.source === 'system') {
+      endIndex = i;
     }
   }
 
-  // Remove all steps from startIndex to endIndex (inclusive)
   const removeCount = endIndex - startIndex + 1;
   trajectory.steps.splice(startIndex, removeCount);
 
@@ -249,10 +286,10 @@ export function removeTurnFromTrajectory(
 }
 
 /**
- * Removes an agent message and all associated steps (reasoning, tool calls, tool results)
- * from the trajectory. Deletes all consecutive 'agent' steps starting from the step
- * that contains the given step_id, going backwards to find the first agent step after
- * the previous user message, and forwards until the next user message.
+ * Removes an agent message and all associated steps (reasoning, tool calls, tool results,
+ * and inline system steps) from the trajectory. Deletes the response starting from the
+ * step that contains the given step_id, going backwards to the previous user message
+ * and forwards until the next user message.
  * Returns the number of steps removed.
  */
 export function removeAgentMessageFromTrajectory(
@@ -272,7 +309,7 @@ export function removeAgentMessageFromTrajectory(
     if (trajectory.steps[i]?.source === 'user') {
       break; // Stop at user message
     }
-    if (trajectory.steps[i]?.source === 'agent') {
+    if (trajectory.steps[i]?.source === 'agent' || trajectory.steps[i]?.source === 'system') {
       firstAgentIndex = i;
     }
   }
@@ -283,12 +320,11 @@ export function removeAgentMessageFromTrajectory(
     if (trajectory.steps[i]?.source === 'user') {
       break; // Stop at next user message
     }
-    if (trajectory.steps[i]?.source === 'agent') {
+    if (trajectory.steps[i]?.source === 'agent' || trajectory.steps[i]?.source === 'system') {
       lastAgentIndex = i;
     }
   }
 
-  // Remove all steps from firstAgentIndex to lastAgentIndex (inclusive)
   const removeCount = lastAgentIndex - firstAgentIndex + 1;
   trajectory.steps.splice(firstAgentIndex, removeCount);
 
@@ -297,5 +333,3 @@ export function removeAgentMessageFromTrajectory(
 
   return removeCount;
 }
-
-

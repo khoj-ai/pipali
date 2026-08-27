@@ -75,8 +75,7 @@ export async function sendMessageToGpt(
         const promptTokens = usageData.input_tokens || 0;
         const completionTokens = usageData.output_tokens || 0;
         const cachedReadTokens = usageData.input_tokens_details?.cached_tokens || 0;
-        // Note: cache_write_tokens not available in Responses API usage
-        const cacheWriteTokens = 0;
+        const cacheWriteTokens = usageData.input_tokens_details?.cache_write_tokens || 0;
 
         // Use cost from platform metadata if available, else estimate locally
         const rawCostUsd = metadata?.cost_usd ?? metadata?.["cost_usd"];

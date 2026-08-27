@@ -83,6 +83,15 @@ export function parseGoAhead(text: string): boolean {
     return APPROVE.has(n) || DETAILS.has(n) || GO_AHEAD_EXTRA.has(n);
 }
 
+export type OpenVoiceRoute = 'speak_pending' | 'reply' | 'compose';
+
+/** Route addressed speech when no turn is open. `null` means nothing is pending. */
+export function routeOpenVoice(payload: string, pendingHeard: boolean | null): OpenVoiceRoute {
+    if (pendingHeard === null) return 'compose';
+    if (!pendingHeard && (!payload || parseGoAhead(payload))) return 'speak_pending';
+    return 'reply';
+}
+
 /**
  * Is this utterance "stop what you're doing" — a run to abandon, or a readout
  * the user has heard enough of? Whole-utterance only, on the same reasoning as

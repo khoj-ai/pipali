@@ -16,11 +16,17 @@
 
 import { User } from '../db/schema';
 import { research, ResearchPausedError } from './director';
-import { atifConversationService } from './conversation/atif/atif.service';
+import { atifConversationService, type ConversationRole } from './conversation/atif/atif.service';
 import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
+import { loadMemorySettings } from '../memory/settings';
+import { memoryPathsExtra, resolveMemoryContext, surfacedMemories, MEMORY_RECALL_KIND } from '../memory';
+import { recallMemories } from '../memory/recall';
+import { resolveMcpInventoryContext } from './actor/search_tools';
+import { getMcpToolDefinitions } from './mcp';
 import type { ResearchIteration } from './director/types';
+import type { ATIFStep } from './conversation/atif/atif.types';
 import type { ConfirmationContext } from './confirmation';
 import { createChildLogger } from '../logger';
 
@@ -45,8 +51,17 @@ export interface ResearchRunnerOptions {
     confirmationContext?: ConfirmationContext;
     /** Chat model ID to use for this conversation */
     chatModelId?: number;
+    /** Row-less platform model alias to use for this run */
+    chatModelAlias?: string;
     /** Unique ID of current research run */
     runId?: string;
+    /** Home, a delegated task, or an ordinary chat */
+    conversationRole?: ConversationRole;
+    /**
+     * Returns and clears the steps delivered to this conversation mid-run, so the
+     * running loop picks them up instead of only the next run seeing them.
+     */
+    drainInjectedSteps?: () => ATIFStep[];
     /** Callback when tool calls are about to start (before execution) */
     onToolCallStart?: (iteration: ResearchIteration) => void;
     /** Callback when an iteration completes (after execution) */
@@ -127,6 +142,43 @@ export async function* runResearchWithConversation(
     // Check if this is a new conversation (no system prompt yet) or existing
     const isNewConversation = !trajectory.steps.some(s => s.source === 'system');
 
+    // Add memory context to trajectory
+    const { memoriesEnabled } = await loadMemorySettings(user.id);
+    const { memoryCatalogue, systemSteps } = await resolveMemoryContext({
+        steps: trajectory.steps,
+        memoriesEnabled,
+        isNewConversation,
+    });
+
+    // Tool schemas are rebuilt every iteration but the inventory naming them is
+    // frozen in the system prompt, so announce what has changed since. Non-fatal:
+    // an unreachable MCP server must not cost the user their turn.
+    let mcpSteps: Array<{ message: string; extra: Record<string, unknown> }> = [];
+    try {
+        mcpSteps = resolveMcpInventoryContext({
+            steps: trajectory.steps,
+            mcpTools: await getMcpToolDefinitions(),
+            isNewConversation,
+        }).systemSteps;
+    } catch (error) {
+        log.warn({ err: error, conversationId }, 'Failed to resolve MCP tool inventory changes');
+    }
+
+    for (const step of [...systemSteps, ...mcpSteps]) {
+        const persistedStep = await atifConversationService.addStep(
+            conversationId,
+            'system',
+            step.message,
+            undefined, // no metrics
+            undefined, // no tool calls
+            undefined, // no observation
+            undefined, // no reasoning
+            undefined, // no raw
+            step.extra
+        )
+        trajectory.steps.push(persistedStep);
+    }
+
     // For existing conversations, persist user message immediately.
     // For new conversations, we add to in-memory first, then persist after system prompt.
     if (userMessage) {
@@ -144,6 +196,38 @@ export async function* runResearchWithConversation(
             // Notify client of user message step_id for deletion support
             if (onUserMessagePersisted) {
                 onUserMessagePersisted(userStep.step_id);
+            }
+        }
+    }
+
+    // Proactively recall memories relevant to the user's message, injected as a
+    // persisted system step after the user turn - appended, kept for the life of
+    // the conversation, each memory at most once (memory-architecture.md §5).
+    let pendingRecallStep: { message: string; extra: Record<string, unknown> } | undefined;
+    if (memoriesEnabled) {
+        const lastUserMessage = trajectory.steps.findLast(
+            s => s.source === 'user' && s.extra?.is_compaction !== true)?.message;
+        if (lastUserMessage) {
+            const recall = await recallMemories(lastUserMessage, surfacedMemories(trajectory.steps));
+            if (recall && isNewConversation) {
+                // The system prompt is not persisted yet; a recall step persisted now
+                // would precede it and read as part of the base prompt on later turns.
+                // Hold it in memory and persist it once the user turn is.
+                addStepToTrajectory(trajectory, 'system', recall.message).extra = recall.extra;
+                pendingRecallStep = recall;
+            } else if (recall) {
+                const recallStep = await atifConversationService.addStep(
+                    conversationId,
+                    'system',
+                    recall.message,
+                    undefined, // no metrics
+                    undefined, // no tool calls
+                    undefined, // no observation
+                    undefined, // no reasoning
+                    undefined, // no raw
+                    recall.extra,
+                );
+                trajectory.steps.push(recallStep);
             }
         }
     }
@@ -170,14 +254,19 @@ export async function* runResearchWithConversation(
         username: userContext.name,
         location: userContext.location,
         userContext: userContext.instructions,
+        memoryCatalogue,
+        memoriesEnabled,
         user,
         systemPrompt,
         abortSignal,
         confirmationContext,
         chatModelId: options.chatModelId,
+        chatModelAlias: options.chatModelAlias,
         conversationId,
+        conversationRole: options.conversationRole,
         runId,
         onTextChunk: onTextDelta,
+        drainInjectedSteps: options.drainInjectedSteps,
     })) {
         // On first iteration (new conversation), persist system prompt and user message to DB
         // System prompt is persisted first to maintain correct ordering: system → user → agent
@@ -206,6 +295,26 @@ export async function* runResearchWithConversation(
                 if (onUserMessagePersisted) {
                     onUserMessagePersisted(userStep.step_id);
                 }
+            }
+
+            // Persist the recall step held back until the turn it follows existed
+            if (pendingRecallStep) {
+                const recallStep = await atifConversationService.addStep(
+                    conversationId,
+                    'system',
+                    pendingRecallStep.message,
+                    undefined, // no metrics
+                    undefined, // no tool calls
+                    undefined, // no observation
+                    undefined, // no reasoning
+                    undefined, // no raw
+                    pendingRecallStep.extra,
+                );
+                const recallIndex = trajectory.steps.findLastIndex(s => s.extra?.kind === MEMORY_RECALL_KIND);
+                if (recallIndex >= 0) {
+                    trajectory.steps[recallIndex] = recallStep;
+                }
+                pendingRecallStep = undefined;
             }
             systemPromptPersisted = true;
         }
@@ -293,6 +402,8 @@ export async function* runResearchWithConversation(
                 { results: iteration.toolResults },
                 iteration.thought,
                 iteration.raw,
+                // A memory the model opened or wrote is in context, so recall skips it
+                memoryPathsExtra(iteration.toolCalls),
             );
             trajectory.steps.push(agentStep);
 

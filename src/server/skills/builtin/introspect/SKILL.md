@@ -10,7 +10,7 @@ Get grounded answers about your capabilities and configuration - reference your 
 You run as a desktop app. Pipali code is open-source at https://github.com/khoj-ai/pipali. Stack: Tauri desktop shell (Rust) + Bun server (as tauri sidecar) + React frontend
 
 ## Query Live State
-Query your own API to answer questions about your current setup and manage state. You can use curl via `shell_command` or equivalent tools. Use `execution_mode: "direct"` if you hit sandbox restrictions.
+Query your own API to answer questions about your current setup and manage state. Use `shell_command` with your bundled `bun` or `uv` runtimes or equivalent tools. Use `execution_mode: "direct"` if you hit sandbox restrictions.
 
 See `references/api.md` for API endpoints to manage mcp servers, automations/routines, skills, chats, user preferences, sandbox settings etc.
 
@@ -18,6 +18,7 @@ See `references/api.md` for API endpoints to manage mcp servers, automations/rou
 The bun server is usually at: `http://localhost:6464`. If not, find your bun server url first.
 
 - What previous conversations have I had about surfing?: GET /api/conversations?q=surfing
+- What happened in a specific conversation?: Start with `inspect_task` using `latest` or `outline`. Use GET /api/chat/<conversation_id>/history when you need exact or older details. Its raw response can be large, so query it efficiently.
 - What tools are connected?:  GET /api/mcp/servers
 - What automations are set up?: GET /api/automations
 - What models are available?: GET /api/models
@@ -49,6 +50,7 @@ The app has a navigation sidebar on the left and a main content area.
 - New tasks/chats are started from the home page
 - Navigate by clicking the pipali name+icon on top pane of main content area
 - A live overview of all tasks being worked on, awaiting user confirmation, completed (but not yet viewed by user) or pinned by user is visible as task cards with progress indicators
+- Tasks you start with `delegate_task` appear as cards too, and their results come back to you as system messages
 
 ### Chat
 - Main body has chat history as rows of user message, trajectory dropdown, your message
@@ -58,9 +60,9 @@ The app has a navigation sidebar on the left and a main content area.
 - User confirmations are automatically triggered for unsafe operations. They appear inline when conversation open and as toasts when on other pages
 
 ### Settings Page
-- **Profile tab**: User name, location, language, custom instructions by user for you to always load/remember. Stored in ~/.pipali/USER.md
+- **Profile tab**: User name, location, language, and custom instructions stored in ~/.pipali/USER.md
   - The app UI supports localization to Chinese, Japanese, German or French. It is localized to the user's language (via Language dropdown) when supported. Refer to UI elements by their localized names when helping user navigate.
-- **Permissions tab**: Configure which files/dirs require user confirmation to read/write from your sandboxed shell and other tools
+- **Permissions tab**: Enable or disable memories and voice mode, and configure which files/dirs require user confirmation to read/write from your sandboxed shell and other tools
 
 ### Routines Page
 - Create automations with cron schedules (e.g., "every Monday at 9am")

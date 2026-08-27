@@ -79,5 +79,9 @@ export function getToolResultStatus(toolResult: string | undefined, toolName: st
         return 'error';
     }
 
+    if (toolName && ['delegate_task', 'inspect_task', 'wait_for_tasks', 'stop_task'].includes(toolName)) {
+        return lowerResult.startsWith('error') ? 'error' : 'success';
+    }
+
     return 'neutral';
 }

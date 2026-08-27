@@ -28,15 +28,17 @@ function getUnitDb(): UnitDbAdapter | undefined {
     return globalThis.__pipaliUnitDb;
 }
 
-// Ensure unit tests never touch the persistent repo DB
+// Ensure unit tests never touch the persistent repo DB or the developer's real memories
 try {
     const baseDir = '/tmp/pipali';
     const { mkdirSync } = await import('node:fs');
     mkdirSync(baseDir, { recursive: true });
     process.env.POSTGRES_DB ||= `${baseDir}/pipali-unit-${process.pid}-${Date.now()}`;
+    process.env.PIPALI_MEMORY_DIR ||= `${baseDir}/pipali-unit-${process.pid}-memory`;
 } catch {
     // If /tmp isn't available, fall back to cwd
     process.env.POSTGRES_DB ||= `${process.cwd()}/.pipali-unit-test.db`;
+    process.env.PIPALI_MEMORY_DIR ||= `${process.cwd()}/.pipali-unit-test-memory`;
 }
 
 process.env.PIPALI_TEST_MODE ||= 'true';
@@ -49,6 +51,12 @@ mock.module(dbSchemaModule, () => {
     return {
         // Basic tables
         User: { $inferSelect: {} },
+        MemorySettings: {
+            id: 'id',
+            userId: 'userId',
+            memoriesEnabled: 'memoriesEnabled',
+            $inferSelect: {},
+        },
         AiModelApi: { $inferSelect: {} },
         ChatModel: { $inferSelect: {} },
         UserChatModel: { $inferSelect: {} },
@@ -86,6 +94,14 @@ mock.module(dbSchemaModule, () => {
         },
         Automation: { $inferSelect: {} },
         AutomationExecution: { $inferSelect: {} },
+        PendingConfirmation: {
+            id: 'id',
+            executionId: 'executionId',
+            request: 'request',
+            status: 'status',
+            expiresAt: 'expiresAt',
+            $inferSelect: {},
+        },
         // Sandbox settings table with column references
         SandboxSettings: {
             id: 'id',

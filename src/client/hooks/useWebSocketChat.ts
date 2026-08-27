@@ -494,7 +494,10 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             if (history && Array.isArray(history)) {
                 messages = history
                     // Filter out compaction steps (they're rendered as agent thoughts, not messages)
-                    .filter(step => !(step.extra?.is_compaction === true))
+                    .filter(step =>
+                        (step.source === 'user' || step.source === 'agent')
+                        && !(step.extra?.is_compaction === true)
+                    )
                     .map(step => ({
                         id: String(step.step_id || generateUUID()),
                         stableId: String(step.step_id || generateUUID()),
@@ -1356,6 +1359,41 @@ const initialState: ChatState = {
     pendingConfirmations: new Map(),
 };
 
+interface ConfirmationResponseParams {
+    conversationId: string;
+    runId: string;
+    requestId: string;
+    optionId: string;
+    guidance?: string;
+    attachments?: ConfirmationResponseAttachment[];
+}
+
+function tryQueueConfirmationResponse(
+    socket: WebSocket | null,
+    params: ConfirmationResponseParams,
+    onQueued: () => void,
+): boolean {
+    if (!socket || socket.readyState !== WebSocket.OPEN) return false;
+    try {
+        socket.send(JSON.stringify({
+            type: 'confirmation_response',
+            conversationId: params.conversationId,
+            runId: params.runId,
+            data: {
+                requestId: params.requestId,
+                selectedOptionId: params.optionId,
+                guidance: params.guidance,
+                ...(params.attachments?.length ? { attachments: params.attachments } : {}),
+                timestamp: new Date().toISOString(),
+            },
+        }));
+    } catch {
+        return false;
+    }
+    onQueued();
+    return true;
+}
+
 // ============================================================================
 // Hook
 // ============================================================================
@@ -1364,6 +1402,9 @@ export interface UseWebSocketChatOptions {
     wsUrl: string;
     onConversationCreated?: (conversationId: string, history?: any[]) => void;
     onConfirmationRequest?: (request: ConfirmationRequest, conversationId: string, runId: string) => void;
+    onConfirmationResolved?: (requestId: string, conversationId: string) => void;
+    /** Fires for every run, including ones this client never started. */
+    onRunStarted?: (conversationId: string, runId: string) => void;
     onTaskComplete?: (request: string | undefined, response: string, conversationId: string) => void;
     onStepStart?: (conversationId: string, runId: string) => void;
     onBillingError?: (error: BillingError, conversationId?: string) => void;
@@ -1377,6 +1418,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         wsUrl,
         onConversationCreated,
         onConfirmationRequest,
+        onConfirmationResolved,
+        onRunStarted,
         onTaskComplete,
         onStepStart,
         onBillingError,
@@ -1407,6 +1450,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         UseWebSocketChatOptions,
         | 'onConversationCreated'
         | 'onConfirmationRequest'
+        | 'onConfirmationResolved'
+        | 'onRunStarted'
         | 'onTaskComplete'
         | 'onStepStart'
         | 'onBillingError'
@@ -1416,6 +1461,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
     >>({
         onConversationCreated,
         onConfirmationRequest,
+        onConfirmationResolved,
+        onRunStarted,
         onTaskComplete,
         onStepStart,
         onBillingError,
@@ -1428,6 +1475,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         callbacksRef.current = {
             onConversationCreated,
             onConfirmationRequest,
+            onConfirmationResolved,
+            onRunStarted,
             onTaskComplete,
             onStepStart,
             onBillingError,
@@ -1438,6 +1487,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
     }, [
         onConversationCreated,
         onConfirmationRequest,
+        onConfirmationResolved,
+        onRunStarted,
         onTaskComplete,
         onStepStart,
         onBillingError,
@@ -1466,6 +1517,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         const {
             onConversationCreated: onConversationCreatedCb,
             onConfirmationRequest: onConfirmationRequestCb,
+            onConfirmationResolved: onConfirmationResolvedCb,
+            onRunStarted: onRunStartedCb,
             onTaskComplete: onTaskCompleteCb,
             onStepStart: onStepStartCb,
             onBillingError: onBillingErrorCb,
@@ -1497,6 +1550,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                     suggestedRunId: message.suggestedRunId,
                 });
                 acquireWakeLock();
+                onRunStartedCb?.(convId, runId);
                 break;
 
             case 'run_stopped':
@@ -1576,6 +1630,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                         conversationId: convId,
                         requestId: message.data.requestId,
                     });
+                    onConfirmationResolvedCb?.(message.data.requestId, convId);
                 }
                 break;
 
@@ -1770,22 +1825,16 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         guidance?: string,
         attachments?: ConfirmationResponseAttachment[]
     ) => {
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
-
-        dispatch({ type: 'CONFIRMATION_RESPONDED', conversationId, requestId });
-
-        wsRef.current.send(JSON.stringify({
-            type: 'confirmation_response',
+        return tryQueueConfirmationResponse(wsRef.current, {
             conversationId,
             runId,
-            data: {
-                requestId,
-                selectedOptionId: optionId,
-                guidance,
-                ...(attachments && attachments.length > 0 ? { attachments } : {}),
-                timestamp: new Date().toISOString(),
-            },
-        }));
+            requestId,
+            optionId,
+            guidance,
+            attachments,
+        }, () => {
+            dispatch({ type: 'CONFIRMATION_RESPONDED', conversationId, requestId });
+        });
     }, []);
 
     const fork = useCallback((message: string, sourceConversationId: string, options?: { clientMessageId?: string; runId?: string; chatModelId?: number }) => {
@@ -1887,4 +1936,5 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
 export const __test__ = {
     chatReducer,
     initialState,
+    tryQueueConfirmationResponse,
 };

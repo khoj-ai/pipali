@@ -86,6 +86,14 @@
         "tierOther": "その他",
         "recommended": "おすすめ"
     },
+    "thoughts": {
+        "delegationModel": "{{tier}}モデルに",
+        "delegationBackground": "バックグラウンドで",
+        "waitForTasks": "{{tasks}}を待機",
+        "noRunInProgress": "実行中のタスクはありませんでした。",
+        "recalledMemories_one": "メモリを{{count}}件呼び出しました。",
+        "recalledMemories_other": "メモリを{{count}}件呼び出しました。"
+    },
     "home": {
         "greetings": {
             "default": [
@@ -295,6 +303,21 @@
         "tabPermissions": "権限",
         "aboutYou": "あなたについて",
         "aboutYouDescription": "この情報は、Pipaliが応答をパーソナライズし、あなたの状況を理解するのに役立ちます。",
+        "memories": "メモリ",
+        "memoriesDescription": "Pipaliが会話をまたいで役立つ情報を記憶できるようにします。オフにすると、今後の会話でメモリが自動的に読み込まれなくなります。既存のメモリファイルと会話は変更されません。",
+        "failedToSaveMemories": "メモリ設定を更新できませんでした",
+        "storedMemories": "保存済みのメモリ（{{count}}件）",
+        "deleteAllMemories": "すべて削除",
+        "deleteAllMemoriesConfirm": "すべてのメモリを削除しますか？この操作は取り消せません。",
+        "deleteMemory": "{{name}}を削除",
+        "deleteMemoryConfirm": "このメモリを削除しますか？",
+        "viewMemory": "{{name}}を表示",
+        "loadingMemories": "メモリを読み込み中...",
+        "loadingMemory": "読み込み中...",
+        "emptyMemory": "このメモリは空です。",
+        "noMemories": "保存済みのメモリはありません",
+        "failedToLoadMemories": "メモリを読み込めませんでした",
+        "failedToDeleteMemories": "メモリを削除できませんでした",
         "labelName": "名前",
         "placeholderName": "あなたの名前",
         "labelLocation": "場所",
@@ -356,7 +379,12 @@
         "saving": "保存中...",
         "save": "保存",
         "failedToSave": "スキルの保存に失敗しました",
-        "failedToDelete": "スキルの削除に失敗しました"
+        "failedToDelete": "スキルの削除に失敗しました",
+        "modified": "変更済み",
+        "resetToDefault": "デフォルトに戻す",
+        "resetSkillConfirm": "変更をデフォルトのスキルに戻しますか？",
+        "resetting": "リセット中...",
+        "failedToReset": "スキルのリセットに失敗しました"
     },
     "automations": {
         "title": "ルーティン",

@@ -14,6 +14,7 @@ import {
     type ConfirmationResponse,
     type ConfirmationCallback,
     CONFIRMATION_OPTIONS,
+    CONFIRMATION_TIMEOUT_MS,
 } from '../../processor/confirmation';
 import type { PendingConfirmation } from './message-types';
 import { createChildLogger } from '../../logger';
@@ -40,11 +41,29 @@ export function createConfirmationCallback(
 ): ConfirmationCallback {
     return async (request: ConfirmationRequest): Promise<ConfirmationResponse> => {
         return new Promise((resolve, reject) => {
+            // Nobody may be watching - a delegated task can still be going after the app
+            // is closed - so give up eventually rather than holding the run forever.
+            const timeout = setTimeout(() => {
+                if (!runHandle.pendingConfirmations.delete(request.requestId)) return;
+                log.warn({
+                    requestId: request.requestId,
+                    conversationId,
+                    runId: runHandle.runId,
+                }, 'Confirmation timed out');
+                reject(new Error('Confirmation timeout expired'));
+            }, CONFIRMATION_TIMEOUT_MS);
+
             runHandle.pendingConfirmations.set(request.requestId, {
                 requestId: request.requestId,
                 request,
-                resolve,
-                reject,
+                resolve: (response) => {
+                    clearTimeout(timeout);
+                    resolve(response);
+                },
+                reject: (error) => {
+                    clearTimeout(timeout);
+                    reject(error);
+                },
             });
 
             log.info({

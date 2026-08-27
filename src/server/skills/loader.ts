@@ -3,6 +3,7 @@
  */
 
 import path from 'path';
+import { parseFrontmatter as parseYamlFrontmatter } from '../frontmatter';
 import type { Skill, SkillLoadResult, SkillLoadError, SkillFrontmatter } from './types';
 
 /**
@@ -15,69 +16,25 @@ import type { Skill, SkillLoadResult, SkillLoadError, SkillFrontmatter } from '.
 const SKILL_NAME_PATTERN = /^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$|^[a-z0-9]$/;
 
 /**
- * Parse YAML frontmatter from SKILL.md content
- * Uses simple regex-based parsing for name and description fields
+ * Parse the skill fields out of SKILL.md frontmatter
  */
 export function parseFrontmatter(content: string): SkillFrontmatter | null {
-    // Match frontmatter between --- markers
-    const frontmatterMatch = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
-    if (!frontmatterMatch) {
-        return null;
-    }
-
-    const yaml = frontmatterMatch[1];
-    if (!yaml) {
+    const parsed = parseYamlFrontmatter(content);
+    if (!parsed) {
         return null;
     }
 
     const result: SkillFrontmatter = {};
 
-    // Parse name field - handles quoted and unquoted values
-    const nameMatch = yaml.match(/^name:\s*["']?([^"'\n]+?)["']?\s*$/m);
-    if (nameMatch && nameMatch[1]) {
-        result.name = nameMatch[1].trim();
+    if (parsed.fields.name) {
+        result.name = parsed.fields.name;
     }
-
-    // Parse description field - handles quoted (with escapes), unquoted, and multiline values
-    // Try double-quoted format first (supports escaped quotes like \")
-    let descMatch = yaml.match(/^description:\s*"((?:[^"\\]|\\.)*)"\s*$/m);
-    if (descMatch && descMatch[1]) {
-        // Unescape escaped characters
-        result.description = descMatch[1].replace(/\\(.)/g, '$1').trim();
-    } else {
-        // Try single-quoted format (supports escaped quotes like \')
-        descMatch = yaml.match(/^description:\s*'((?:[^'\\]|\\.)*)'\s*$/m);
-        if (descMatch && descMatch[1]) {
-            // Unescape escaped characters
-            result.description = descMatch[1].replace(/\\(.)/g, '$1').trim();
-        } else {
-            // Try unquoted format (any characters until end of line)
-            descMatch = yaml.match(/^description:\s*([^\n]+?)\s*$/m);
-            if (descMatch && descMatch[1]) {
-                result.description = descMatch[1].trim();
-            } else {
-                // Try multiline format with > or |
-                const multilineMatch = yaml.match(/^description:\s*[>|]\s*\r?\n((?:[ \t]+[^\n]*\r?\n?)+)/m);
-                if (multilineMatch && multilineMatch[1]) {
-                    result.description = multilineMatch[1]
-                        .split('\n')
-                        .map(line => line.trim())
-                        .filter(line => line.length > 0)
-                        .join(' ')
-                        .trim();
-                }
-            }
-        }
+    if (parsed.fields.description) {
+        result.description = parsed.fields.description;
     }
-
-    // Parse visible field under metadata section only
-    const metadataMatch = yaml.match(/^metadata:\s*\r?\n((?:[ \t]+[^\n]*\r?\n?)*)/m);
-    if (metadataMatch && metadataMatch[1]) {
-        const metadataBlock = metadataMatch[1];
-        const visibleMatch = metadataBlock.match(/^\s+visible:\s*["']?(true|false)["']?\s*$/m);
-        if (visibleMatch && visibleMatch[1]) {
-            result.visible = visibleMatch[1] === 'true';
-        }
+    // Visibility is only honored under metadata, never as a top-level field
+    if (parsed.metadata.visible === 'true' || parsed.metadata.visible === 'false') {
+        result.visible = parsed.metadata.visible === 'true';
     }
 
     return result;

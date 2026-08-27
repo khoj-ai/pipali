@@ -145,43 +145,90 @@ export function playTranscriptTicks(wordCount: number): number {
 }
 
 // Serialized TTS playback so a completion summary never overlaps a confirmation readback.
-let speechSource: AudioBufferSourceNode | null = null;
 let speechChain: Promise<void> = Promise.resolve();
+// Halts the readout currently scheduling PCM blocks (barge-in).
+let stopActiveSpeech: (() => void) | null = null;
+// Invalidates callbacks already chained behind the active readout. Resetting
+// speechChain alone cannot detach callbacks from its previous value.
+let speechGeneration = 0;
 
-function playDecodedBuffer(ctx: AudioContext, data: ArrayBuffer): Promise<void> {
-    return new Promise<void>((resolve) => {
-        // decodeAudioData detaches its input, so decode a copy.
-        ctx.decodeAudioData(data.slice(0))
-            .then((audioBuffer) => {
-                const source = ctx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(ensureSpeechGain(ctx));
-                speechSource = source;
-                source.onended = () => {
-                    if (speechSource === source) speechSource = null;
-                    resolve();
-                };
-                source.start();
-            })
-            .catch(() => resolve());
-    });
+/** A pull source of decoded speech samples; sampleRate is 0 until the stream's header has parsed. */
+export interface PcmStream {
+    readonly sampleRate: number;
+    blocks(): AsyncIterable<Float32Array<ArrayBuffer>>;
 }
 
-/** Queue TTS audio for playback; resolves when it finishes. Never overlaps prior speech. */
-export function speakAudio(data: ArrayBuffer): Promise<void> {
+/**
+ * Play a decoded PCM stream gaplessly: each block is scheduled right behind
+ * the previous one, so playback starts on the first block while later ones
+ * are still arriving. A network stall leaves a silence, then speech resumes.
+ */
+async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void> {
+    const gain = ensureSpeechGain(ctx);
+    const active = new Set<AudioBufferSourceNode>();
+    let stopped = false;
+    let streamEnded = false;
+    let nextStart = 0;
+    let settle!: () => void;
+    const donePlaying = new Promise<void>((resolve) => { settle = resolve; });
+    const maybeSettle = () => {
+        if (stopped || (streamEnded && active.size === 0)) settle();
+    };
+    const stop = () => {
+        stopped = true;
+        for (const source of active) {
+            try { source.stop(); } catch { /* already stopped */ }
+        }
+        active.clear();
+        maybeSettle();
+    };
+    stopActiveSpeech = stop;
+    // Consume in the background: a stop must release this readout immediately,
+    // even while the loop is suspended waiting on a stalled producer.
+    void (async () => {
+        try {
+            for await (const block of stream.blocks()) {
+                if (stopped) break;
+                if (!block.length || !stream.sampleRate) continue;
+                const buffer = ctx.createBuffer(1, block.length, stream.sampleRate);
+                buffer.copyToChannel(block, 0);
+                const source = ctx.createBufferSource();
+                source.buffer = buffer;
+                source.connect(gain);
+                nextStart = Math.max(nextStart, ctx.currentTime + 0.03);
+                source.start(nextStart);
+                nextStart += buffer.duration;
+                active.add(source);
+                source.onended = () => { active.delete(source); maybeSettle(); };
+            }
+        } catch {
+            // Synthesis failed mid-stream — let whatever was scheduled finish.
+        }
+        streamEnded = true;
+        maybeSettle();
+    })();
+    await donePlaying;
+    if (stopActiveSpeech === stop) stopActiveSpeech = null;
+}
+
+/** Queue a TTS stream for playback; resolves when it finishes. Never overlaps prior speech. */
+export function speakPcm(stream: PcmStream): Promise<void> {
     const ctx = ensureAudioContext();
     if (!ctx) return Promise.resolve();
-    const play = speechChain.catch(() => {}).then(() => playDecodedBuffer(ctx, data));
+    const generation = speechGeneration;
+    const play = speechChain.catch(() => {}).then(() => {
+        if (generation !== speechGeneration) return;
+        return playPcmStream(ctx, stream);
+    });
     speechChain = play.catch(() => {});
     return play;
 }
 
 /** Stop current playback and clear the queue (barge-in). */
 export function stopSpeaking(): void {
-    if (speechSource) {
-        try { speechSource.stop(); } catch { /* already stopped */ }
-        speechSource = null;
-    }
+    speechGeneration++;
+    stopActiveSpeech?.();
+    stopActiveSpeech = null;
     speechChain = Promise.resolve();
     duckSpeech(false);
 }

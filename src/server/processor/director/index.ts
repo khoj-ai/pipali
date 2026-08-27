@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { type User } from '../../db/schema';
 import type { ToolDefinition } from '../conversation/conversation';
 import { sendMessageToModel } from '../conversation/index';
@@ -8,18 +9,31 @@ import { readFile, type ReadFileArgs } from '../actor/read_file';
 import { grepFiles, type GrepFilesArgs } from '../actor/grep_files';
 import { editFile, type EditFileArgs } from '../actor/edit_file';
 import { writeFile, type WriteFileArgs } from '../actor/write_file';
-import { shellCommand, type ShellCommandArgs } from '../actor/shell_command';
+import { shellCommand, stopProcess, type ShellCommandArgs, type StopProcessArgs } from '../actor/shell_command';
 import { webSearch, type WebSearchArgs } from '../actor/search_web';
 import { readWebpage, type ReadWebpageArgs } from '../actor/read_webpage';
 import { askUser, type AskUserArgs } from '../actor/ask_user';
+import type { ConversationRole } from '../conversation/atif/atif.service';
+import {
+    delegateTask,
+    inspectTask,
+    stopTask,
+    waitForTasks,
+    type DelegateTaskArgs,
+    type InspectTaskArgs,
+    type StopTaskArgs,
+    type WaitForTasksArgs,
+} from '../actor/delegate_task';
 import { generateImage, type GenerateImageArgs } from '../actor/generate_image';
 import { emailUser, type EmailUserArgs } from '../actor/email_user';
-import { applyProviderToolSearch, applyToolDeferral, searchTools, SEARCH_TOOLS_TOOL_NAME, type SearchToolsArgs } from '../actor/search_tools';
+import { applyProviderToolSearch, applyToolDeferral, buildMcpInventoryForPrompt, searchTools, SEARCH_TOOLS_TOOL_NAME, type SearchToolsArgs } from '../actor/search_tools';
 import { getFunctionCallName } from '../conversation/openai/utils';
 import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
-import { type ATIFMetrics, type ATIFObservationResult, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
+import { formatMemoryForPrompt, MEMORY_RECALL_KIND } from '../../memory';
+import { type ATIFMetrics, type ATIFObservationResult, type ATIFStep, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
+import { addMetrics } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, getMcpServerDescriptions, executeMcpTool, isMcpTool } from '../mcp';
 import { PlatformBillingError } from '../../http/billing-errors';
@@ -121,6 +135,10 @@ interface ResearchConfig {
     location?: string;
     username?: string;
     userContext?: string;
+    /** Catalogue the conversation's system prompt lists, frozen at conversation start */
+    memoryCatalogue?: string;
+    /** Whether persistent memories may be exposed to this run. */
+    memoriesEnabled?: boolean;
     user?: typeof User.$inferSelect;
     /** Optional system prompt override (persisted at run start) */
     systemPrompt?: string;
@@ -130,6 +148,8 @@ interface ResearchConfig {
     confirmationContext?: ConfirmationContext;
     // Chat model ID to use for this conversation (overrides user's default)
     chatModelId?: number;
+    // Row-less platform model alias to use while retaining the selected model's configuration
+    chatModelAlias?: string;
     // Unique ID of current research run
     runId?: string;
     // Step count when iteration threshold was first reached, for stable warning injection
@@ -138,6 +158,8 @@ interface ResearchConfig {
     isFirstEverConversation?: boolean;
     // Conversation ID for tools that need to reference the current conversation
     conversationId?: string;
+    // Whether this conversation may itself delegate
+    conversationRole?: ConversationRole;
     // Callback for real-time text delta streaming
     onTextChunk?: (chunk: string) => void;
     // MCP tools whose full schemas are advertised to the model (others are deferred behind search_tools)
@@ -146,9 +168,24 @@ interface ResearchConfig {
     // OpenAI Responses API, 'flat' via provider translation) or the app-side
     // search_tools actor ('off')
     providerToolSearch?: ProviderToolSearchMode;
+    // Returns and clears steps delivered to this conversation while the run is in flight
+    drainInjectedSteps?: () => ATIFStep[];
 }
 
 export type ProviderToolSearchMode = 'off' | 'flat' | 'namespaced';
+
+/**
+ * Name-only inventory of connected MCP tools for the system prompt. Kept
+ * non-fatal: an unreachable MCP server must not block the prompt.
+ */
+async function buildMcpContext(): Promise<string> {
+    try {
+        return buildMcpInventoryForPrompt(await getMcpToolDefinitions());
+    } catch (error) {
+        log.warn({ err: error }, 'Failed to build MCP tool inventory for system prompt');
+        return '';
+    }
+}
 
 export async function buildSystemPrompt(args: {
     currentDate?: string;
@@ -159,6 +196,10 @@ export async function buildSystemPrompt(args: {
     userContext?: string;
     provideUpdatesPreamble?: string;
     isFirstEverConversation?: boolean;
+    conversationRole?: ConversationRole;
+    /** Catalogue to list, frozen at conversation start by the caller. Live changes arrive as steps. */
+    memoryCatalogue?: string;
+    memoriesEnabled?: boolean;
     now?: Date;
 }): Promise<string> {
     const now = args.now ?? new Date();
@@ -171,7 +212,15 @@ export async function buildSystemPrompt(args: {
         ? `\n- ${args.provideUpdatesPreamble}`
         : '';
 
+    const memoryContext = args.memoriesEnabled === false
+        ? ''
+        : formatMemoryForPrompt(args.memoryCatalogue ?? '', {
+            canWrite: args.conversationRole !== 'delegated',
+        });
+
     const skillsContext = formatSkillsForPrompt(getLoadedSkills().filter(s => s.visible));
+
+    const mcpContext = await buildMcpContext();
 
     const firstConversationContext = args.isFirstEverConversation
         ? await prompts.firstConversation.format({})
@@ -179,7 +228,9 @@ export async function buildSystemPrompt(args: {
 
     return prompts.director.format({
         user_context: userContext,
+        memory_context: memoryContext,
         skills_context: skillsContext,
+        mcp_context: mcpContext,
         first_conversation_context: firstConversationContext,
         current_date: args.currentDate ?? now.toLocaleDateString('en-CA'),
         current_time: getTimeOfDay(now),
@@ -370,8 +421,26 @@ REQUIRED:
                     minimum: 1000,
                     maximum: 300000,
                 },
+                run_in_background: {
+                    type: 'boolean',
+                    description: 'Set true for work that outlives a tool call: builds, test suites, dev servers. Returns the pid and a log file to tail or grep, and you are told when the command exits. Ignores timeout.',
+                },
             },
             required: ['justification', 'command', 'operation_type'],
+        },
+    },
+    {
+        name: 'stop_process',
+        description: 'Stop a background command started by shell_command, along with anything it spawned.',
+        schema: {
+            type: 'object',
+            properties: {
+                pid: {
+                    type: 'integer',
+                    description: 'The pid returned when the command was started.',
+                },
+            },
+            required: ['pid'],
         },
     },
     {
@@ -523,6 +592,110 @@ Tips:
     },
 ];
 
+/** Held apart from builtInTools because which conversations get them varies by role. */
+const delegationTools: ToolDefinition[] = [
+    {
+        name: 'delegate_task',
+        description: `Hand a task to a separate conversation to work on independently.
+
+Delegate when a task will take more than a few steps or can be parallelized.
+
+If run_in_background is true, the task is delegated to and returns immediately with its conversation id, and you are notified when it finishes. Otherwise this one call waits till the task is completed and returns the result.
+You can also start several tasks in the background and wait_for_tasks on all of them together.`,
+        schema: {
+            type: 'object',
+            properties: {
+                title: {
+                    type: 'string',
+                    description: 'Short label for the task, shown to the user in the sidebar and task cards. A few words.',
+                },
+                message: {
+                    type: 'string',
+                    description: 'The complete, standalone brief for the task, including what "done" looks like. The task sees only this.',
+                },
+                model_tier: {
+                    type: 'string',
+                    enum: ['flagship', 'balanced', 'lite'],
+                    description: 'Model intelligence tier for this task. Choose based on difficulty and cost; omit to use the same tier as this conversation.',
+                },
+                conversation_id: {
+                    type: 'string',
+                    description: 'Omit to start a new task. Pass the id of a task you already started to send it a follow-up, which reaches it even mid-work.',
+                },
+                run_in_background: {
+                    type: 'boolean',
+                    description: 'Set false to wait for the result and get it back from this call.',
+                },
+                timeout_seconds: {
+                    type: 'number',
+                    description: 'Only used when run_in_background is false. How long to wait before returning current state. Defaults to 300, maximum 1800.',
+                    minimum: 1,
+                    maximum: 1800,
+                },
+            },
+            required: ['title', 'message', 'run_in_background'],
+        },
+    },
+    {
+        name: 'inspect_task',
+        description: `Read any of the user's conversations - a task you delegated, or an earlier chat you want to recall.
+
+Once a task has finished, every detail level returns its complete final response, since that is the answer you were waiting for.
+
+Detail levels for a task still in progress:
+- "latest" (default): the most recent step. The cheap way to check on progress.
+- "outline": the current turn - any message, and which tools ran (names with a short identifying argument, never their output).
+- "full": a pointer plus recent steps. For a long conversation, follow the instructions it returns to query your own API and pull only the parts you need.`,
+        schema: {
+            type: 'object',
+            properties: {
+                conversation_id: { type: 'string', description: 'The conversation to read.' },
+                detail: {
+                    type: 'string',
+                    enum: ['latest', 'outline', 'full'],
+                    description: 'How much to return while a task is still running. Defaults to "latest".',
+                },
+            },
+            required: ['conversation_id'],
+        },
+    },
+    {
+        name: 'wait_for_tasks',
+        description: `Wait for delegated tasks to finish and get their results.
+Use this for tasks already running in the background. If you are starting a task you intend to wait for, pass run_in_background: false to delegate_task instead - that is one call rather than two.
+Pass every task you are waiting on in one call so they run concurrently. Tasks that have already finished return immediately.
+Returns each task's final response. The wait ends early if the user interrupts you or stops the run, and returns whatever state the tasks are in if it reaches the timeout.`,
+        schema: {
+            type: 'object',
+            properties: {
+                conversation_ids: {
+                    type: 'array',
+                    items: { type: 'string' },
+                    description: 'Conversation ids of the tasks to wait for, as returned by delegate_task.',
+                },
+                timeout_seconds: {
+                    type: 'number',
+                    description: 'How long to wait before giving up and reporting current state. Defaults to 300, maximum 1800.',
+                    minimum: 1,
+                    maximum: 1800,
+                },
+            },
+            required: ['conversation_ids'],
+        },
+    },
+    {
+        name: 'stop_task',
+        description: 'Stop a running conversation, such as a delegated task that is no longer needed or has gone off track. The conversation stays readable afterwards.',
+        schema: {
+            type: 'object',
+            properties: {
+                conversation_id: { type: 'string', description: 'The conversation whose run should be stopped.' },
+            },
+            required: ['conversation_id'],
+        },
+    },
+];
+
 /**
  * Get all available tools including built-in tools and MCP tools.
  * When many MCP tools are connected, their schemas are deferred behind tool
@@ -530,7 +703,13 @@ Tips:
  * marked defer_loading); others get the app-side search_tools actor, where
  * only tools in `loadedMcpTools` are advertised in full.
  */
-async function getAllTools(loadedMcpTools: Set<string> = new Set(), providerToolSearch: ProviderToolSearchMode = 'off'): Promise<ToolDefinition[]> {
+async function getAllTools(
+    loadedMcpTools: Set<string> = new Set(),
+    providerToolSearch: ProviderToolSearchMode = 'off',
+    conversationRole: ConversationRole = 'manual',
+): Promise<ToolDefinition[]> {
+    // A delegated task does the work but cannot split it further.
+    const baseTools = conversationRole === 'delegated' ? builtInTools : [...builtInTools, ...delegationTools];
     try {
         const mcpTools = await getMcpToolDefinitions();
         const deferredMcpTools = providerToolSearch !== 'off'
@@ -539,10 +718,10 @@ async function getAllTools(loadedMcpTools: Set<string> = new Set(), providerTool
                 serverDescriptions: getMcpServerDescriptions(),
             })
             : applyToolDeferral(mcpTools, loadedMcpTools);
-        return [...builtInTools, ...deferredMcpTools];
+        return [...baseTools, ...deferredMcpTools];
     } catch (error) {
         log.error({ err: error }, 'Failed to load MCP tools');
-        return builtInTools;
+        return baseTools;
     }
 }
 
@@ -573,8 +752,13 @@ async function pickNextTool(
     const { currentDate, dayOfWeek, location, username, userContext, currentIteration = 0, maxIterations, thresholdStepCount } = config;
     const isLast = currentIteration >= maxIterations - 1;
 
-    // Get all tools (built-in + MCP)
-    const tools = await getAllTools(config.loadedMcpTools, config.providerToolSearch);
+    // Get all tools (built-in + delegation + MCP). A delegated task does its own work
+    // rather than splitting it further, so delegation is withheld there.
+    const tools = await getAllTools(
+        config.loadedMcpTools,
+        config.providerToolSearch,
+        config.conversationRole,
+    );
     const toolChoice = isLast ? 'none' : 'auto';
 
     const now = new Date();
@@ -585,11 +769,16 @@ async function pickNextTool(
         username,
         userContext,
         isFirstEverConversation: config.isFirstEverConversation,
+        conversationRole: config.conversationRole,
+        memoryCatalogue: config.memoryCatalogue,
+        memoriesEnabled: config.memoriesEnabled,
         now,
     });
 
-    // Check if this is the first agent iteration
-    const hasSystemStep = config.chatHistory.steps.some(s => s.source === 'system');
+    // Check if this is the first agent iteration. Auxiliary system steps like a
+    // recalled memory can precede the base system prompt in a new conversation.
+    const hasSystemStep = config.chatHistory.steps.some(
+        s => s.source === 'system' && s.extra?.kind !== MEMORY_RECALL_KIND);
     const isFirstIteration = !hasSystemStep;
 
     // Inject iteration warning when at 90%+ of max iterations
@@ -609,7 +798,7 @@ async function pickNextTool(
         const warningStep = {
             step_id: -1, // Ephemeral, not persisted
             timestamp: now.toISOString(),
-            source: 'user' as const,
+            source: 'system' as const,
             message: iterationWarning,
         };
 
@@ -636,8 +825,10 @@ async function pickNextTool(
             false,     // fastMode
             config.user, // user - for user's selected model
             config.chatModelId,
+            config.conversationId,
             config.runId,
             config.onTextChunk,
+            config.chatModelAlias,
         );
 
         // Check if response is valid
@@ -652,6 +843,7 @@ async function pickNextTool(
                 prompt_tokens: response.usage.prompt_tokens,
                 completion_tokens: response.usage.completion_tokens,
                 cached_tokens: response.usage.cached_tokens,
+                cache_write_tokens: response.usage.cache_write_tokens,
                 cost_usd: response.usage.cost_usd,
             };
         }
@@ -744,14 +936,23 @@ async function pickNextTool(
 }
 
 /**
+ * Extract shell text preceding any heredoc body to scan for (chained) commands.
+ * Interpreter payloads (`python3 << 'EOF' ...`) are not shell syntax that need to scanned.
+ */
+function shellPortion(command: string): string {
+    return command.split(/<<-?\s*['"]?\w+/)[0] ?? command;
+}
+
+/**
  * Detect if a shell command is a `find` invocation.
  * Matches `find /path ...` at the start or after pipe/chain operators.
  */
 export function isShellFindCommand(command: string): boolean {
-    const trimmed = command.trimStart();
+    const shell = shellPortion(command);
+    const trimmed = shell.trimStart();
     if (trimmed.startsWith('find ') || trimmed === 'find') return true;
     // Check for find after pipe or chain operators
-    return /[|;&]\s*find\s/.test(command);
+    return /[|;&]\s*find\s/.test(shell);
 }
 
 /**
@@ -760,7 +961,7 @@ export function isShellFindCommand(command: string): boolean {
  */
 export function extractFindPath(command: string): string | undefined {
     // Split on chain operators to get the segment containing `find`
-    const segments = command.split(/[|;&]+/);
+    const segments = shellPortion(command).split(/[|;&]+/);
     const findSegment = segments.reverse().find(s => s.trimStart().startsWith('find '));
     if (!findSegment) return undefined;
     const afterFind = findSegment.trimStart().slice('find '.length).trimStart();
@@ -821,14 +1022,14 @@ async function executeTool(
             case 'edit_file': {
                 const result = await editFile(
                     toolCall.arguments as EditFileArgs,
-                    { confirmationContext: context?.confirmation }
+                    { confirmationContext: context?.confirmation, conversationId: context?.conversationId }
                 );
                 return result.compiled;
             }
             case 'write_file': {
                 const result = await writeFile(
                     toolCall.arguments as WriteFileArgs,
-                    { confirmationContext: context?.confirmation }
+                    { confirmationContext: context?.confirmation, conversationId: context?.conversationId }
                 );
                 return result.compiled;
             }
@@ -845,7 +1046,8 @@ async function executeTool(
                 ) {
                     const findPath = extractFindPath(args.command);
                     const resolvedFindPath = findPath ? resolvePath(findPath) : resolvePath('~');
-                    if (isBroadSearch(resolvedFindPath)) {
+                    // A find on a missing path fails instantly, so there is no slow scan to warn about
+                    if (isBroadSearch(resolvedFindPath) && existsSync(resolvedFindPath)) {
                         context.shownReminders.add('find_warned');
                         return '[System Warning]: prefer `mdfind` over `find` for instant results and to avoid TCC permission dialogs.\n'
                             + 'Examples: `mdfind -name "report" -onlyin ~/Documents` (find by name substring), '
@@ -857,9 +1059,16 @@ async function executeTool(
 
                 const result = await shellCommand(
                     args,
-                    { confirmationContext: context?.confirmation }
+                    {
+                        confirmationContext: context?.confirmation,
+                        conversationId: context?.conversationId,
+                        user: context?.user,
+                    }
                 );
                 return result.compiled;
+            }
+            case 'stop_process': {
+                return stopProcess(toolCall.arguments as StopProcessArgs).compiled;
             }
             case 'search_web': {
                 const result = await webSearch(toolCall.arguments as WebSearchArgs, context?.conversationId);
@@ -889,6 +1098,44 @@ async function executeTool(
                 const result = await askUser(
                     toolCall.arguments as AskUserArgs,
                     context?.confirmation
+                );
+                return result.compiled;
+            }
+            case 'delegate_task': {
+                const result = await delegateTask(
+                    toolCall.arguments as DelegateTaskArgs,
+                    {
+                        user: context?.user,
+                        parentConversationId: context?.conversationId,
+                        confirmationPreferences: context?.confirmation?.preferences,
+                        abortSignal: context?.abortSignal,
+                        parentChatModelId: context?.chatModelId,
+                    },
+                );
+                return result.compiled;
+            }
+            case 'inspect_task': {
+                const result = await inspectTask(
+                    toolCall.arguments as InspectTaskArgs,
+                    { user: context?.user },
+                );
+                return result.compiled;
+            }
+            case 'stop_task': {
+                const result = await stopTask(
+                    toolCall.arguments as StopTaskArgs,
+                    { user: context?.user },
+                );
+                return result.compiled;
+            }
+            case 'wait_for_tasks': {
+                const result = await waitForTasks(
+                    toolCall.arguments as WaitForTasksArgs,
+                    {
+                        user: context?.user,
+                        abortSignal: context?.abortSignal,
+                        parentConversationId: context?.conversationId,
+                    },
                 );
                 return result.compiled;
             }
@@ -987,6 +1234,15 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         // Check if paused before starting new iteration
         if (config.abortSignal?.aborted) {
             throw new ResearchPausedError();
+        }
+
+        // Updates delivered while this run was in flight - a background command
+        // exiting, a delegated task reporting back. Already persisted, so this only
+        // brings them into the trajectory the next request is built from.
+        const injectedSteps = config.drainInjectedSteps?.() ?? [];
+        if (injectedSteps.length > 0) {
+            config.chatHistory.steps.push(...injectedSteps);
+            log.info({ count: injectedSteps.length, iteration: i }, 'Picked up updates delivered mid-run');
         }
 
         // Capture step count when we first hit the threshold
@@ -1104,6 +1360,7 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             prompt_tokens: 0,
             completion_tokens: 0,
             cached_tokens: 0,
+            cache_write_tokens: 0,
             cost_usd: 0,
         };
 
@@ -1115,24 +1372,15 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             runId: config.runId,
             shownReminders,
             loadedMcpTools,
+            user: config.user,
+            chatModelId: config.chatModelId,
+            abortSignal: config.abortSignal,
         };
         iteration.toolResults = await executeToolsInParallel(iteration.toolCalls, executionContext, config.abortSignal);
 
         // Merge tool execution metrics with director's LLM metrics
         if (metricsAccumulator.prompt_tokens > 0 || metricsAccumulator.completion_tokens > 0) {
-            if (iteration.metrics) {
-                iteration.metrics.prompt_tokens += metricsAccumulator.prompt_tokens;
-                iteration.metrics.completion_tokens += metricsAccumulator.completion_tokens;
-                iteration.metrics.cached_tokens = (iteration.metrics.cached_tokens || 0) + metricsAccumulator.cached_tokens;
-                iteration.metrics.cost_usd += metricsAccumulator.cost_usd;
-            } else {
-                iteration.metrics = {
-                    prompt_tokens: metricsAccumulator.prompt_tokens,
-                    completion_tokens: metricsAccumulator.completion_tokens,
-                    cached_tokens: metricsAccumulator.cached_tokens || undefined,
-                    cost_usd: metricsAccumulator.cost_usd,
-                };
-            }
+            iteration.metrics = addMetrics(iteration.metrics, metricsAccumulator);
         }
 
         yield iteration;

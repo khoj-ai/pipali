@@ -9,16 +9,18 @@ import { initializeDatabase } from "./init";
 import { getMigrationsFolder } from "./utils";
 import { loadSkills, installBuiltinSkills } from "./skills";
 import { initializeUserContext } from "./user-context";
-import { websocketHandler, type WebSocketData } from "./routes/ws";
+import { initializeMemory } from "./memory";
+import { handleChatUpgrade, websocketHandler, type WebSocketData } from "./routes/ws";
 import {
     IS_COMPILED_BINARY,
     EMBEDDED_MIGRATIONS,
 } from "./embedded-assets";
 import { startAutomationSystem, stopAutomationSystem } from "./automation";
-import { loadEnabledMcpServers, closeMcpClients } from "./processor/mcp";
+import { loadEnabledMcpServers, startMcpRetrySweep, stopMcpRetrySweep, closeMcpClients } from "./processor/mcp";
 import { configureAuth, isAuthenticated, getPlatformUserInfo } from "./auth";
 import { createChildLogger } from './logger';
 import { initializeSandbox, shutdownSandbox } from './sandbox';
+import { killAllBackgroundProcesses } from './events/background-processes';
 import { initPlatformTransport, shutdownPlatformTransport } from './telemetry/platform-transport';
 import { setServer } from './server-instance';
 
@@ -68,6 +70,11 @@ Options:
       --anon               Skip platform authentication, use local API keys (env: PIPALI_ANON_MODE)
       --platform-url <url> Platform URL for authentication (env: PIPALI_PLATFORM_URL)
       --help               Show this help message
+
+Environment:
+  PIPALI_TRUSTED_HOSTS   Comma separated hostnames this server can be reached on behind
+                         a reverse proxy. Browser requests whose Host is not loopback or
+                         listed here are refused.
 
 Examples:
   pipali                        # Start with platform authentication
@@ -207,10 +214,16 @@ async function main() {
         log.info('🔓 Running in anonymous mode (using local API keys)');
     }
 
-    // Install builtin skills to global directory (skips if already exists)
+    // Install builtin skills, updating the ones the user has not edited
     const builtinResult = await installBuiltinSkills();
     if (builtinResult.installed.length > 0) {
         log.info(`📦 Installed builtin skill(s): ${builtinResult.installed.join(', ')}`);
+    }
+    if (builtinResult.refreshed.length > 0) {
+        log.info(`📦 Updated builtin skill(s): ${builtinResult.refreshed.join(', ')}`);
+    }
+    if (builtinResult.customized.length > 0) {
+        log.info(`📦 Kept your edited builtin skill(s): ${builtinResult.customized.join(', ')}`);
     }
 
     // Load skills from global and local paths
@@ -235,6 +248,9 @@ async function main() {
     }
     await initializeUserContext(userInfo);
 
+    // Create the memory directory so the agent can write memories without checking first
+    await initializeMemory();
+
     // Initialize sandbox runtime (for secure shell command execution)
     await initializeSandbox();
 
@@ -248,6 +264,11 @@ async function main() {
     loadEnabledMcpServers().catch(error => {
         log.warn(`⚠️ Failed to load MCP servers:`, error);
     });
+
+    // Servers that failed to connect, or that drop later, are retried in the
+    // background. Nothing else reconnects them without the user going to the
+    // Tools page, and they have no way to know they need to.
+    startMcpRetrySweep();
 
     // Build frontend only in development mode (not when running as compiled binary)
     if (!IS_COMPILED_BINARY && !process.env.PIPALI_SERVER_RESOURCE_DIR) {
@@ -266,91 +287,86 @@ async function main() {
         log.info("Skipping frontend build (bundled server resources).");
     }
 
-  // Disable development mode (hot reload) in test mode or compiled binary
-  // This prevents Bun from restarting the server when files change during tests
-  const isDevelopmentMode = !IS_COMPILED_BINARY && process.env.PIPALI_TEST_MODE !== 'true';
+    // Disable development mode (hot reload) in test mode or compiled binary
+    // This prevents Bun from restarting the server when files change during tests
+    const isDevelopmentMode = !IS_COMPILED_BINARY && process.env.PIPALI_TEST_MODE !== 'true';
 
-  // Paths for quieter logging (e.g frequent polling endpoints)
-  const QUIETER_PATHS = new Set(['/api/automations/confirmations/pending']);
+    // Paths for quieter logging (e.g frequent polling endpoints)
+    const QUIETER_PATHS = new Set(['/api/automations/confirmations/pending']);
 
-  const server = Bun.serve<WebSocketData, any>({
-    async fetch(req, server) {
-        const url = new URL(req.url);
-        if (QUIETER_PATHS.has(url.pathname)) {
-            log.debug(`[${req.method}] ${url.pathname}`);
-        } else {
-            log.info(`[${req.method}] ${url.pathname}`);
-        }
-
-        // WebSocket
-        if (url.pathname === "/ws/chat") {
-            const success = server.upgrade(req, {
-                data: {
-                    // Initialize data if needed
-                }
-            });
-            if (success) {
-                return undefined;
+    const server = Bun.serve<WebSocketData, any>({
+        async fetch(req, server) {
+            const url = new URL(req.url);
+            if (QUIETER_PATHS.has(url.pathname)) {
+                log.debug(`[${req.method}] ${url.pathname}`);
+            } else {
+                log.info(`[${req.method}] ${url.pathname}`);
             }
-        }
 
-        // API
-        if (url.pathname.startsWith("/api")) {
-            const res = await api.fetch(req, server);
+            // WebSocket
+            if (url.pathname === "/ws/chat") {
+                return handleChatUpgrade(req, server);
+            }
+
+            // API
+            if (url.pathname.startsWith("/api")) {
+                const res = await api.fetch(req, server);
+                return res;
+            }
+
+            // Static and frontend routes
+            const res = await app.fetch(req, server);
             return res;
-        }
+        },
+        websocket: websocketHandler,
+        hostname: config.host,
+        port: config.port,
+        development: isDevelopmentMode,
+    });
 
-        // Static and frontend routes
-        const res = await app.fetch(req, server);
-        return res;
-    },
-    websocket: websocketHandler,
-    hostname: config.host,
-    port: config.port,
-    development: isDevelopmentMode,
-  });
+    setServer(server);
 
-  setServer(server);
+    log.info(`Server listening on http://${config.host}:${server.port}`);
 
-  log.info(`Server listening on http://${config.host}:${server.port}`);
-
-  // Log auth status (authentication is now handled via the frontend login page)
-  if (!config.anon && !alreadyAuthenticated) {
-      log.info('🔐 Authentication required - sign in via the web interface');
-      log.info(`   Platform: ${config.platformUrl}`);
-  }
-
-  // Graceful shutdown handlers to prevent database corruption
-  let shutdownStarted = false;
-  const shutdown = async (signal: string) => {
-    if (shutdownStarted) return;
-    shutdownStarted = true;
-
-    log.info(`\nReceived ${signal}, shutting down gracefully...`);
-
-    const forceExitTimer = setTimeout(() => {
-      log.error('Graceful shutdown timed out, forcing exit.');
-      process.exit(1);
-    }, 8_000);
-
-    try {
-      server.stop();
-      await stopAutomationSystem();
-      await closeMcpClients();
-      await shutdownSandbox();
-      await shutdownPlatformTransport();
-      await closeDatabase();
-      log.info('Shutdown complete.');
-      process.exit(0);
-    } finally {
-      clearTimeout(forceExitTimer);
+    // Log auth status (authentication is now handled via the frontend login page)
+    if (!config.anon && !alreadyAuthenticated) {
+        log.info('🔐 Authentication required - sign in via the web interface');
+        log.info(`   Platform: ${config.platformUrl}`);
     }
-  };
 
-  process.on('SIGINT', () => void shutdown('SIGINT'));
-  process.on('SIGTERM', () => void shutdown('SIGTERM'));
-  process.on('SIGHUP', () => void shutdown('SIGHUP'));
-  process.on('SIGQUIT', () => void shutdown('SIGQUIT'));
+    // Graceful shutdown handlers to prevent database corruption
+    let shutdownStarted = false;
+    const shutdown = async (signal: string) => {
+        if (shutdownStarted) return;
+        shutdownStarted = true;
+
+        log.info(`\nReceived ${signal}, shutting down gracefully...`);
+
+        const forceExitTimer = setTimeout(() => {
+            log.error('Graceful shutdown timed out, forcing exit.');
+            process.exit(1);
+        }, 8_000);
+
+        try {
+            server.stop();
+            killAllBackgroundProcesses();
+            await stopAutomationSystem();
+            stopMcpRetrySweep();
+            await closeMcpClients();
+            await shutdownSandbox();
+            await shutdownPlatformTransport();
+            await closeDatabase();
+            log.info('Shutdown complete.');
+            process.exit(0);
+        } finally {
+            clearTimeout(forceExitTimer);
+        }
+    };
+
+    process.on('SIGINT', () => void shutdown('SIGINT'));
+    process.on('SIGTERM', () => void shutdown('SIGTERM'));
+    process.on('SIGHUP', () => void shutdown('SIGHUP'));
+    process.on('SIGQUIT', () => void shutdown('SIGQUIT'));
 }
 
 main();

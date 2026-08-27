@@ -6,7 +6,7 @@
 
 import { test, expect } from '@playwright/test';
 import { HomePage, ChatPage } from '../helpers/page-objects';
-import { stopAllActiveRunsFromHome } from '../helpers/cleanup';
+import { stopAllActiveConversations, stopAllActiveRunsFromHome } from '../helpers/cleanup';
 
 // Use "pausable" keyword to trigger slow mock scenario (1s between steps)
 const PAUSABLE_QUERY = 'run a pausable analysis';
@@ -18,7 +18,10 @@ function uniqueQuery(base: string): string {
 test.describe('Home Page Task Gallery', () => {
     let homePage: HomePage;
 
-    test.beforeEach(async ({ page }) => {
+    test.beforeEach(async ({ page, request }) => {
+        // Specs share one server, and an agent can start work on its own, so begin from
+        // a known-quiet state rather than inheriting whatever is still running.
+        await stopAllActiveConversations(page, request);
         homePage = new HomePage(page);
         await homePage.goto();
     });

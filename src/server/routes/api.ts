@@ -9,6 +9,7 @@ import { db, getDefaultChatModel } from '../db';
 import { Automation, Conversation, ConversationStep } from '../db/schema';
 import { asc, eq, desc, and, inArray, sql } from 'drizzle-orm';
 import { AiModelApi, ChatModel, User, UserChatModel } from '../db/schema';
+import { isAllowedOrigin } from './origin-guard';
 import openapi from './openapi';
 import automations from './automations';
 import mcp from './mcp';
@@ -21,8 +22,11 @@ import { getActiveStatus } from '../sessions';
 import { transcribeAudio, synthesizeSpeech, summarizeForSpeech, VoiceUnavailableError } from '../voice';
 import { PlatformAuthError } from '../http/platform-fetch';
 import { PlatformBillingError } from '../http/billing-errors';
-import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill, toggleSkillVisibility } from '../skills';
+import { loadSkills, getLoadedSkills, createSkill, getSkill, deleteSkill, updateSkill, toggleSkillVisibility, resetBuiltinSkill } from '../skills';
 import { loadUserContext, saveUserContext } from '../user-context';
+import { deleteAllMemories, deleteMemory, getMemory, listMemories } from '../memory';
+import { loadMemorySettings, saveMemorySettings } from '../memory/settings';
+import { stopDreaming } from '../memory/dream';
 import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
 import { IS_COMPILED_BINARY, EMBEDDED_CHANGELOG } from '../embedded-assets';
@@ -40,22 +44,26 @@ const log = createChildLogger({ component: 'api' });
 const api = new Hono().basePath('/api');
 
 // Enable CORS for Tauri desktop app and local development
-// - macOS/Linux WebView uses tauri://localhost origin
-// - Windows WebView2 uses http://tauri.localhost origin
 api.use('*', cors({
-    origin: (origin) => {
+    origin: (origin, c) => {
         // Allow Tauri app, localhost dev servers, and same-origin requests
         if (!origin) return '*'; // Same-origin or non-browser requests
-        if (origin.startsWith('tauri://')) return origin;
-        if (origin === 'http://tauri.localhost') return origin; // Windows WebView2
-        if (origin.startsWith('http://localhost:')) return origin;
-        if (origin.startsWith('http://127.0.0.1:')) return origin;
-        return null; // Reject other origins
+        return isAllowedOrigin(origin, c.req.header('Host')) ? origin : null;
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization'],
     credentials: true,
 }));
+
+// CORS hides disallowed responses but does not stop simple cross-origin writes.
+api.use('*', async (c, next) => {
+    const origin = c.req.header('Origin');
+    const safeMethod = c.req.method === 'GET' || c.req.method === 'HEAD' || c.req.method === 'OPTIONS';
+    if (origin && !safeMethod && !isAllowedOrigin(origin, c.req.header('Host'))) {
+        return c.json({ error: 'Forbidden origin' }, 403);
+    }
+    await next();
+});
 
 // Health check endpoint for Tauri sidecar readiness detection
 api.get('/health', (c) => c.json({ status: 'ok' }));
@@ -221,6 +229,7 @@ api.get('/conversations', async (c) => {
         updatedAt: Conversation.updatedAt,
         chatModelId: Conversation.chatModelId,
         automationId: Conversation.automationId,
+        parentConversationId: Conversation.parentConversationId,
         isPinned: Conversation.isPinned,
     })
     .from(Conversation)
@@ -344,6 +353,7 @@ api.get('/conversations', async (c) => {
             chatModelId: conv.chatModelId,
             isActive,
             isAutomation: !!conv.automationId,
+            parentConversationId: conv.parentConversationId,
             isPinned: conv.isPinned,
             latestReasoning,
             ...(matchSnippet !== undefined && { matchSnippet }),
@@ -622,6 +632,84 @@ api.put('/user/context', zValidator('json', userContextSchema), async (c) => {
     }
 });
 
+api.get('/memory/settings', async (c) => {
+    const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
+    if (!user) {
+        return c.json({ error: 'User not found' }, 404);
+    }
+
+    try {
+        return c.json(await loadMemorySettings(user.id));
+    } catch (err) {
+        log.error({ err }, 'Failed to load memory settings');
+        return c.json({ error: 'Failed to load memory settings' }, 500);
+    }
+});
+
+const memorySettingsSchema = z.object({
+    memoriesEnabled: z.boolean().optional(),
+});
+
+api.put('/memory/settings', zValidator('json', memorySettingsSchema), async (c) => {
+    const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
+    if (!user) {
+        return c.json({ error: 'User not found' }, 404);
+    }
+
+    try {
+        const settings = await saveMemorySettings(user.id, c.req.valid('json'));
+        if (!settings.memoriesEnabled) {
+            await stopDreaming(user.id);
+        }
+        return c.json(settings);
+    } catch (err) {
+        log.error({ err }, 'Failed to save memory settings');
+        return c.json({ error: 'Failed to save memory settings' }, 500);
+    }
+});
+
+api.get('/memory', async (c) => {
+    try {
+        return c.json({ memories: await listMemories() });
+    } catch (err) {
+        log.error({ err }, 'Failed to list memories');
+        return c.json({ error: 'Failed to list memories' }, 500);
+    }
+});
+
+api.get('/memory/:file', async (c) => {
+    try {
+        const memory = await getMemory(c.req.param('file'));
+        return memory
+            ? c.json({ memory })
+            : c.json({ error: 'Memory not found' }, 404);
+    } catch (err) {
+        log.error({ err }, 'Failed to load memory');
+        return c.json({ error: 'Failed to load memory' }, 500);
+    }
+});
+
+api.delete('/memory', async (c) => {
+    try {
+        return c.json({ success: true, deleted: await deleteAllMemories() });
+    } catch (err) {
+        log.error({ err }, 'Failed to delete memories');
+        return c.json({ error: 'Failed to delete memories' }, 500);
+    }
+});
+
+api.delete('/memory/:file', async (c) => {
+    try {
+        const deleted = await deleteMemory(c.req.param('file'));
+        return deleted
+            ? c.json({ success: true })
+            : c.json({ error: 'Memory not found' }, 404);
+    } catch (err) {
+        log.error({ err }, 'Failed to delete memory');
+        return c.json({ error: 'Failed to delete memory' }, 500);
+    }
+});
+
 // ATIF Export endpoint - Export a conversation in ATIF format
 api.get('/conversations/:conversationId/export/atif', async (c) => {
     const conversationId = c.req.param('conversationId');
@@ -791,6 +879,22 @@ api.patch('/skills/:name/visibility', zValidator('json', toggleVisibilitySchema)
     return c.json({ success: true, skill: result.skill });
 });
 
+// Restore a builtin skill to the version shipped with this build
+api.post('/skills/:name/reset', async (c) => {
+    const name = c.req.param('name');
+    log.info(`♻️  Resetting builtin skill "${name}"`);
+
+    const result = await resetBuiltinSkill(name);
+
+    if (!result.success) {
+        log.warn(`⚠️  Failed to reset skill: ${result.error}`);
+        return c.json({ error: result.error }, 400);
+    }
+
+    log.info(`✅ Reset skill "${name}"`);
+    return c.json({ success: true, skill: result.skill });
+});
+
 // Delete a skill
 api.delete('/skills/:name', async (c) => {
     const name = c.req.param('name');
@@ -852,23 +956,26 @@ api.put('/user/sandbox', zValidator('json', sandboxSettingsSchema), async (c) =>
     }
 });
 
-// Upload files to /tmp/pipali/uploads/ (web mode file attachment)
+// Upload files to Pipali's system temp directory (web mode file attachment)
 api.post('/upload', async (c) => {
     const body = await c.req.parseBody({ all: true });
     const files = body['files'];
     if (!files) return c.json({ error: 'No files provided' }, 400);
 
     const fileArray = Array.isArray(files) ? files : [files];
-    const uploadDir = path.join(os.tmpdir(), 'pipali', 'uploads');
+    const uploadDir = path.resolve(os.tmpdir(), 'pipali', 'uploads');
     await Bun.$`mkdir -p ${uploadDir}`.quiet();
 
     const results = [];
     for (const file of fileArray) {
         if (typeof file === 'string') continue;
         const uuid = crypto.randomUUID().slice(0, 8);
-        const fileName = file.name || 'unknown';
+        const fileName = path.basename((file.name || 'unknown').replaceAll('\\', '/')) || 'unknown';
         const destName = `${uuid}-${fileName}`;
-        const destPath = path.join(uploadDir, destName);
+        const destPath = path.resolve(uploadDir, destName);
+        if (path.dirname(destPath) !== uploadDir) {
+            return c.json({ error: 'Invalid file name' }, 400);
+        }
         await Bun.write(destPath, file);
         results.push({ fileName, filePath: destPath, sizeBytes: file.size });
     }
@@ -1011,9 +1118,9 @@ api.post('/voice/speech', zValidator('json', voiceSpeechSchema), async (c) => {
     const { text, voice, model, format } = c.req.valid('json');
     try {
         const result = await synthesizeSpeech({ text, voice, model, format });
-        return new Response(result.audio, {
+        return new Response(result.stream, {
             status: 200,
-            headers: { 'Content-Type': result.contentType, 'Content-Length': String(result.audio.length) },
+            headers: { 'Content-Type': result.contentType },
         });
     } catch (error) {
         return voiceErrorResponse(c, error);

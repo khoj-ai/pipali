@@ -6,6 +6,7 @@
 
 import { apiFetch } from '../api';
 import { SUMMARIZE_TEXT_CAP } from './voice-config';
+import { PcmBlockBuffer, WavStreamParser } from './voice-pcm';
 
 /** Segmented capture needs getUserMedia + AudioWorklet (Safari/WKWebView 14.1+, Chromium, Firefox). */
 export function isVoiceCaptureSupported(): boolean {
@@ -73,16 +74,50 @@ export async function summarizeForSpeech(text: string, opts?: { kind?: 'response
     return data.summary ?? '';
 }
 
-/** Synthesize speech audio for text via the app's voice route. */
-export async function synthesizeSpeech(
-    text: string,
-    opts?: { voice?: string; model?: string; format?: string },
-): Promise<ArrayBuffer> {
-    const res = await apiFetch('/api/voice/speech', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, ...opts }),
-    });
-    if (!res.ok) throw await toVoiceError(res);
-    return res.arrayBuffer();
+export interface SpeechHandle {
+    /** Settles once audio is flowing (or synthesis failed) — gate readiness cues on this. */
+    ready: Promise<void>;
+    /** Decoded audio for playback via speakPcm; buffers so playback can attach any time. */
+    stream: PcmBlockBuffer;
+    /** Abort synthesis and discard the readout (superseded or dismissed). */
+    cancel(): void;
+}
+
+/**
+ * Start synthesizing speech for text via the app's voice route, decoding the
+ * streamed WAV response as it arrives. Synthesis begins immediately; playback
+ * attaches whenever the readout is actually wanted. Text may be a promise so
+ * a summary can still be enriching while the handle is already cacheable.
+ */
+export function startSpeech(text: string | Promise<string>, opts?: { voice?: string; model?: string }): SpeechHandle {
+    const controller = new AbortController();
+    const stream = new PcmBlockBuffer();
+    void (async () => {
+        try {
+            const input = await text;
+            const res = await apiFetch('/api/voice/speech', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: input, format: 'wav', ...opts }),
+                signal: controller.signal,
+            });
+            if (!res.ok) throw await toVoiceError(res);
+            if (!res.body) throw new Error('Speech response had no body');
+            const parser = new WavStreamParser();
+            const reader = res.body.getReader();
+            for (;;) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                const samples = parser.push(value);
+                if (parser.info) stream.sampleRate = parser.info.sampleRate;
+                if (samples.length) stream.push(samples);
+            }
+            stream.end();
+        } catch (error) {
+            stream.fail(error);
+        }
+    })();
+    // Acks never observe `ready`; keep an unwatched rejection from surfacing as unhandled.
+    stream.first.catch(() => {});
+    return { ready: stream.first, stream, cancel: () => controller.abort() };
 }

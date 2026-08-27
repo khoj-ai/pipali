@@ -1,9 +1,11 @@
 // Individual thought/tool_call rendering
 
 import { useCallback, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Thought } from '../../types';
-import { formatToolArgs, getFriendlyToolName, formatToolArgsRich, getToolCategory } from '../../utils/formatting';
+import { formatDelegationToolResult, formatToolArgs, getFriendlyToolName, formatToolArgsRich, getToolCategory, getDelegatedConversationId } from '../../utils/formatting';
 import { getToolResultStatus } from '../../utils/toolStatus';
+import { useConversationNavigation } from '../../hooks/useConversationNavigation';
 import { ExternalLink } from '../ExternalLink';
 import { ChatMarkdown } from '../ChatMarkdown';
 import { ThoughtDiffView } from '../tool-views/ThoughtDiffView';
@@ -52,6 +54,7 @@ interface ThoughtItemProps {
     showResult?: boolean; // false = outline (title only), true = full (title + result)
     onToggle?: () => void; // Toggle this item's detail level individually
     uidMap?: Map<string, { role: string; label: string }>; // Chrome snapshot uid→label map
+    delegatedTaskTitles?: Map<string, string>;
 }
 
 // Clear markdown markers for the single-line outline view, where the
@@ -61,7 +64,9 @@ function formatPlainText(text: string): string {
     return text.replace(/\*\*([^*]+)\*\*/g, '$1');
 }
 
-export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult = true, onToggle, uidMap }: ThoughtItemProps) {
+export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult = true, onToggle, uidMap, delegatedTaskTitles }: ThoughtItemProps) {
+    const { t } = useTranslation();
+    const navigateToConversation = useConversationNavigation();
     // Track whether the reasoning text is overflowing (truncated by ellipsis)
     const [isOverflowing, setIsOverflowing] = useState(false);
     const reasoningRef = useCallback((el: HTMLDivElement | null) => {
@@ -97,16 +102,43 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult
 
     if (thought.type === 'tool_call') {
         const toolName = thought.toolName || '';
-        const richArgs = formatToolArgsRich(toolName, thought.toolArgs, !showResult, uidMap);
+        const delegationText = {
+            background: t('thoughts.delegationBackground'),
+            modelTier: (tier: string) => {
+                const tierLabels: Record<string, string> = {
+                    flagship: t('inputArea.tierFlagship'),
+                    balanced: t('inputArea.tierBalanced'),
+                    lite: t('inputArea.tierLite'),
+                };
+                return t('thoughts.delegationModel', { tier: tierLabels[tier] ?? tier });
+            },
+            waitForTasks: (tasks: string) => t('thoughts.waitForTasks', { tasks }),
+            noRunInProgress: t('thoughts.noRunInProgress'),
+        };
+        const richArgs = formatToolArgsRich(
+            toolName,
+            thought.toolArgs,
+            !showResult,
+            uidMap,
+            delegatedTaskTitles,
+            delegationText,
+        );
         const formattedArgs = richArgs ? '' : formatToolArgs(toolName, thought.toolArgs);
         const friendlyToolName = getFriendlyToolName(toolName);
         const isInterrupted = thought.toolResult?.trim() === '[interrupted]';
+        const displayToolResult = formatDelegationToolResult(
+            toolName,
+            thought.toolResult,
+            delegationText.noRunInProgress,
+        );
         const category = getToolCategory(toolName);
         const operationType = toolName.includes('__') ? thought.toolArgs?.operation_type : undefined;
 
         // Determine success/error status for step indicator (pending takes precedence)
         const stepStatus = thought.isPending ? 'pending' : getToolResultStatus(thought.toolResult, toolName);
         const canToggle = !!onToggle;
+        // Delegated conversations are kept out of the sidebar, so this step is the way in
+        const delegatedConversationId = getDelegatedConversationId(toolName, thought.toolResult);
 
         return (
             <div className={`thought-item ${isPreview ? 'preview' : ''} ${thought.isPending ? 'pending' : ''}`}>
@@ -128,6 +160,14 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult
                                     <ExternalLink href={richArgs.url} className="thought-args-link">
                                         {richArgs.text}
                                     </ExternalLink>
+                                ) : delegatedConversationId && navigateToConversation ? (
+                                    <button
+                                        type="button"
+                                        className="thought-args-link thought-args-button"
+                                        onClick={(e) => { e.stopPropagation(); navigateToConversation(delegatedConversationId); }}
+                                    >
+                                        {richArgs.text}
+                                    </button>
                                 ) : (
                                     <span className="thought-args-primary">{richArgs.text}</span>
                                 )}
@@ -214,12 +254,12 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult
                                 />
                             )}
                             {/* Show regular result for other tools, or error output for tools with suppressed results */}
-                            {!isInterrupted && thought.toolResult && (
+                            {!isInterrupted && displayToolResult && (
                                 !TOOLS_WITH_CUSTOM_VIEWS.has(toolName) ||
                                 (stepStatus === 'error' && !TOOLS_WITH_ERROR_HANDLING_VIEWS.has(toolName))
                             ) && (
                                 <ToolResultView
-                                    result={thought.toolResult}
+                                    result={displayToolResult}
                                     toolName={friendlyToolName}
                                 />
                             )}

@@ -300,6 +300,8 @@ export interface QueuedMessage {
     clientMessageId: string;
     message: string;
     chatModelId?: number;
+    /** alias for dynamic selection by platform */
+    chatModelAlias?: string;
 }
 
 /**

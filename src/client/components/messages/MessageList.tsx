@@ -20,6 +20,7 @@ interface MessageListProps {
     userFirstName?: string;
     hasInput?: boolean;
     isProcessing?: boolean;
+    zoom?: number;
 }
 
 export function MessageList({
@@ -35,6 +36,7 @@ export function MessageList({
     userFirstName,
     hasInput,
     isProcessing = false,
+    zoom = 1,
 }: MessageListProps) {
     const {
         activeRunStableId,
@@ -51,7 +53,7 @@ export function MessageList({
     );
 
     return (
-        <main className="main-content" ref={mainContentRef}>
+        <main className="main-content" ref={mainContentRef} style={{ zoom }}>
             <div className="messages-container">
                 {messages.length === 0 ? (
                     <EmptyHomeState userFirstName={userFirstName} hasInput={hasInput} />

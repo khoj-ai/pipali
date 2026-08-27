@@ -86,6 +86,14 @@
         "tierOther": "Other",
         "recommended": "Recommended"
     },
+    "thoughts": {
+        "delegationModel": "to {{tier}} model",
+        "delegationBackground": "in background",
+        "waitForTasks": "on {{tasks}}",
+        "noRunInProgress": "No run was in progress.",
+        "recalledMemories_one": "Recalled {{count}} memory.",
+        "recalledMemories_other": "Recalled {{count}} memories."
+    },
     "voice": {
         "beta": "Beta",
         "betaHint": "Turning this on adds the voice controls next to the message box.",
@@ -295,6 +303,21 @@
         "tabPermissions": "Permissions",
         "aboutYou": "About You",
         "aboutYouDescription": "This information helps Pipali personalize responses and understand your context.",
+        "memories": "Memories",
+        "memoriesDescription": "Let Pipali remember useful details across conversations. Disable to stop memories from being auto-loaded in future conversations. Existing memory files and conversations remain unchanged.",
+        "failedToSaveMemories": "Failed to update memory settings",
+        "storedMemories": "Stored memories ({{count}})",
+        "deleteAllMemories": "Delete all",
+        "deleteAllMemoriesConfirm": "Delete all memories? This cannot be undone.",
+        "deleteMemory": "Delete {{name}}",
+        "deleteMemoryConfirm": "Delete this memory?",
+        "viewMemory": "View {{name}}",
+        "loadingMemories": "Loading memories...",
+        "loadingMemory": "Loading...",
+        "emptyMemory": "This memory is empty.",
+        "noMemories": "No stored memories",
+        "failedToLoadMemories": "Failed to load memories",
+        "failedToDeleteMemories": "Failed to delete memories",
         "labelName": "Name",
         "placeholderName": "Your name",
         "labelLocation": "Location",
@@ -356,7 +379,12 @@
         "saving": "Saving...",
         "save": "Save",
         "failedToSave": "Failed to save skill",
-        "failedToDelete": "Failed to delete skill"
+        "failedToDelete": "Failed to delete skill",
+        "modified": "Modified",
+        "resetToDefault": "Reset to Default",
+        "resetSkillConfirm": "Replace your changes with the default skill?",
+        "resetting": "Resetting...",
+        "failedToReset": "Failed to reset skill"
     },
     "automations": {
         "title": "Routines",

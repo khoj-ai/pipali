@@ -18,6 +18,15 @@ import {
 } from './confirmation.types';
 
 /**
+ * How long an unanswered confirmation blocks its run before it is given up on.
+ *
+ * A run can be waiting while nobody is at the machine - a scheduled routine at 3am, or
+ * a delegated task still going after the app was closed - so this is generous. Without
+ * it those runs would block forever.
+ */
+export const CONFIRMATION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
+
+/**
  * Callback function type for requesting confirmation from user
  * The implementer (WebSocket handler, TUI, etc.) provides this
  */

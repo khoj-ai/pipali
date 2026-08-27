@@ -1,6 +1,8 @@
 import { test, expect, describe } from 'bun:test';
-import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt } from '../../src/server/processor/director';
+import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research } from '../../src/server/processor/director';
 import { isFirstRunEasterEgg } from '../../src/server/utils';
+import { MEMORY_RECALL_KIND } from '../../src/server/memory';
+import type { ATIFTrajectory, ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
 
 type MultimodalContent = Array<{ type: string; [key: string]: string }>;
 
@@ -116,6 +118,20 @@ describe('truncateToolOutput', () => {
 });
 
 describe('buildSystemPrompt', () => {
+    test('keeps memories on by default and removes the entire memory surface when disabled', async () => {
+        const catalogue = 'prefers-short-answers.md (feedback): Prefer concise answers';
+        const enabled = await buildSystemPrompt({ memoryCatalogue: catalogue });
+        const disabled = await buildSystemPrompt({ memoryCatalogue: catalogue, memoriesEnabled: false });
+
+        expect(enabled).toContain('persistent file-based memory');
+        expect(enabled).toContain(catalogue);
+        expect(enabled).toContain('write fact files');
+        expect(disabled).not.toContain('persistent file-based memory');
+        expect(disabled).not.toContain(catalogue);
+        expect(disabled).not.toContain('write fact files');
+        expect(disabled).not.toContain('<memory_catalogue>');
+    });
+
     test('should include first conversation instructions when isFirstEverConversation is true', async () => {
         const prompt = await buildSystemPrompt({
             isFirstEverConversation: true,
@@ -141,6 +157,87 @@ describe('buildSystemPrompt', () => {
         });
 
         expect(prompt).not.toContain('First Conversation');
+    });
+
+    // The inventory is also gated on the deferral threshold; see shouldDeferMcpTools in search_tools.test.ts
+    test('omits the external tool inventory when no MCP servers are connected', async () => {
+        const prompt = await buildSystemPrompt({ username: 'TestUser' });
+
+        expect(prompt).not.toContain('External Tools');
+        expect(prompt).not.toContain('<connected_tools>');
+        expect(prompt).not.toContain('{mcp_context}');
+    });
+});
+
+const trajectory = (steps: Array<Partial<ATIFStep>>): ATIFTrajectory => ({
+    schema_version: 'ATIF-v1.4',
+    session_id: 'session-1',
+    agent: { name: 'pipali-agent', version: '1.0.0', model_name: 'mock' },
+    steps: steps.map((step, i) => ({
+        step_id: i + 1,
+        timestamp: new Date().toISOString(),
+        source: 'user',
+        ...step,
+    })) as ATIFStep[],
+});
+
+describe('research first iteration', () => {
+    const firstIterationSystemPrompt = async (steps: Array<Partial<ATIFStep>>) => {
+        const previousMock = globalThis.__pipaliMockLLM;
+        globalThis.__pipaliMockLLM = () => ({ message: 'Done.', raw: [] });
+        try {
+            for await (const iteration of research({ chatHistory: trajectory(steps), maxIterations: 2 })) {
+                if (iteration.isToolCallStart) continue;
+                return iteration.systemPrompt;
+            }
+            return undefined;
+        } finally {
+            globalThis.__pipaliMockLLM = previousMock;
+        }
+    };
+
+    test('yields the system prompt when only auxiliary system steps precede it', async () => {
+        // A recalled memory is a system step, but not the base system prompt - a new
+        // conversation carrying one must still get its system prompt persisted
+        await expect(firstIterationSystemPrompt([
+            { source: 'user', message: 'hi' },
+            { source: 'system', message: '# Memory recalled', extra: { kind: MEMORY_RECALL_KIND, memory_paths: ['a.md'] } },
+        ])).resolves.toBeDefined();
+    });
+
+    test('yields no system prompt when the conversation already carries one', async () => {
+        await expect(firstIterationSystemPrompt([
+            { source: 'system', message: 'You are Pipali.' },
+            { source: 'user', message: 'hi' },
+        ])).resolves.toBeUndefined();
+    });
+});
+
+describe('research request tracing', () => {
+    // Requests are traced with the conversation row id, the handle that resolves
+    // against /api/chat/:id/history. The ATIF session_id is a separate identifier.
+    test('reports the conversation and run ids, not the ATIF session id', async () => {
+        const previousMock = globalThis.__pipaliMockLLM;
+        const traced: Array<Record<string, string | undefined>> = [];
+        globalThis.__pipaliMockLLM = (_query, ctx) => {
+            traced.push({ conversationId: ctx?.conversationId, sessionId: ctx?.sessionId, runId: ctx?.runId });
+            return { message: 'Done.', raw: [] };
+        };
+        try {
+            for await (const iteration of research({
+                chatHistory: trajectory([{ source: 'user', message: 'hi' }]),
+                conversationId: 'conversation-1',
+                runId: 'run-1',
+                maxIterations: 2,
+            })) {
+                if (iteration.isToolCallStart) continue;
+            }
+        } finally {
+            globalThis.__pipaliMockLLM = previousMock;
+        }
+
+        // Distinct sentinels, so a slip in the positional call reads as a swap here
+        expect(traced).toEqual([{ conversationId: 'conversation-1', sessionId: 'session-1', runId: 'run-1' }]);
     });
 });
 

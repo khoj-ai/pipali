@@ -5,7 +5,7 @@
 
 import { asc, eq, and, inArray, isNull, sql } from 'drizzle-orm';
 import { v4 as uuidv4 } from 'uuid';
-import { db } from '../../../db';
+import { db, getDefaultChatModel } from '../../../db';
 import { Conversation, ConversationStep, User } from '../../../db/schema';
 import { createEmptyATIFTrajectory } from './atif.types';
 import {
@@ -24,11 +24,14 @@ import {
   exportATIFTrajectory,
   importATIFTrajectory,
   calculateFinalMetrics,
+  accumulateFinalMetrics,
   sanitizeForJsonb,
 } from './atif.utils';
 import { createChildLogger } from '../../../logger';
 
 const log = createChildLogger({ component: 'atif' });
+
+export type ConversationRole = 'manual' | 'delegated';
 
 export interface ConversationWithTrajectory {
   id: string;
@@ -82,18 +85,6 @@ function getMessagePreview(message: string | undefined): string | undefined {
     return undefined;
   }
   return message.slice(0, 240);
-}
-
-function addMetricsToFinalMetrics(
-  previous: ATIFMetrics | undefined,
-  current: ATIFMetrics | undefined,
-): ATIFMetrics {
-  return {
-    prompt_tokens: (previous?.prompt_tokens ?? 0) + (current?.prompt_tokens ?? 0),
-    completion_tokens: (previous?.completion_tokens ?? 0) + (current?.completion_tokens ?? 0),
-    cached_tokens: (previous?.cached_tokens ?? 0) + (current?.cached_tokens ?? 0) || undefined,
-    cost_usd: (previous?.cost_usd ?? 0) + (current?.cost_usd ?? 0),
-  };
 }
 
 /**
@@ -200,6 +191,21 @@ export class ATIFConversationService {
     return withTrajectory(conversation, steps);
   }
 
+  /**
+   * Whether a conversation was delegated by an agent. Derived from the parent link
+   * rather than stored, so it can never disagree with its source.
+   */
+  async getConversationRole(
+    conversationId: string,
+    _user: typeof User.$inferSelect,
+  ): Promise<ConversationRole> {
+    const [conversation] = await db
+      .select({ parentConversationId: Conversation.parentConversationId })
+      .from(Conversation)
+      .where(eq(Conversation.id, conversationId));
+
+    return conversation?.parentConversationId ? 'delegated' : 'manual';
+  }
 
   /**
    * Adds a step to a conversation
@@ -258,24 +264,11 @@ export class ATIFConversationService {
         step.extra = { ...step.extra, ...extra };
       }
 
-      const totals = addMetricsToFinalMetrics(
-        conversation.final_metrics
-          ? {
-              prompt_tokens: conversation.final_metrics.total_prompt_tokens,
-              completion_tokens: conversation.final_metrics.total_completion_tokens,
-              cached_tokens: conversation.final_metrics.total_cached_tokens,
-              cost_usd: conversation.final_metrics.total_cost_usd,
-            }
-          : undefined,
+      const finalMetrics = accumulateFinalMetrics(
+        conversation.final_metrics,
         metrics,
+        Number(stats?.stepCount ?? 0) + 1,
       );
-      const finalMetrics = {
-        total_prompt_tokens: totals.prompt_tokens,
-        total_completion_tokens: totals.completion_tokens,
-        total_cached_tokens: totals.cached_tokens,
-        total_cost_usd: totals.cost_usd,
-        total_steps: Number(stats?.stepCount ?? 0) + 1,
-      };
       const now = new Date();
       const sanitizedStep = sanitizeForJsonb(step);
 
@@ -299,6 +292,76 @@ export class ATIFConversationService {
         .where(eq(Conversation.id, conversationId));
 
       return sanitizedStep;
+    });
+  }
+
+  /**
+   * Re-append existing steps as the conversation's newest ones, keeping their order.
+   *
+   * An update delivered while a run was in flight ends up buried under everything the
+   * run went on to say. A turn woken by that update has to find it at the end: a
+   * request that ends on the agent's own turn is refused outright by some providers.
+   *
+   * Returns the steps in their new positions, or none if they were already last.
+   */
+  async moveStepsToEnd(conversationId: string, stepIds: number[]): Promise<ATIFStep[]> {
+    if (stepIds.length === 0) return [];
+
+    return await db.transaction(async (tx) => {
+      const locked = await tx.execute(sql`
+        SELECT id FROM conversation WHERE id = ${conversationId} FOR UPDATE
+      `);
+
+      if (locked.rows.length === 0) {
+        throw new Error(`Conversation ${conversationId} not found`);
+      }
+
+      const [stats] = await tx
+        .select({ maxStepId: sql<number>`coalesce(max(${ConversationStep.stepId}), 0)::int` })
+        .from(ConversationStep)
+        .where(eq(ConversationStep.conversationId, conversationId));
+      const maxStepId = Number(stats?.maxStepId ?? 0);
+
+      const rows = await tx
+        .select({ stepId: ConversationStep.stepId, step: ConversationStep.step })
+        .from(ConversationStep)
+        .where(and(
+          eq(ConversationStep.conversationId, conversationId),
+          inArray(ConversationStep.stepId, stepIds),
+        ))
+        .orderBy(asc(ConversationStep.stepId));
+
+      // Step ids are unique and ascending, so occupying the last n of them means
+      // these already are the conversation's tail.
+      if (rows.length === 0 || rows[0]!.stepId === maxStepId - rows.length + 1) return [];
+
+      await tx
+        .delete(ConversationStep)
+        .where(and(
+          eq(ConversationStep.conversationId, conversationId),
+          inArray(ConversationStep.stepId, rows.map(row => row.stepId)),
+        ));
+
+      const now = new Date();
+      const moved = rows.map((row, index) => ({ ...row.step, step_id: maxStepId + index + 1 }));
+
+      await tx.insert(ConversationStep).values(moved.map(step => ({
+        conversationId,
+        stepId: step.step_id,
+        source: step.source,
+        // The step keeps saying when it happened; only its place in the order changes.
+        timestamp: getStepTimestamp(step),
+        messagePreview: getMessagePreview(step.message),
+        step,
+        updatedAt: now,
+      })));
+
+      await tx
+        .update(Conversation)
+        .set({ updatedAt: now })
+        .where(eq(Conversation.id, conversationId));
+
+      return moved;
     });
   }
 
@@ -500,6 +563,7 @@ export class ATIFConversationService {
         total_prompt_tokens: sourceTrajectory.final_metrics.total_prompt_tokens || 0,
         total_completion_tokens: sourceTrajectory.final_metrics.total_completion_tokens || 0,
         total_cached_tokens: sourceTrajectory.final_metrics.total_cached_tokens || 0,
+        total_cache_write_tokens: sourceTrajectory.final_metrics.total_cache_write_tokens || 0,
         total_cost_usd: sourceTrajectory.final_metrics.total_cost_usd,
         total_steps: sourceTrajectory.final_metrics.total_steps,
       } : undefined,

@@ -15,6 +15,10 @@ export interface Skill {
     location: string;
     /** Whether the skill is visible/enabled for prompt injection (default: true) */
     visible: boolean;
+    /** Whether the skill ships with the app rather than being the user's own */
+    builtin?: boolean;
+    /** Whether a builtin skill has been edited, so updates no longer land on it */
+    modified?: boolean;
 }
 
 /**

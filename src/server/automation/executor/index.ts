@@ -11,7 +11,7 @@ import { eq, and, gte, sql } from 'drizzle-orm';
 import { atifConversationService } from '../../processor/conversation/atif/atif.service';
 import type { TriggerEventData } from '../types';
 import type { ConfirmationContext } from '../../processor/confirmation';
-import { createEmptyPreferences } from '../../processor/confirmation';
+import { createEmptyPreferences, CONFIRMATION_TIMEOUT_MS } from '../../processor/confirmation';
 import type { ConfirmationRequest, ConfirmationResponse } from '../../processor/confirmation/confirmation.types';
 import { createStandardConfirmationOptions } from '../../processor/confirmation/confirmation.types';
 import { getOrCreateBus } from '../../events/conversation-event-bus';
@@ -28,7 +28,6 @@ const MAX_RETRIES = 2;
 const RETRY_DELAYS = [15000, 30000]; // 15s, 30s
 
 // Confirmation timeout (24 hours)
-const CONFIRMATION_TIMEOUT_MS = 24 * 60 * 60 * 1000;
 
 // Execution queue (in-memory for MVP)
 interface QueuedExecution {

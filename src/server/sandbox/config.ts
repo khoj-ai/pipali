@@ -94,6 +94,25 @@ export const DEFAULT_DENIED_READ_PATHS: string[] = [
 ];
 
 /**
+ * Paths re-allowed for reading inside the denied system directories above.
+ * All hold Apple-shipped public configuration, no secrets.
+ *
+ * - ssl: macOS curl links against LibreSSL, which unconditionally fopen()s
+ *   /private/etc/ssl/openssl.cnf during crypto init — even for plain HTTP, and
+ *   before OPENSSL_CONF is consulted, so no env var can redirect it. Denying
+ *   /private/etc therefore breaks every curl invocation.
+ * - localtime: the symlink naming the system timezone. Unreadable, libc and ICU
+ *   both fall back to UTC and every timestamp a command prints is wrong. TZ
+ *   (see getSandboxEnvOverrides) covers most tools; this covers the rest.
+ */
+export const DEFAULT_ALLOWED_READ_PATHS: string[] = [
+    '/etc/ssl',
+    '/private/etc/ssl',  // macOS: /etc is a symlink to /private/etc
+    '/etc/localtime',
+    '/private/etc/localtime',
+];
+
+/**
  * Default paths that are always denied for writes within allowed paths.
  * Note: The sandbox-runtime already auto-protects many sensitive files
  * (.bashrc, .git/hooks, etc.), this list can be used for additional protection.
@@ -185,10 +204,20 @@ export function buildRuntimeConfig(config: SandboxConfig): SandboxRuntimeConfig 
     const deniedWritePaths = expandPaths(config.deniedWritePaths);
     const deniedReadPaths = expandPaths(config.deniedReadPaths);
 
+    // macOS: /etc is a symlink to /private/etc. Denying the symlink itself blocks
+    // traversal through it, making the carve-outs below unreachable by their
+    // canonical /etc/... spelling. Denying only the real path protects the same
+    // contents, since Seatbelt resolves symlinks before matching rules.
+    const profileDeniedReadPaths = process.platform === 'darwin'
+        ? deniedReadPaths.filter(p => p !== '/etc')
+        : deniedReadPaths;
+
     return {
         filesystem: {
             // Deny list for reads - these paths are blocked from reading
-            denyRead: deniedReadPaths,
+            denyRead: profileDeniedReadPaths,
+            // Carve-outs within denied paths - these take precedence over denyRead
+            allowRead: expandPaths(DEFAULT_ALLOWED_READ_PATHS),
             // Allow list for writes - only these paths can be written to
             allowWrite: allowedWritePaths,
             // Deny list for writes - blocked even if within allowed paths
