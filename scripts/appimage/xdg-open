@@ -16,9 +16,17 @@
 #   without launching anything (khoj-ai/pipali#52),
 # - the browser gets the AppImage's GTK theme/backend/loader caches.
 
+# The colon lists below are split unquoted, so without -f a PATH or
+# LD_LIBRARY_PATH entry holding a glob character is expanded against the cwd.
+set -f
+
 # Shell builtins only: the host PATH this runs with may be minimal.
 case "$0" in */*) _self_dir="${0%/*}" ;; *) _self_dir="." ;; esac
 appdir="${APPDIR:-$(cd "$_self_dir/../.." && pwd)}"
+# A trailing slash would make the literal prefix match below miss every entry.
+while [ "$appdir" != "/" ] && [ "${appdir%/}" != "$appdir" ]; do
+    appdir="${appdir%/}"
+done
 
 # Drop every entry located under $appdir (and duplicates) from a colon list.
 strip_appdir_entries() {
