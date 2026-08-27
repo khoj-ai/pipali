@@ -1,0 +1,105 @@
+#!/bin/sh
+# Hand URL/file opening to the host's own xdg-open, outside the AppImage's
+# runtime environment. Installed by scripts/build-tauri.ts in place of the
+# xdg-open that Tauri's bundler copies from the CI build host
+# (tauri-apps/tauri#4265); that copy is kept next to this script as
+# xdg-open.bundled and only used when the host has no xdg-open at all.
+#
+# Why: everything the app spawns inherits the AppImage runtime environment.
+# AppRun prepends $APPDIR to PATH, LD_LIBRARY_PATH, XDG_DATA_DIRS, ... and the
+# GTK hook forces GTK_THEME, GDK_BACKEND and the module caches of the bundled
+# GTK. That is right for the app and wrong for anything the host is asked to
+# open on its behalf:
+# - host helpers crash on the bundled libraries (kde-open on Arch: libcurl
+#   symbol error; gio on Ubuntu 24.04 / Arch: glib symbol error),
+# - the build host's xdg-open predates Plasma 6, so on KDE it reports success
+#   without launching anything (khoj-ai/pipali#52),
+# - the browser gets the AppImage's GTK theme/backend/loader caches.
+
+# The colon lists below are split unquoted, so without -f a PATH or
+# LD_LIBRARY_PATH entry holding a glob character is expanded against the cwd.
+set -f
+
+# Shell builtins only: the host PATH this runs with may be minimal.
+case "$0" in */*) _self_dir="${0%/*}" ;; *) _self_dir="." ;; esac
+appdir="${APPDIR:-$(cd "$_self_dir/../.." && pwd)}"
+# A trailing slash would make the literal prefix match below miss every entry.
+while [ "$appdir" != "/" ] && [ "${appdir%/}" != "$appdir" ]; do
+    appdir="${appdir%/}"
+done
+
+# Drop every entry located under $appdir (and duplicates) from a colon list.
+strip_appdir_entries() {
+    _list="$1" _out=""
+    _old_ifs="$IFS"; IFS=:
+    for _entry in $_list; do
+        case "$_entry" in
+            "$appdir" | "$appdir"/*) continue ;;
+        esac
+        case ":$_out:" in
+            *":$_entry:"*) continue ;;
+        esac
+        _out="${_out:+$_out:}$_entry"
+    done
+    IFS="$_old_ifs"
+    printf '%s' "$_out"
+}
+
+# Lists AppRun / the GTK hook prepend to: keep the host's original entries.
+for _var in PATH LD_LIBRARY_PATH XDG_DATA_DIRS PYTHONPATH PERLLIB GSETTINGS_SCHEMA_DIR \
+            QT_PLUGIN_PATH GST_PLUGIN_SYSTEM_PATH GST_PLUGIN_SYSTEM_PATH_1_0; do
+    eval "_value=\${$_var:-}"
+    [ -n "$_value" ] || continue
+    _cleaned=$(strip_appdir_entries "$_value")
+    if [ -n "$_cleaned" ]; then
+        eval "$_var=\$_cleaned"
+        export "$_var"
+    else
+        unset "$_var"
+    fi
+done
+[ -n "${PATH:-}" ] || PATH=/usr/local/bin:/usr/bin:/bin
+export PATH
+
+# AppRun runs the app from $APPDIR/usr; a browser started there keeps a cwd
+# inside a mount that disappears when the app quits. OWD is where the
+# AppImage was launched from.
+[ -d "${OWD:-}" ] && cd "$OWD"
+unset OLDPWD
+
+# Set outright for the bundled GTK/Python by AppRun and the GTK hook (the
+# original values are not preserved, so unsetting is the closest to the host's
+# own environment). APPIMAGE/APPDIR/ARGV0/OWD make AppImage-aware programs
+# believe *they* run from this AppImage.
+unset PYTHONHOME GTK_THEME GDK_BACKEND GTK_DATA_PREFIX GTK_EXE_PREFIX GTK_PATH \
+      GTK_IM_MODULE_FILE GDK_PIXBUF_MODULE_FILE GIO_EXTRA_MODULES \
+      APPIMAGE APPDIR ARGV0 OWD
+
+# First xdg-open on the (now host-only) PATH that is not this script.
+_host_xdg_open=""
+_old_ifs="$IFS"; IFS=:
+for _dir in $PATH; do
+    [ -n "$_dir" ] || continue
+    if [ -x "$_dir/xdg-open" ] && [ ! "$_dir/xdg-open" -ef "$0" ]; then
+        _host_xdg_open="$_dir/xdg-open"
+        break
+    fi
+done
+IFS="$_old_ifs"
+
+if [ -n "$_host_xdg_open" ]; then
+    exec "$_host_xdg_open" "$@"
+fi
+
+# No xdg-utils on the host: use the build host's copy, still with the cleaned
+# environment so whatever it launches is not broken by the bundle. Its own
+# helpers (xdg-mime) come from the bundle only as a last resort.
+_bundled="$_self_dir/xdg-open.bundled"
+if [ -x "$_bundled" ]; then
+    PATH="$PATH:$appdir/usr/bin"
+    export PATH
+    exec "$_bundled" "$@"
+fi
+
+echo "xdg-open: no xdg-open found on the host and no bundled fallback" >&2
+exit 3
