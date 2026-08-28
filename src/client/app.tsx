@@ -29,6 +29,7 @@ import { useFocusManagement, useFileDrop, useModels, useSidecar, useWebSocketCha
 import { setApiBaseUrl, apiFetch } from "./utils/api";
 import { IS_TOUCH } from "./utils/platform";
 import { generateUUID, generateDeterministicId, getToolCategory, formatAttachedFilesBlock, type ToolCategory } from "./utils/formatting";
+import { ensureServiceWorker } from "./utils/push";
 import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupNotificationClickListener, warmAudioContext } from "./utils/notifications";
 import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
 import { useVoiceSettings } from "./hooks/useVoiceSettings";
@@ -501,6 +502,8 @@ const App = () => {
     // Initialize native OS notifications and register click handler
     useEffect(() => {
         initNotifications();
+
+        ensureServiceWorker();
 
         // Register click handler for web notifications (navigates to conversation)
         // This handler is also used by the focus navigation listener for Tauri notifications

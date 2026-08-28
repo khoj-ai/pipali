@@ -14,6 +14,11 @@ export const EMBEDDED_INDEX_HTML = "";
 export const EMBEDDED_STYLES_CSS = "";
 export const EMBEDDED_APP_JS = "";
 
+// PWA shell: the manifest makes the app installable, and the service worker is what
+// receives Web Push while the app is closed.
+export const EMBEDDED_SERVICE_WORKER = "";
+export const EMBEDDED_MANIFEST = "";
+
 // Icon assets (base64 encoded)
 export const EMBEDDED_ICONS: { [key: string]: string } = {};
 

@@ -20,6 +20,7 @@ import {
 } from '../../processor/confirmation';
 import type { PendingConfirmation } from './message-types';
 import { createChildLogger } from '../../logger';
+import { pushConfirmationRequest } from '../../push';
 
 const log = createChildLogger({ component: 'confirmation-manager' });
 
@@ -121,6 +122,12 @@ export function createConfirmationCallback(
                 runId: runHandle.runId,
                 data: request,
             });
+
+            // Always pushed, even with someone watching here: an unanswered confirmation
+            // holds the run until they come back, so a duplicate beats a miss.
+            if (bus.user) {
+                pushConfirmationRequest(bus.user.id, request, conversationId);
+            }
         });
     };
 }

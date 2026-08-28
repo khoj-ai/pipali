@@ -23,6 +23,7 @@ import { setSessionActive, setSessionInactive, updateSessionReasoning } from '..
 import { createConfirmationCallback } from '../routes/ws/confirmation-manager';
 import { createChildLogger } from '../logger';
 import { getServer } from '../server-instance';
+import { pushRunComplete } from '../push';
 
 const log = createChildLogger({ component: 'run-executor' });
 
@@ -340,6 +341,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
 
             const result = iteratorResult!.value;
             if (result) {
+                // A sleeping phone drops its socket, so an empty bus is the signal that
+                // nobody saw this. Delegated tasks stay quiet: the conversation they
+                // report into announces itself.
+                const worthPushing = !bus.hasSubscribers() && conversationRole !== 'delegated';
                 bus.publish({
                     type: 'run_complete',
                     conversationId,
@@ -349,6 +354,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                         stepId: result.stepId,
                     },
                 });
+                if (worthPushing && user) pushRunComplete(user.id, result.response, conversationId);
             }
 
             // Check if there are queued messages to process after completion

@@ -259,6 +259,8 @@ async function generateEmbeddedAssets(
     indexHtml: string,
     stylesCss: string,
     appJs: string,
+    serviceWorker: string,
+    manifest: string,
     icons: { [key: string]: string },
     builtinSkills: { [path: string]: { content: string; binary: boolean } },
     changelog: string,
@@ -307,6 +309,10 @@ export const EMBEDDED_STYLES_CSS = \`${escapeForTemplate(stylesCss)}\`;
 
 export const EMBEDDED_APP_JS = \`${escapeForTemplate(appJs)}\`;
 
+export const EMBEDDED_SERVICE_WORKER = \`${escapeForTemplate(serviceWorker)}\`;
+
+export const EMBEDDED_MANIFEST = \`${escapeForTemplate(manifest)}\`;
+
 export const EMBEDDED_ICONS: { [key: string]: string } = {
 ${iconsObject}
 };
@@ -347,6 +353,8 @@ export const EMBEDDED_MAINTENANCE_MIGRATIONS: { sql: string; tag: string }[] = [
 export const EMBEDDED_INDEX_HTML = "";
 export const EMBEDDED_STYLES_CSS = "";
 export const EMBEDDED_APP_JS = "";
+export const EMBEDDED_SERVICE_WORKER = "";
+export const EMBEDDED_MANIFEST = "";
 
 // Icon assets (base64 encoded)
 export const EMBEDDED_ICONS: { [key: string]: string } = {};
@@ -426,10 +434,12 @@ async function main() {
         const icons = await readIcons();
         const builtinSkills = await readBuiltinSkills();
         const indexHtml = await fs.readFile(path.join(CLIENT_SRC, "index.html"), "utf-8");
+        const serviceWorker = await fs.readFile(path.join(CLIENT_SRC, "sw.js"), "utf-8");
+        const manifest = await fs.readFile(path.join(CLIENT_SRC, "manifest.webmanifest"), "utf-8");
         const changelog = await readChangelog();
 
         // Generate embedded assets module
-        await generateEmbeddedAssets(migrations, maintenanceMigrations, indexHtml, stylesCss, appJs, icons, builtinSkills, changelog);
+        await generateEmbeddedAssets(migrations, maintenanceMigrations, indexHtml, stylesCss, appJs, serviceWorker, manifest, icons, builtinSkills, changelog);
 
         // Compile
         await compile(target);

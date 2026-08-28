@@ -295,7 +295,19 @@
         "questionFromPipali": "Question from Pipali",
         "actionRequired": "Action Required",
         "taskComplete": "Task Complete",
-        "taskFinished": "Your task has finished"
+        "taskFinished": "Your task has finished",
+        "push": {
+            "title": "Phone notifications",
+            "description": "Be told when Pipali finishes or needs your approval, even with the app closed.",
+            "unsupported": "This browser can't receive notifications. On iPhone, open Pipali in Safari and add it to your Home Screen first. A secure (https) connection is required.",
+            "denied": "Notifications are blocked for this site. Allow them in your browser settings, then try again.",
+            "failed": "Could not turn on notifications.",
+            "devices": "Devices getting notified",
+            "noDevices": "No devices yet. Turn this on wherever you want to be reached.",
+            "never": "Not notified yet",
+            "lastNotified": "Last notified {{when}}",
+            "remove": "Stop notifying this device"
+        }
     },
     "settings": {
         "title": "Settings",

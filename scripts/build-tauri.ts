@@ -392,14 +392,16 @@ async function buildServerBundle() {
         path.join(serverResourceDir, "skills", "builtin")
     );
 
-    // Copy minimal frontend assets (index.html, public, dist)
+    // Copy minimal frontend assets (index.html, sw.js, manifest, public, dist)
     console.log("   Copying frontend assets...");
     const clientDest = path.join(serverResourceDir, "src", "client");
     await fs.mkdir(clientDest, { recursive: true });
-    await fs.copyFile(
-        path.join(ROOT_DIR, "src", "client", "index.html"),
-        path.join(clientDest, "index.html")
-    );
+    for (const file of ["index.html", "sw.js", "manifest.webmanifest"]) {
+        await fs.copyFile(
+            path.join(ROOT_DIR, "src", "client", file),
+            path.join(clientDest, file)
+        );
+    }
     await copyDir(
         path.join(ROOT_DIR, "src", "client", "public"),
         path.join(clientDest, "public"),

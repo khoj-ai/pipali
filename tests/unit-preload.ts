@@ -127,6 +127,24 @@ mock.module(dbSchemaModule, () => {
             allowLocalBinding: 'allowLocalBinding',
             $inferSelect: {},
         },
+        // Web Push: subscriptions and the VAPID keypair that addresses them
+        NotificationSettings: {
+            id: 'id',
+            userId: 'userId',
+            vapidPublicKey: 'vapidPublicKey',
+            vapidPrivateKey: 'vapidPrivateKey',
+            $inferSelect: {},
+        },
+        PushSubscription: {
+            id: 'id',
+            userId: 'userId',
+            endpoint: 'endpoint',
+            p256dh: 'p256dh',
+            auth: 'auth',
+            label: 'label',
+            lastNotifiedAt: 'lastNotifiedAt',
+            $inferSelect: {},
+        },
         // Web search/scraper tables with column references for queries
         WebSearchProvider: {
             enabled: 'enabled',

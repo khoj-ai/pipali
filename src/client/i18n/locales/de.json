@@ -254,7 +254,19 @@
         "questionFromPipali": "Frage von Pipali",
         "actionRequired": "Aktion erforderlich",
         "taskComplete": "Task abgeschlossen",
-        "taskFinished": "Dein Task wurde abgeschlossen"
+        "taskFinished": "Dein Task wurde abgeschlossen",
+        "push": {
+            "title": "Benachrichtigungen auf dem Handy",
+            "description": "Erfahre, wenn Pipali fertig ist oder deine Zustimmung braucht – auch bei geschlossener App.",
+            "unsupported": "Dieser Browser kann keine Benachrichtigungen empfangen. Öffne Pipali auf dem iPhone in Safari und füge es zum Home-Bildschirm hinzu. Eine sichere (https) Verbindung ist erforderlich.",
+            "denied": "Benachrichtigungen sind für diese Seite blockiert. Erlaube sie in den Browsereinstellungen und versuche es erneut.",
+            "failed": "Benachrichtigungen konnten nicht aktiviert werden.",
+            "devices": "Benachrichtigte Geräte",
+            "noDevices": "Noch keine Geräte. Aktiviere dies überall dort, wo du erreichbar sein willst.",
+            "never": "Noch nicht benachrichtigt",
+            "lastNotified": "Zuletzt benachrichtigt {{when}}",
+            "remove": "Dieses Gerät nicht mehr benachrichtigen"
+        }
     },
     "voice": {
         "beta": "Beta",

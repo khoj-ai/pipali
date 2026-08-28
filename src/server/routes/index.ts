@@ -5,6 +5,8 @@ import {
     EMBEDDED_INDEX_HTML,
     EMBEDDED_STYLES_CSS,
     EMBEDDED_APP_JS,
+    EMBEDDED_SERVICE_WORKER,
+    EMBEDDED_MANIFEST,
     EMBEDDED_ICONS,
     IS_COMPILED_BINARY,
 } from '../embedded-assets';
@@ -26,6 +28,20 @@ if (IS_COMPILED_BINARY) {
     app.get('/dist/app.js', (c) => {
         return c.text(EMBEDDED_APP_JS, 200, {
             'Content-Type': 'application/javascript',
+        });
+    });
+
+    app.get('/sw.js', (c) => {
+        return c.text(EMBEDDED_SERVICE_WORKER, 200, {
+            'Content-Type': 'application/javascript',
+            // The worker is the push receiver; a stale cached copy silently stops delivery.
+            'Cache-Control': 'no-cache',
+        });
+    });
+
+    app.get('/manifest.webmanifest', (c) => {
+        return c.text(EMBEDDED_MANIFEST, 200, {
+            'Content-Type': 'application/manifest+json',
         });
     });
 
@@ -53,6 +69,22 @@ if (IS_COMPILED_BINARY) {
         : './src/client';
     // Development mode - serve from disk
     app.get('/', serveStatic({ path: path.join(clientRoot, 'index.html') }));
+
+    const serveClientFile = (route: string, file: string, contentType: string) => {
+        app.get(route, async (c) => {
+            const source = Bun.file(path.join(clientRoot, file));
+            if (!(await source.exists())) return c.notFound();
+            return c.text(await source.text(), 200, {
+                'Content-Type': contentType,
+                // The worker is the push receiver; a stale cached copy silently stops delivery.
+                'Cache-Control': 'no-cache',
+            });
+        });
+    };
+
+    serveClientFile('/sw.js', 'sw.js', 'application/javascript');
+    serveClientFile('/manifest.webmanifest', 'manifest.webmanifest', 'application/manifest+json');
+
     // Serve public assets (icons, etc.)
     app.get('/icons/*', serveStatic({ root: path.join(clientRoot, 'public') }));
     // Serve static files (CSS, JS, etc.)

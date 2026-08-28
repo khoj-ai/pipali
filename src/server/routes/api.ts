@@ -14,6 +14,7 @@ import openapi from './openapi';
 import automations from './automations';
 import mcp from './mcp';
 import auth from './auth';
+import push from './push';
 
 import { getDefaultUser } from '../utils';
 import { atifConversationService } from '../processor/conversation/atif/atif.service';
@@ -1175,5 +1176,8 @@ api.route('/', openapi);
 
 // Mount the auth router
 api.route('/auth', auth);
+
+// Mount the Web Push router
+api.route('/push', push);
 
 export default api;

@@ -459,3 +459,30 @@ export const SandboxSettings = pgTable('sandbox_settings', {
     allowLocalBinding: boolean('allow_local_binding').default(true).notNull(),
     ...dbBaseModel,
 });
+
+// Web Push Notifications
+// The VAPID keypair identifies this Pipali install to the browsers' push services.
+// It lives beside the subscriptions because regenerating it silently invalidates every one
+// of them — a restored database must bring back both or neither.
+export const NotificationSettings = pgTable('notification_settings', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }).unique(),
+    vapidPublicKey: text('vapid_public_key').notNull(),
+    vapidPrivateKey: text('vapid_private_key').notNull(),
+    ...dbBaseModel,
+});
+
+// A device that asked to be told when a run finishes or wants a confirmation.
+export const PushSubscription = pgTable('push_subscription', {
+    id: serial('id').primaryKey(),
+    userId: integer('user_id').notNull().references(() => User.id, { onDelete: 'cascade' }),
+    // Push service URL minted by the browser, unique per device and install.
+    endpoint: text('endpoint').notNull().unique(),
+    // Keys the push service cannot read with: the payload is sealed to this device.
+    p256dh: text('p256dh').notNull(),
+    auth: text('auth').notNull(),
+    // Shown in Settings so a device can be recognised and revoked.
+    label: text('label').notNull(),
+    lastNotifiedAt: timestamp('last_notified_at'),
+    ...dbBaseModel,
+});

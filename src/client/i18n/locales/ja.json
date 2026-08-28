@@ -254,7 +254,19 @@
         "questionFromPipali": "Pipaliからの質問",
         "actionRequired": "対応が必要です",
         "taskComplete": "タスク完了",
-        "taskFinished": "タスクが完了しました"
+        "taskFinished": "タスクが完了しました",
+        "push": {
+            "title": "スマホへの通知",
+            "description": "アプリを閉じていても、Pipali の完了や確認依頼をお知らせします。",
+            "unsupported": "このブラウザは通知を受け取れません。iPhone では Safari で Pipali を開き、ホーム画面に追加してください。安全な (https) 接続が必要です。",
+            "denied": "このサイトの通知がブロックされています。ブラウザの設定で許可してからもう一度お試しください。",
+            "failed": "通知を有効にできませんでした。",
+            "devices": "通知先のデバイス",
+            "noDevices": "デバイスがありません。連絡を受けたい端末で有効にしてください。",
+            "never": "未通知",
+            "lastNotified": "最終通知 {{when}}",
+            "remove": "このデバイスへの通知を停止"
+        }
     },
     "voice": {
         "beta": "ベータ",

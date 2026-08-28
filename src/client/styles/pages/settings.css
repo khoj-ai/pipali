@@ -696,3 +696,67 @@
     }
 
 }
+
+/* Devices receiving push notifications */
+.settings-device-list {
+    margin-top: 8px;
+    overflow: hidden;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-md);
+    list-style: none;
+}
+
+.settings-device + .settings-device {
+    border-top: 1px solid var(--color-border);
+}
+
+.settings-device {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    /* Matches the touch target the memory list already sets. */
+    min-height: 44px;
+    padding: 4px 6px 4px 12px;
+}
+
+.settings-device-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--color-text);
+    font-size: 13px;
+    font-weight: 500;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.settings-device-meta {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+    font-size: 11px;
+}
+
+.settings-device-remove {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--color-text-muted);
+    cursor: pointer;
+}
+
+.settings-device-remove:hover {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+}
+
+.settings-spinner {
+    margin-top: 8px;
+    color: var(--color-text-muted);
+    animation: spin 1s linear infinite;
+}

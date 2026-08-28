@@ -7,6 +7,7 @@ import { apiFetch } from '../../utils/api';
 import { SUPPORTED_LANGUAGES } from '../../i18n';
 import { PathListEditor } from './PathListEditor';
 import { MemorySettingsSection } from './MemorySettingsSection';
+import { NotificationsSection } from './NotificationsSection';
 import { useVoiceSettings } from '../../hooks/useVoiceSettings';
 
 type SettingsTab = 'profile' | 'permissions';
@@ -369,6 +370,8 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                         )}
 
                         <MemorySettingsSection />
+
+                        <NotificationsSection />
 
                         {/* Voice mode (beta) — gates all voice UI and the mic session */}
                         <div className="settings-section">

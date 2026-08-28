@@ -1,0 +1,17 @@
+{
+    "name": "Pipali",
+    "short_name": "Pipali",
+    "description": "A personal AI for knowledge work on your computer.",
+    "start_url": "/",
+    "scope": "/",
+    "display": "standalone",
+    "background_color": "#fafafa",
+    "theme_color": "#fafafa",
+    "icons": [
+        { "src": "/icons/pipali_64.png", "sizes": "64x64", "type": "image/png" },
+        { "src": "/icons/pipali_128.png", "sizes": "128x128", "type": "image/png" },
+        { "src": "/icons/pipali_256.png", "sizes": "256x256", "type": "image/png" },
+        { "src": "/icons/pipali_512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" },
+        { "src": "/icons/pipali_1024.png", "sizes": "1024x1024", "type": "image/png" }
+    ]
+}

@@ -254,7 +254,19 @@
         "questionFromPipali": "来自 Pipali 的问题",
         "actionRequired": "需要操作",
         "taskComplete": "任务完成",
-        "taskFinished": "你的任务已完成"
+        "taskFinished": "你的任务已完成",
+        "push": {
+            "title": "手机通知",
+            "description": "即使应用已关闭，也能在 Pipali 完成任务或需要你确认时收到提醒。",
+            "unsupported": "此浏览器无法接收通知。在 iPhone 上请用 Safari 打开 Pipali 并添加到主屏幕。需要安全 (https) 连接。",
+            "denied": "此站点的通知已被阻止。请在浏览器设置中允许后重试。",
+            "failed": "无法开启通知。",
+            "devices": "接收通知的设备",
+            "noDevices": "还没有设备。在你希望被联系到的设备上开启。",
+            "never": "尚未通知",
+            "lastNotified": "上次通知 {{when}}",
+            "remove": "停止通知此设备"
+        }
     },
     "voice": {
         "beta": "测试版",
