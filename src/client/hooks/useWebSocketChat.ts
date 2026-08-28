@@ -68,7 +68,7 @@ export type ChatAction =
     | { type: 'CONFIRMATION_REQUEST'; conversationId: string; runId: string; request: ConfirmationRequest }
     | { type: 'CONFIRMATION_RESPONDED'; conversationId: string; requestId: string }
     | { type: 'DISMISS_CONFIRMATION'; conversationId: string; requestId: string }
-    | { type: 'MESSAGE_DELETED'; conversationId: string; role: 'user' | 'assistant'; stepId: number }
+    | { type: 'MESSAGE_DELETED'; conversationId: string; role: 'user' | 'assistant'; stepId: number; rewind?: boolean }
     | { type: 'USER_STEP_SAVED'; conversationId: string; runId: string; clientMessageId: string; stepId: number; message?: string }
     | { type: 'BILLING_ERROR'; conversationId?: string; runId?: string; error: BillingError }
     | { type: 'AUTH_ERROR'; conversationId?: string; runId?: string; error: AuthError }
@@ -388,6 +388,12 @@ function deleteTurnFromMessages(messages: Message[], stepId: number): Message[] 
     return [...messages.slice(0, idx), ...messages.slice(endIdx + 1)];
 }
 
+/** Drop the message recorded at this step along with everything that followed it. */
+function truncateMessagesFrom(messages: Message[], stepId: number): Message[] {
+    const idx = messages.findIndex(m => m.id === String(stepId));
+    return idx === -1 ? messages : messages.slice(0, idx);
+}
+
 function deleteAssistantMessageFromMessages(messages: Message[], stepId: number): Message[] {
     const stepIdStr = String(stepId);
     const next = messages.filter(m => !(m.role === 'assistant' && m.id === stepIdStr));
@@ -580,6 +586,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                         stableId: String(step.step_id || generateUUID()),
                         role: (step.source === 'user' ? 'user' : 'assistant') as 'user' | 'assistant',
                         content: step.message || '',
+                        createdAt: step.timestamp,
                     }))
                     .filter(m => m.content);
             }
@@ -1239,6 +1246,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                         stableId: clientMessageId,
                         role: 'user' as const,
                         content: action.message,
+                        createdAt: new Date().toISOString(),
                     };
 
                     // Insert before the run's assistant placeholder (if present) to preserve turn order.
@@ -1497,10 +1505,11 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         }
 
         case 'MESSAGE_DELETED': {
-            const { conversationId, role, stepId } = action;
+            const { conversationId, role, stepId, rewind } = action;
             const isCurrentConversation = conversationId === state.conversationId;
 
             const applyDeletion = (msgs: Message[]): Message[] => {
+                if (rewind) return truncateMessagesFrom(msgs, stepId);
                 if (role === 'assistant') return deleteAssistantMessageFromMessages(msgs, stepId);
                 return deleteTurnFromMessages(msgs, stepId);
             };
@@ -1846,6 +1855,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                         conversationId: convId,
                         role: message.data.role === 'assistant' ? 'assistant' : 'user',
                         stepId: message.data.stepId,
+                        rewind: message.data.rewind === true,
                     });
                 }
                 break;

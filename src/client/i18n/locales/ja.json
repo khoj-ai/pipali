@@ -624,6 +624,11 @@
     },
     "messages": {
         "deleteMessage": "メッセージを削除",
+        "copyMessage": "メッセージをコピー",
+        "editMessage": "メッセージを編集",
+        "forkConversation": "ここから会話を分岐",
+        "forkedTitle": "分岐: {{title}}",
+        "resend": "再送信",
         "pleaseLookAtFiles": "添付ファイルを確認してください。",
         "queued": "キュー待ち"
     }

@@ -333,3 +333,26 @@ export function removeAgentMessageFromTrajectory(
 
   return removeCount;
 }
+
+/**
+ * Removes the given step and everything recorded after it, rewinding the trajectory to
+ * the state it was in just before that step ran.
+ * Returns the number of steps removed.
+ */
+export function truncateTrajectoryFrom(
+  trajectory: ATIFTrajectory,
+  stepId: number
+): number {
+  const startIndex = trajectory.steps.findIndex(s => s.step_id === stepId);
+
+  if (startIndex === -1) {
+    return 0;
+  }
+
+  const removeCount = trajectory.steps.length - startIndex;
+  trajectory.steps.splice(startIndex);
+
+  trajectory.final_metrics = calculateFinalMetrics(trajectory.steps);
+
+  return removeCount;
+}

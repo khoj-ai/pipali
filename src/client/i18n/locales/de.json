@@ -624,6 +624,11 @@
     },
     "messages": {
         "deleteMessage": "Nachricht löschen",
+        "copyMessage": "Nachricht kopieren",
+        "editMessage": "Nachricht bearbeiten",
+        "forkConversation": "Unterhaltung ab hier verzweigen",
+        "forkedTitle": "Verzweigung: {{title}}",
+        "resend": "Erneut senden",
         "pleaseLookAtFiles": "Bitte schau dir die angehängten Dateien an.",
         "queued": "In Warteschlange"
     }

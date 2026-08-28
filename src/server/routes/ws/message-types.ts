@@ -227,6 +227,8 @@ export interface MessageDeletedMessage {
     data: {
         stepId: number;
         role: 'user' | 'assistant';
+        /** The step and everything after it went, not just its own turn. */
+        rewind?: boolean;
     };
 }
 

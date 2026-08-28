@@ -20,6 +20,7 @@ import {
   removeStepFromTrajectory,
   removeTurnFromTrajectory,
   removeAgentMessageFromTrajectory,
+  truncateTrajectoryFrom,
   validateATIFTrajectory,
   exportATIFTrajectory,
   importATIFTrajectory,
@@ -472,6 +473,28 @@ export class ATIFConversationService {
   }
 
   /**
+   * Rewinds a conversation to just before the given step, dropping that step and
+   * everything recorded after it.
+   * Returns the number of steps deleted.
+   */
+  async rewindToStep(conversationId: string, stepId: number): Promise<number> {
+    const conversation = await this.getConversation(conversationId);
+
+    if (!conversation) {
+      throw new Error(`Conversation ${conversationId} not found`);
+    }
+
+    const trajectory = conversation.trajectory;
+    const beforeSteps = [...trajectory.steps];
+
+    if (truncateTrajectoryFrom(trajectory, stepId) === 0) {
+      return 0;
+    }
+
+    return await this.persistStepDeletions(conversationId, beforeSteps, trajectory.steps);
+  }
+
+  /**
    * Exports a conversation in ATIF format
    */
   async exportConversationAsATIF(conversationId: string): Promise<string> {
@@ -537,15 +560,15 @@ export class ATIFConversationService {
   }
 
   /**
-   * Forks an existing conversation with its complete history.
-   * Creates a new conversation with a copy of all steps from the source.
+   * Forks an existing conversation into a new one holding a copy of its history.
+   * `upToStepId` branches partway through, keeping only the steps up to and including it.
    */
   async forkConversation(
     sourceConversationId: string,
     user: typeof User.$inferSelect,
-    title?: string,
-    chatModelId?: number,
+    options: { title?: string; chatModelId?: number; upToStepId?: number } = {},
   ): Promise<ConversationWithTrajectory> {
+    const { title, chatModelId, upToStepId } = options;
     const sourceConversation = await this.getConversation(sourceConversationId);
 
     if (!sourceConversation) {
@@ -555,18 +578,14 @@ export class ATIFConversationService {
     // Create a deep copy of the trajectory
     const sourceTrajectory = sourceConversation.trajectory;
     const newSessionId = uuidv4();
+    const forkedSteps = upToStepId === undefined
+      ? [...sourceTrajectory.steps]
+      : sourceTrajectory.steps.filter(step => step.step_id <= upToStepId);
     const newTrajectory: ATIFTrajectory = sanitizeForJsonb({
       ...sourceTrajectory,
       session_id: newSessionId,
-      steps: [...sourceTrajectory.steps], // Copy all steps including history
-      final_metrics: sourceTrajectory.final_metrics ? {
-        total_prompt_tokens: sourceTrajectory.final_metrics.total_prompt_tokens || 0,
-        total_completion_tokens: sourceTrajectory.final_metrics.total_completion_tokens || 0,
-        total_cached_tokens: sourceTrajectory.final_metrics.total_cached_tokens || 0,
-        total_cache_write_tokens: sourceTrajectory.final_metrics.total_cache_write_tokens || 0,
-        total_cost_usd: sourceTrajectory.final_metrics.total_cost_usd,
-        total_steps: sourceTrajectory.final_metrics.total_steps,
-      } : undefined,
+      steps: forkedSteps,
+      final_metrics: calculateFinalMetrics(forkedSteps),
     });
 
     // Build insert data

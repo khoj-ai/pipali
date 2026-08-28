@@ -27,7 +27,8 @@ import { useFocusManagement, useFileDrop, useModels, useSidecar, useWebSocketCha
 
 // Utils
 import { setApiBaseUrl, apiFetch } from "./utils/api";
-import { generateUUID, generateDeterministicId, getToolCategory, type ToolCategory } from "./utils/formatting";
+import { IS_TOUCH } from "./utils/platform";
+import { generateUUID, generateDeterministicId, getToolCategory, formatAttachedFilesBlock, type ToolCategory } from "./utils/formatting";
 import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupNotificationClickListener, warmAudioContext } from "./utils/notifications";
 import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
 import { useVoiceSettings } from "./hooks/useVoiceSettings";
@@ -180,7 +181,7 @@ const App = () => {
     // Hooks
     const { textareaRef, scheduleTextareaFocus } = useFocusManagement();
     const { models, defaultModel, selectedModel, setSelectedModel, selectModel, showModelDropdown, setShowModelDropdown, refetchModels } = useModels();
-    const { isDragging, stagedFiles, uploadFiles, pickAndStageFiles, removeFile, clearFiles, formatAttachedFilesMessage } = useFileDrop();
+    const { isDragging, stagedFiles, uploadFiles, pickAndStageFiles, removeFile, clearFiles } = useFileDrop();
     const wsUrl = `${wsBaseUrl}/ws/chat`;
 
     // Voice companion handlers are wired after the hook; the ref lets the
@@ -192,7 +193,7 @@ const App = () => {
         onStepStart: (convId: string) => void;
     } | null>(null);
     // Let the voice companion (wired above sendMessage) reuse the standard send pipeline.
-    const sendMessageRef = useRef<((e?: React.FormEvent, options?: { text?: string }) => void) | null>(null);
+    const sendMessageRef = useRef<((e?: React.FormEvent, options?: { text?: string; attachedFiles?: string[] }) => void) | null>(null);
 
     const {
         isConnected,
@@ -1024,7 +1025,7 @@ const App = () => {
                     const rawContent = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
                     const attachMatch = rawContent.match(/\n\n<attached_files>\n([\s\S]*?)\n<\/attached_files>$/);
                     const attachedFiles = attachMatch
-                        ? attachMatch[1].split('\n').map((line: string) => line.replace(/^- /, '').split('/').pop() || '').filter(Boolean)
+                        ? attachMatch[1].split('\n').map((line: string) => line.replace(/^- /, '').trim()).filter(Boolean)
                         : undefined;
                     const stepId = msg.step_id != null ? String(msg.step_id) : generateUUID();
                     historyMessages.push({
@@ -1033,6 +1034,7 @@ const App = () => {
                         id: stepId,
                         stableId: stepId,
                         attachedFiles,
+                        createdAt: msg.timestamp,
                     });
                 }
 
@@ -1510,6 +1512,90 @@ const App = () => {
         }
     };
 
+    /**
+     * Rewind the conversation to just before a message, then ask it again with the
+     * edited text. Everything the agent said after it is dropped, so the new answer
+     * takes the place of the old one instead of landing at the end of the thread.
+     * The rewrite falls back to the composer if the rewind fails, rather than vanishing.
+     */
+    const editMessage = async (messageId: string, text: string) => {
+        if (!conversationId) return;
+
+        const index = messages.findIndex(m => m.id === messageId);
+        if (index === -1) return;
+
+        // Rewinding with no way to send would drop the turn and the rewrite with it
+        if (!isConnected) {
+            setInput(text);
+            return;
+        }
+
+        try {
+            const res = await apiFetch(`/api/conversations/${conversationId}/messages/${messageId}?role=user&rewind=true`, {
+                method: 'DELETE'
+            });
+            if (!res.ok) {
+                const data = await res.json();
+                console.error("Failed to rewind conversation:", data.error);
+                setInput(text);
+                return;
+            }
+        } catch (e) {
+            console.error("Failed to rewind conversation", e);
+            setInput(text);
+            return;
+        }
+
+        const kept = messages.slice(0, index);
+        setChatMessages(kept);
+        syncConversationState(conversationId, kept);
+
+        sendMessage(undefined, { text, attachedFiles: messages[index]?.attachedFiles });
+    };
+
+    /**
+     * Branch the conversation into a copy of itself that stops just short of a message,
+     * handing that message back to the composer. The same rewrite `editMessage` makes
+     * in place, without disturbing the thread it came from.
+     */
+    const forkConversationFrom = async (messageId: string) => {
+        if (!conversationId) return;
+
+        const stepId = Number(messageId);
+        if (!Number.isInteger(stepId)) return;
+        const message = messages.find(m => m.id === messageId);
+        const upToStepId = stepId - 1;
+
+        // Nothing precedes the opening question, so a fork of it is just a fresh chat.
+        if (upToStepId < 1) {
+            startNewConversation();
+            setInput(message?.content ?? '');
+            return;
+        }
+
+        const sourceTitle = conversations.find(c => c.id === conversationId)?.title;
+        try {
+            const res = await apiFetch(`/api/conversations/${conversationId}/fork`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    upToStepId,
+                    ...(sourceTitle && { title: t('messages.forkedTitle', { title: sourceTitle }) }),
+                }),
+            });
+            const data = await res.json();
+            if (!res.ok) {
+                console.error("Failed to fork conversation:", data.error);
+                return;
+            }
+            await fetchConversations();
+            selectConversation(data.conversationId);
+            setInput(message?.content ?? '');
+        } catch (e) {
+            console.error("Failed to fork conversation", e);
+        }
+    };
+
     // ===== Billing Actions =====
 
     const handleBillingDismiss = (messageId: string) => {
@@ -1681,15 +1767,18 @@ const App = () => {
         }
     };
 
-    const sendMessage = async (e?: React.FormEvent, options?: { text?: string }) => {
+    const sendMessage = async (e?: React.FormEvent, options?: { text?: string; attachedFiles?: string[] }) => {
         e?.preventDefault();
         if (!isConnected) return;
 
-        // Voice supplies the message text directly; typed sends read the composer.
-        const isVoice = options?.text !== undefined;
+        // Voice and message edits supply the text directly; typed sends read the composer.
+        const isSupplied = options?.text !== undefined;
         const rawValue = options?.text ?? (textareaRef.current?.value ?? input);
         let messageText = rawValue.trim();
-        const hasFiles = !isVoice && stagedFiles.length > 0;
+        const filePaths = isSupplied
+            ? (options?.attachedFiles ?? [])
+            : stagedFiles.map(f => f.filePath);
+        const hasFiles = filePaths.length > 0;
 
         // Allow sending with only files (no text)
         if (!messageText && hasFiles) {
@@ -1698,12 +1787,11 @@ const App = () => {
         if (!messageText) return;
 
         // Build the full message with file paths for the agent
-        const fileSuffix = hasFiles ? formatAttachedFilesMessage(stagedFiles) : '';
-        const fullMessage = messageText + fileSuffix;
-        const fileNames = hasFiles ? stagedFiles.map(f => f.fileName) : undefined;
+        const fullMessage = messageText + formatAttachedFilesBlock(filePaths);
+        const attachedFiles = hasFiles ? filePaths : undefined;
 
-        // Don't clear the user's typed draft when the message came from voice.
-        if (!isVoice) {
+        // Don't clear the user's typed draft when the text came from elsewhere.
+        if (!isSupplied) {
             setInput("");
             clearFiles();
         }
@@ -1713,7 +1801,7 @@ const App = () => {
         const clientMessageId = generateUUID();
         const runId = generateUUID();
         // Show only the user's typed text in the UI (not the <attached_files> block)
-        const userMsg: Message = { id: clientMessageId, stableId: clientMessageId, role: 'user', content: messageText, attachedFiles: fileNames };
+        const userMsg: Message = { id: clientMessageId, stableId: clientMessageId, role: 'user', content: messageText, attachedFiles, createdAt: new Date().toISOString() };
         const chatModelId = getChatModelIdForRun(conversationId);
 
         setCurrentPage('chat');
@@ -1738,9 +1826,7 @@ const App = () => {
     sendMessageRef.current = sendMessage;
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            // On mobile/touch devices, let Enter create a newline (user taps send button instead)
-            if ('ontouchstart' in window || navigator.maxTouchPoints > 0) return;
+        if (e.key === 'Enter' && !e.shiftKey && !IS_TOUCH) {
             e.preventDefault();
             sendMessage();
         }
@@ -1759,8 +1845,7 @@ const App = () => {
         }
         if (!userMsg) return;
 
-        const fileSuffix = formatAttachedFilesMessage(stagedFiles);
-        const fullMessage = userMsg + fileSuffix;
+        const fullMessage = userMsg + formatAttachedFilesBlock(stagedFiles.map(f => f.filePath));
 
         setInput("");
         clearFiles();
@@ -1887,7 +1972,7 @@ const App = () => {
                     )}
                     {currentPage === 'chat' && (
                         <ErrorBoundary>
-                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} zoom={mainViewZoom} />
+                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onForkConversation={forkConversationFrom} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} zoom={mainViewZoom} />
                         </ErrorBoundary>
                     )}
 

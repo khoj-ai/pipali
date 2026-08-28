@@ -180,13 +180,6 @@ export function useFileDrop() {
         setStagedFiles([]);
     }, []);
 
-    /** Build the <attached_files> block to append to user message text. */
-    const formatAttachedFilesMessage = useCallback((files: StagedFile[]): string => {
-        if (files.length === 0) return '';
-        const fileList = files.map(f => `- ${f.filePath}`).join('\n');
-        return `\n\n<attached_files>\n${fileList}\n</attached_files>`;
-    }, []);
-
     return {
         isDragging,
         stagedFiles,
@@ -195,6 +188,5 @@ export function useFileDrop() {
         pickAndStageFiles,
         removeFile,
         clearFiles,
-        formatAttachedFilesMessage,
     };
 }

@@ -417,10 +417,13 @@ api.delete('/conversations/:conversationId', async (c) => {
 // Delete a message from a conversation
 // For user messages: deletes just that step
 // For assistant messages: deletes all associated agent steps (reasoning, tool calls, etc.)
+// With ?rewind=true: deletes the message and everything said after it, so an edited
+// message can be asked again from the same point in the conversation
 api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
     const conversationId = c.req.param('conversationId');
     const stepIdParam = c.req.param('stepId');
     const role = c.req.query('role'); // 'user' or 'assistant'
+    const rewind = c.req.query('rewind') === 'true';
 
     // Validate conversation ID
     try {
@@ -436,6 +439,19 @@ api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
     }
 
     try {
+        if (rewind) {
+            const deletedCount = await atifConversationService.rewindToStep(conversationId, stepId);
+            if (deletedCount === 0) {
+                return c.json({ error: 'Message not found' }, 404);
+            }
+            getBus(conversationId)?.publish({
+                type: 'message_deleted',
+                conversationId,
+                data: { stepId, role: role === 'assistant' ? 'assistant' : 'user', rewind: true },
+            });
+            return c.json({ success: true, deletedCount });
+        }
+
         if (role === 'assistant') {
             // Delete all agent steps associated with this assistant message
             const deletedCount = await atifConversationService.deleteAgentMessage(conversationId, stepId);
@@ -464,6 +480,40 @@ api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
     } catch (error) {
         log.error({ err: error }, 'Error deleting message');
         return c.json({ error: error instanceof Error ? error.message : 'Failed to delete message' }, 500);
+    }
+});
+
+// Fork a conversation into a new one that carries a copy of its history.
+// `upToStepId` branches partway through, keeping only the steps up to and including it.
+const forkSchema = z.object({
+    upToStepId: z.number().int().positive().optional(),
+    title: z.string().trim().min(1).optional(),
+});
+
+api.post('/conversations/:conversationId/fork', zValidator('json', forkSchema), async (c) => {
+    const conversationId = c.req.param('conversationId');
+    try {
+        z.uuid().parse(conversationId);
+    } catch (e) {
+        return c.json({ error: 'Invalid conversation ID' }, 400);
+    }
+
+    const [user] = await db.select().from(User).where(eq(User.email, getDefaultUser().email));
+    if (!user) {
+        return c.json({ error: 'User not found' }, 404);
+    }
+
+    const { upToStepId, title } = c.req.valid('json');
+
+    try {
+        const fork = await atifConversationService.forkConversation(conversationId, user, {
+            title,
+            upToStepId,
+        });
+        return c.json({ conversationId: fork.id, title: fork.title });
+    } catch (error) {
+        log.error({ err: error }, 'Error forking conversation');
+        return c.json({ error: error instanceof Error ? error.message : 'Failed to fork conversation' }, 500);
     }
 });
 

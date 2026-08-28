@@ -624,6 +624,11 @@
     },
     "messages": {
         "deleteMessage": "删除消息",
+        "copyMessage": "复制消息",
+        "editMessage": "编辑消息",
+        "forkConversation": "从此处分叉对话",
+        "forkedTitle": "分叉：{{title}}",
+        "resend": "重新发送",
         "pleaseLookAtFiles": "请查看附件。",
         "queued": "排队中"
     }

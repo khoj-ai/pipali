@@ -624,6 +624,11 @@
     },
     "messages": {
         "deleteMessage": "Supprimer le message",
+        "copyMessage": "Copier le message",
+        "editMessage": "Modifier le message",
+        "forkConversation": "Bifurquer la conversation à partir d'ici",
+        "forkedTitle": "Bifurcation : {{title}}",
+        "resend": "Renvoyer",
         "pleaseLookAtFiles": "Consulte les fichiers joints.",
         "queued": "En file d'attente"
     }

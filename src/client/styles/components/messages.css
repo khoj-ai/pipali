@@ -15,6 +15,14 @@
     display: flex;
     flex-direction: column;
     gap: 8px;
+}
+
+/* The message proper, without the attachment and queue notes that trail it. The
+   actions row anchors here so it lands on the bubble's edge rather than theirs. */
+.message-main {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
     position: relative;
 }
 
@@ -85,6 +93,12 @@
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
+/* On the user's bubble the row sits astride its bottom edge, half above, half below */
+.user-message .message-actions {
+    bottom: 0;
+    transform: translateY(50%);
+}
+
 .message-action-btn {
     display: flex;
     align-items: center;
@@ -107,6 +121,51 @@
 
 .message-action-btn:active {
     background: var(--bg-active);
+}
+
+/* Soft "sent at" hint, revealed with the actions it sits beside */
+.message-time {
+    padding: 0 6px;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+    white-space: nowrap;
+}
+
+/* Editing a sent message, in place of its bubble */
+.message-edit {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.message-edit-input {
+    width: 100%;
+    min-width: min(60vw, 480px);
+    padding: 12px 16px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-lg);
+    background: var(--color-bg-muted);
+    color: var(--color-text);
+    font-family: inherit;
+    font-size: var(--text-base);
+    line-height: var(--leading-relaxed);
+    resize: vertical;
+}
+
+.message-edit-input:focus {
+    outline: none;
+    border-color: var(--color-accent);
+}
+
+.message-edit-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.message-edit-actions button {
+    padding: 6px 12px;
+    font-size: var(--text-sm);
 }
 
 .message-content {

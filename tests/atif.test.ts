@@ -18,6 +18,7 @@ import {
   removeStepFromTrajectory,
   removeTurnFromTrajectory,
   removeAgentMessageFromTrajectory,
+  truncateTrajectoryFrom,
   calculateFinalMetrics,
   accumulateFinalMetrics,
   addMetrics,
@@ -835,6 +836,43 @@ describe('ATIF User Message Removal', () => {
 
     expect(removedCount).toBe(3);
     expect(trajectory.steps.map(step => step.step_id)).toEqual([4]);
+  });
+});
+
+describe('ATIF Trajectory Truncation', () => {
+  function conversationOfFourTurns(): ATIFTrajectory {
+    const trajectory = createEmptyATIFTrajectory('session-123', 'test-agent', '1.0.0', 'gpt-4');
+    addStepToTrajectory(trajectory, 'user', 'First message');
+    addStepToTrajectory(trajectory, 'agent', 'First response', undefined, undefined,
+      { prompt_tokens: 100, completion_tokens: 50, cost_usd: 0.01 });
+    addStepToTrajectory(trajectory, 'user', 'Second message');
+    addStepToTrajectory(trajectory, 'agent', 'Second response', undefined, undefined,
+      { prompt_tokens: 150, completion_tokens: 75, cost_usd: 0.015 });
+    return trajectory;
+  }
+
+  test('should drop the given step and everything after it, and recalculate metrics', () => {
+    const trajectory = conversationOfFourTurns();
+
+    const removed = truncateTrajectoryFrom(trajectory, 3);
+
+    expect(removed).toBe(2);
+    expect(trajectory.steps.map(s => s.step_id)).toEqual([1, 2]);
+
+    // Only the first agent step's metrics survive
+    expect(trajectory.final_metrics?.total_prompt_tokens).toBe(100);
+    expect(trajectory.final_metrics?.total_completion_tokens).toBe(50);
+    expect(trajectory.final_metrics?.total_cost_usd).toBe(0.01);
+    expect(trajectory.final_metrics?.total_steps).toBe(2);
+  });
+
+  test('should leave the trajectory alone when the step is gone', () => {
+    const trajectory = conversationOfFourTurns();
+
+    const removed = truncateTrajectoryFrom(trajectory, 999);
+
+    expect(removed).toBe(0);
+    expect(trajectory.steps).toHaveLength(4);
   });
 });
 

@@ -12,6 +12,8 @@ interface MessageListProps {
     conversationId?: string;
     platformFrontendUrl?: string;
     onDeleteMessage?: (messageId: string, role: 'user' | 'assistant') => void;
+    onEditMessage?: (messageId: string, text: string) => void;
+    onForkConversation?: (messageId: string) => void;
     onBillingContinue?: (messageId: string) => void;
     onBillingDismiss?: (messageId: string) => void;
     onAuthSignIn?: (messageId: string) => void;
@@ -28,6 +30,8 @@ export function MessageList({
     conversationId,
     platformFrontendUrl,
     onDeleteMessage,
+    onEditMessage,
+    onForkConversation,
     onBillingContinue,
     onBillingDismiss,
     onAuthSignIn,
@@ -68,6 +72,8 @@ export function MessageList({
                                     message={msg}
                                     platformFrontendUrl={platformFrontendUrl}
                                     onDelete={onDeleteMessage}
+                                    onEdit={onEditMessage}
+                                    onFork={onForkConversation}
                                     onBillingContinue={onBillingContinue}
                                     onBillingDismiss={onBillingDismiss}
                                     onAuthSignIn={onAuthSignIn}

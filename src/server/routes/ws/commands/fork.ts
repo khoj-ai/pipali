@@ -53,8 +53,7 @@ export const ForkCommandHandler: Command<ForkCommand> = {
         const forkedConversation = await atifConversationService.forkConversation(
             sourceConversationId,
             user,
-            undefined,
-            chatModelId,
+            { chatModelId },
         );
 
         // Send conversation_created with full history

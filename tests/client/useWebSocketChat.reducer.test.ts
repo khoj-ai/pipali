@@ -663,3 +663,39 @@ test('a starting tool call moves streamed text into the trajectory', () => {
         ['tool_call', '', false],
     ]);
 });
+
+test('MESSAGE_DELETED with rewind drops the edited message and everything after it', () => {
+    const conversationId = 'c1';
+    const messages: Message[] = [
+        { id: '1', stableId: '1', role: 'user', content: 'First question' },
+        { id: '2', stableId: '2', role: 'assistant', content: 'First answer' },
+        { id: '3', stableId: '3', role: 'user', content: 'Second question' },
+        { id: '4', stableId: '4', role: 'assistant', content: 'Second answer' },
+        { id: '5', stableId: '5', role: 'user', content: 'Third question' },
+        { id: '6', stableId: '6', role: 'assistant', content: 'Third answer' },
+    ];
+    const state = makeState({
+        conversationId,
+        messages,
+        conversationState: { isProcessing: false, isStopped: false, isCompleted: false, messages },
+    });
+
+    const rewound = __test__.chatReducer(state, {
+        type: 'MESSAGE_DELETED',
+        conversationId,
+        role: 'user',
+        stepId: 3,
+        rewind: true,
+    });
+    expect(rewound.messages.map(m => m.id)).toEqual(['1', '2']);
+    expect(rewound.conversationStates.get(conversationId)?.messages.map(m => m.id)).toEqual(['1', '2']);
+
+    // Without the flag the same step takes only its own turn
+    const deleted = __test__.chatReducer(state, {
+        type: 'MESSAGE_DELETED',
+        conversationId,
+        role: 'user',
+        stepId: 3,
+    });
+    expect(deleted.messages.map(m => m.id)).toEqual(['1', '2', '5', '6']);
+});

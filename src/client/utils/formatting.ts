@@ -11,6 +11,36 @@ export function formatFileSize(bytes: number): string {
     return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+/** Build the <attached_files> block a user message carries to the agent. */
+export function formatAttachedFilesBlock(filePaths: string[]): string {
+    if (filePaths.length === 0) return '';
+    return `\n\n<attached_files>\n${filePaths.map(p => `- ${p}`).join('\n')}\n</attached_files>`;
+}
+
+/**
+ * A soft stamp for when a message was sent: the time alone for today, the weekday
+ * within the past week, and the date beyond that. All parts come from the locale, so
+ * no part of it needs translating.
+ */
+export function formatMessageTime(timestamp: string, locale?: string, now: Date = new Date()): string {
+    const date = new Date(timestamp);
+    if (Number.isNaN(date.getTime())) return '';
+
+    const time = date.toLocaleTimeString(locale, { hour: 'numeric', minute: '2-digit' });
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const daysAgo = Math.round((startOfDay(now) - startOfDay(date)) / 86_400_000);
+
+    if (daysAgo === 0) return time;
+    if (daysAgo > 0 && daysAgo < 7) return `${date.toLocaleDateString(locale, { weekday: 'short' })} ${time}`;
+
+    const day = date.toLocaleDateString(locale, {
+        month: 'short',
+        day: 'numeric',
+        ...(date.getFullYear() === now.getFullYear() ? {} : { year: 'numeric' }),
+    });
+    return `${day}, ${time}`;
+}
+
 /**
  * Convert snake_case tool name to Title Case
  */

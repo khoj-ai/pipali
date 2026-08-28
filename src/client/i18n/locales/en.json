@@ -624,6 +624,11 @@
     },
     "messages": {
         "deleteMessage": "Delete message",
+        "copyMessage": "Copy message",
+        "editMessage": "Edit message",
+        "forkConversation": "Fork conversation from here",
+        "forkedTitle": "Fork: {{title}}",
+        "resend": "Resend",
         "pleaseLookAtFiles": "Please look at the attached files.",
         "queued": "Queued"
     }

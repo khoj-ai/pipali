@@ -18,8 +18,10 @@ export type Message = {
     runErrorInfo?: {
         message: string;
     };
-    /** File names attached by the user (extracted from <attached_files> block) */
+    /** Paths of files attached by the user (extracted from <attached_files> block) */
     attachedFiles?: string[];
+    /** ISO timestamp of when the message was recorded */
+    createdAt?: string;
     /** True for user messages waiting in the soft-interrupt queue (run_started not yet received). */
     isQueued?: boolean;
 };
