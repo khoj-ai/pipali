@@ -44,3 +44,4 @@
 
 /* Responsive */
 @import './responsive.css';
+@import './base/safe-area.css';

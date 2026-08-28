@@ -62,6 +62,16 @@ export function useTheme() {
     setTheme(newTheme);
   }, [theme, getResolvedTheme, setTheme]);
 
+  // The status bar reads this tag. A media query would follow the OS while the app can be
+  // set against it, so it tracks the resolved theme, taking the colour from the same token
+  // the page paints with.
+  useEffect(() => {
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (!meta) return;
+    const background = getComputedStyle(document.documentElement).getPropertyValue('--color-bg').trim();
+    if (background) meta.setAttribute('content', background);
+  }, [resolvedTheme]);
+
   // Apply theme on mount and watch for system preference changes
   useEffect(() => {
     applyTheme(theme);
