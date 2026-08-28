@@ -1,6 +1,6 @@
 // Individual message component
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Paperclip, Clock, Copy, Check, Pencil, GitBranch } from 'lucide-react';
 import type { Message } from '../../types';
@@ -33,8 +33,22 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
     const isUser = message.role === 'user';
     const isStreaming = message.isStreaming || isActiveRun;
     const [isRevealed, setIsRevealed] = useState(false);
+    const messageRef = useRef<HTMLDivElement>(null);
     const [copied, setCopied] = useState(false);
     const [draft, setDraft] = useState<string | null>(null);
+
+    // A finger has no hover to leave, so the revealed row is dismissed by a tap elsewhere.
+    // The row sits inside the message, so one containment check covers both.
+    useEffect(() => {
+        if (!isRevealed || !IS_TOUCH) return;
+        const dismiss = (e: PointerEvent) => {
+            if (e.pointerType === 'mouse') return;
+            if (messageRef.current?.contains(e.target as Node)) return;
+            setIsRevealed(false);
+        };
+        document.addEventListener('pointerdown', dismiss);
+        return () => document.removeEventListener('pointerdown', dismiss);
+    }, [isRevealed]);
 
     // Edit and fork address a message by its step, so they wait for it to be persisted.
     const isPersisted = isNumericIdString(message.id);
@@ -96,6 +110,7 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
 
     return (
         <div
+            ref={messageRef}
             className={`message ${isUser ? 'user-message' : 'assistant-message'}`}
             // A pointer hovers; a finger taps the message to reveal the same row.
             onPointerEnter={e => { if (e.pointerType === 'mouse') setIsRevealed(true); }}

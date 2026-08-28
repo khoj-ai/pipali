@@ -99,3 +99,61 @@
         padding: 24px 16px;
     }
 }
+
+/*
+ * Touch targets.
+ *
+ * Keyed on the pointer rather than the viewport: a small window on a laptop still has a
+ * cursor, and a tablet has a finger at any width.
+ *
+ * Bare icons grow outright, since the extra room around them reads as padding. The send
+ * button instead keeps its painted size and grows an invisible target, because it carries
+ * a filled background and growing that reads as a slab rather than a button. The gap in
+ * its group is widened to clear the overlay, so a tap near the edge cannot land on the
+ * neighbour underneath it.
+ */
+@media (pointer: coarse) {
+    .toolbar-button {
+        width: var(--touch-target-min);
+        height: var(--touch-target-min);
+    }
+
+    /* Deliberately tucked against the voice button, so it gains height, not width. */
+    .voice-control .voice-mode-trigger {
+        width: 24px;
+        height: var(--touch-target-min);
+    }
+
+    .action-button {
+        position: relative;
+    }
+
+    .action-button::after {
+        content: '';
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: var(--touch-target-min);
+        height: var(--touch-target-min);
+        transform: translate(-50%, -50%);
+    }
+
+    /*
+     * This row floats over the message it belongs to, so it grows part way rather than to
+     * the full target - at 44px it would outweigh the bubble. 36px wide on a 40px pitch
+     * keeps neighbouring targets off each other, and the shorter height keeps the row off
+     * the last line of text it sits against.
+     */
+    .message-action-btn {
+        width: 36px;
+        height: 28px;
+    }
+
+    .message-actions {
+        gap: 4px;
+    }
+
+    .input-toolbar-left { gap: 6px; }
+    /* Wide enough that the send button's overlay stops short of its neighbour. */
+    .input-toolbar-right { gap: 8px; }
+}

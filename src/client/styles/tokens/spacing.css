@@ -29,6 +29,8 @@
   --max-width-conversation: 1000px;
   --conversation-inset: 24px;
   --header-height: 52px;
+  /* Smallest comfortable target for a finger, per Apple HIG and Material */
+  --touch-target-min: 44px;
 }
 
 /*
