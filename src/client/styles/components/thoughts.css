@@ -119,6 +119,13 @@
     min-width: 8px;
 }
 
+/* Run stopwatch, beside the trail of what the run did */
+.run-timer {
+    font-variant-numeric: tabular-nums;
+    font-size: var(--text-xs);
+    color: var(--color-text-muted);
+}
+
 .thoughts-chevron {
     flex-shrink: 0;
 }

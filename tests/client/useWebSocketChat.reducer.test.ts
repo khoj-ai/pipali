@@ -699,3 +699,28 @@ test('MESSAGE_DELETED with rewind drops the edited message and everything after 
     });
     expect(deleted.messages.map(m => m.id)).toEqual(['1', '2', '5', '6']);
 });
+
+test('OBSERVE_ACTIVE_RUN dates the placeholder from the message it answers, not from now', () => {
+    const conversationId = 'c1';
+    const askedAt = '2026-03-15T09:05:00.000Z';
+    const messages: Message[] = [
+        { id: '1', stableId: '1', role: 'user', content: 'Take your time', createdAt: askedAt },
+    ];
+    const state = makeState({
+        conversationId,
+        messages,
+        conversationState: { isProcessing: true, isStopped: false, isCompleted: false, messages },
+    });
+
+    const observing = __test__.chatReducer(state, {
+        type: 'OBSERVE_ACTIVE_RUN',
+        conversationId,
+        runId: 'run-1',
+        clientMessageId: '1',
+    });
+
+    // Watching from halfway through must not restart the clock at zero
+    const assistant = observing.messages.find(m => m.role === 'assistant');
+    expect(assistant?.isStreaming).toBe(true);
+    expect(assistant?.startedAt).toBe(askedAt);
+});

@@ -20,8 +20,10 @@ export type Message = {
     };
     /** Paths of files attached by the user (extracted from <attached_files> block) */
     attachedFiles?: string[];
-    /** ISO timestamp of when the message was recorded */
+    /** ISO timestamp of when the message was recorded; for an agent message, when its run ended */
     createdAt?: string;
+    /** ISO timestamp of when the run behind an agent message began */
+    startedAt?: string;
     /** True for user messages waiting in the soft-interrupt queue (run_started not yet received). */
     isQueued?: boolean;
 };

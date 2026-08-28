@@ -964,12 +964,17 @@ const App = () => {
             let currentAgentMessage: Message | null = null;
             let thoughts: Thought[] = [];
             let firstAgentStepId: string | null = null;
+            // A run is bracketed by the user step that started it and its own last step.
+            let runStartedAt: string | undefined;
+            let lastAgentTimestamp: string | undefined;
 
             const finalizeCurrentAgent = () => {
                 if (currentAgentMessage) {
                     if (thoughts.length > 0) {
                         currentAgentMessage.thoughts = thoughts;
                     }
+                    currentAgentMessage.startedAt = runStartedAt;
+                    currentAgentMessage.createdAt = lastAgentTimestamp;
                     historyMessages.push(currentAgentMessage);
                 } else if (thoughts.length > 0) {
                     // Use the first agent step_id for orphaned thoughts so deletion works
@@ -980,11 +985,14 @@ const App = () => {
                         thoughts: thoughts,
                         id: msgId,
                         stableId: msgId,
+                        startedAt: runStartedAt,
+                        createdAt: lastAgentTimestamp,
                     });
                 }
                 thoughts = [];
                 currentAgentMessage = null;
                 firstAgentStepId = null;
+                lastAgentTimestamp = undefined;
             };
 
             for (const msg of data.history) {
@@ -1036,6 +1044,7 @@ const App = () => {
                         attachedFiles,
                         createdAt: msg.timestamp,
                     });
+                    runStartedAt = msg.timestamp;
                 }
 
                 if (msg.source === 'agent') {
@@ -1043,6 +1052,7 @@ const App = () => {
                     if (firstAgentStepId === null) {
                         firstAgentStepId = msg.step_id != null ? String(msg.step_id) : generateUUID();
                     }
+                    lastAgentTimestamp = msg.timestamp;
                     let toolResultsMap: Map<string, string> = new Map();
                     const hasMessage = msg.message && msg.message.trim() !== '';
                     const stepGroupId = msg.tool_calls && msg.tool_calls.length > 0

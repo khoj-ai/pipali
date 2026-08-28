@@ -151,7 +151,12 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
 
                 {/* Thoughts / Reasoning */}
                 {message.thoughts && message.thoughts.length > 0 && (
-                    <ThoughtsSection thoughts={message.thoughts} isStreaming={isStreaming} />
+                    <ThoughtsSection
+                        thoughts={message.thoughts}
+                        isStreaming={isStreaming}
+                        startedAt={message.startedAt}
+                        endedAt={message.createdAt}
+                    />
                 )}
 
                 {/* Message Content */}

@@ -325,6 +325,7 @@ function settleStreamedThoughts(thoughts: Thought[] | undefined): Thought[] | un
 
 function stopAllStreamingAssistants(messages: Message[]): Message[] {
     let changed = false;
+    const endedAt = new Date().toISOString();
     const next = messages.map(m => {
         if (m.role !== 'assistant') return m;
         // Callers may already have cleared isStreaming while settling content,
@@ -332,7 +333,8 @@ function stopAllStreamingAssistants(messages: Message[]): Message[] {
         const thoughts = settleStreamedThoughts(m.thoughts);
         if (!m.isStreaming && thoughts === m.thoughts) return m;
         changed = true;
-        return { ...m, isStreaming: false, thoughts };
+        // However the run ended - answered, stopped or failed - its clock stops here.
+        return { ...m, isStreaming: false, thoughts, createdAt: m.createdAt ?? endedAt };
     });
     return changed ? next : messages;
 }
@@ -532,6 +534,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     content: '',
                     isStreaming: true,
                     thoughts: [],
+                    startedAt: new Date().toISOString(),
                 };
                 const userIndex = msgs.findIndex(m => m.role === 'user' && (m.id === clientMessageId || m.stableId === clientMessageId));
                 return userIndex === -1
@@ -666,6 +669,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     content: '',
                     isStreaming: true,
                     thoughts: [],
+                    // No optimistic placeholder to inherit from: a queued message whose
+                    // turn came round, an observer, or a conversation opened mid-run.
+                    startedAt: new Date().toISOString(),
                 };
 
                 const userIndex = messages.findIndex(m => m.role === 'user' && (m.id === clientMessageId || m.stableId === clientMessageId));
@@ -707,6 +713,8 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
             // Mark pending tool calls as interrupted
             const markInterrupted = (msgs: Message[]): Message[] => {
+                // A run cut short still ran for as long as it ran, so its clock stops here too.
+                const endedAt = new Date().toISOString();
                 return msgs.map(msg => {
                     if (msg.role !== 'assistant' || !msg.thoughts) return msg;
 
@@ -714,6 +722,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     if (!isTargetRun) return msg;
 
                     const settled = settleStreamedThoughts(msg.thoughts);
+                    const stopped = { ...msg, isStreaming: false, createdAt: msg.createdAt ?? endedAt };
                     if (settled?.some(t => t.isPending)) {
                         const updatedThoughts = settled.map(thought => {
                             if (thought.type === 'tool_call' && thought.isPending) {
@@ -721,9 +730,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                             }
                             return thought;
                         });
-                        return { ...msg, thoughts: updatedThoughts, isStreaming: false };
+                        return { ...stopped, thoughts: updatedThoughts };
                     }
-                    return { ...msg, thoughts: settled, isStreaming: false };
+                    return { ...stopped, thoughts: settled };
                 });
             };
 
@@ -1440,6 +1449,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     content: '',
                     isStreaming: true,
                     thoughts: [],
+                    // Tuning into a run already under way. It began when the message it
+                    // answers was recorded, not when we started watching.
+                    startedAt: baseMessages.findLast(m => m.role === 'user')?.createdAt,
                 };
                 if (clientMessageId) {
                     const userIndex = baseMessages.findIndex(m => m.role === 'user' && (m.id === clientMessageId || m.stableId === clientMessageId));

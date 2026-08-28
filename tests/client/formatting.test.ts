@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { formatMessageTime } from '../../src/client/utils/formatting';
+import { formatMessageTime, formatRunDuration } from '../../src/client/utils/formatting';
 
 describe('formatMessageTime', () => {
     const now = new Date('2026-03-15T18:00:00');
@@ -23,5 +23,16 @@ describe('formatMessageTime', () => {
 
     test('returns nothing it cannot read', () => {
         expect(formatMessageTime('not a date', 'en-US', now)).toBe('');
+    });
+});
+
+describe('formatRunDuration', () => {
+    test('grows units as a run wears on, padding once minutes appear', () => {
+        expect(formatRunDuration(0)).toBe('0s');
+        expect(formatRunDuration(59_400)).toBe('59s');
+        expect(formatRunDuration(60_000)).toBe('1m 00s');
+        expect(formatRunDuration(134_000)).toBe('2m 14s');
+        expect(formatRunDuration(3_600_000)).toBe('1h 00m');
+        expect(formatRunDuration(3_780_000)).toBe('1h 03m');
     });
 });

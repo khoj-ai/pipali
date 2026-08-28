@@ -5,6 +5,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronRight, ChevronUp, Globe, FileSearch, Pencil, Lightbulb, Terminal, Wrench } from 'lucide-react';
 import type { Thought } from '../../types';
 import { ThoughtItem } from './ThoughtItem';
+import { RunTimer } from './RunTimer';
 import { buildDelegatedTaskTitleMap, formatCharCount, getToolCategory, type ToolCategory } from '../../utils/formatting';
 import { parseSnapshotUids } from '../../utils/snapshotParser';
 
@@ -38,6 +39,8 @@ const CHEVRON_ICONS: Record<ExpandLevel, React.ComponentType<{ size?: number; cl
 interface ThoughtsSectionProps {
     thoughts: Thought[];
     isStreaming?: boolean;
+    startedAt?: string;
+    endedAt?: string;
 }
 
 // Split a thought with multiple **heading** sections into separate thoughts for display.
@@ -93,7 +96,7 @@ export function getCollapsedPreviewThoughts(thoughts: Thought[]): Thought[] {
         });
 }
 
-export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps) {
+export function ThoughtsSection({ thoughts, isStreaming, startedAt, endedAt }: ThoughtsSectionProps) {
     const [expandLevel, setExpandLevel] = useState<ExpandLevel>(getStoredExpandLevel);
     // Per-item overrides: at level 1, toggled items show full; at level 2, toggled items show outline
     const [toggledItems, setToggledItems] = useState<Set<string>>(new Set());
@@ -223,6 +226,7 @@ export function ThoughtsSection({ thoughts, isStreaming }: ThoughtsSectionProps)
                     </span>
                     <Chevron size={14} className="thoughts-chevron" />
                 </button>
+                {startedAt && <RunTimer startedAt={startedAt} endedAt={endedAt} isRunning={isStreaming} />}
             </div>
 
             {/* Show assistant-visible messages and tool calls while collapsed, without tool results */}
