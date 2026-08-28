@@ -196,33 +196,6 @@ export async function openFile(filePath: string): Promise<boolean> {
 }
 
 /**
- * Acquire a wake lock to prevent OS idle sleep.
- * Uses reference counting in Rust — safe to call multiple times for parallel tasks.
- */
-export async function acquireWakeLock(): Promise<void> {
-    if (!isTauri()) return;
-    try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('acquire_wake_lock');
-    } catch (err) {
-        console.warn('[wakeLock] Failed to acquire:', err);
-    }
-}
-
-/**
- * Release a wake lock. OS sleep is re-enabled when all tasks have released.
- */
-export async function releaseWakeLock(): Promise<void> {
-    if (!isTauri()) return;
-    try {
-        const { invoke } = await import('@tauri-apps/api/core');
-        await invoke('release_wake_lock');
-    } catch (err) {
-        console.warn('[wakeLock] Failed to release:', err);
-    }
-}
-
-/**
  * Listen for deep link events from Tauri.
  * Deep links are custom URL schemes (e.g., pipali://chat/conversationId) that
  * can be used to navigate the app to specific locations.

@@ -46,6 +46,7 @@ import { SegmentedCapture, type CapturedSegment } from '../utils/voice/voice-cap
 import { TurnTranscript, isHallucination, isSelfEcho, isImplausibleSpeechRate } from '../utils/voice/voice-turn';
 import { VOICE_TUNABLES, STT_BIAS_PROMPT, type VoiceMode, type VoiceStatus } from '../utils/voice/voice-config';
 import { playVoiceCue, playTranscriptTicks, speakPcm, stopSpeaking, duckSpeech, voiceCueDurationMs, type VoiceCueProfile } from '../utils/notifications';
+import { keepScreenAwake, releaseScreenAwake } from '../utils/wake-lock';
 import { parseConfirmationIntent, parseAddressing, parseStopWork, routeOpenVoice } from '../utils/voice/voice-intent';
 import { buildConfirmationSummary, buildConfirmationDetail, buildCompletionSummary } from '../utils/voice/voice-summary';
 
@@ -269,6 +270,9 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         const capture = captureRef.current;
         captureRef.current = null;
         capture?.stop();
+        // A locked screen suspends microphone capture, so the display is held only
+        // while we are actually listening — dormancy and mode-off both land here.
+        if (capture) releaseScreenAwake();
         if (withCue && capture) playVoiceCue('session_end');
     }, [clearInviteTimer, clearIdleTimer, interruptSpeaking, releaseTurn]);
 
@@ -299,6 +303,7 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         }
         if (sessionTokenRef.current !== token) { capture.stop(); return; }
         captureRef.current = capture;
+        keepScreenAwake();
         playVoiceCue('session_start');
         setStatus(pendingRef.current && !pendingRef.current.heard ? 'announced' : 'idle');
         markAddressed();
