@@ -10,6 +10,7 @@ export const Selectors = {
     mainContent: '.main-content',
     messagesContainer: '.messages-container',
     sidebar: '.sidebar',
+    pullRefreshIndicator: '.pull-refresh-indicator',
 
     // Input Area
     inputArea: '.input-area',

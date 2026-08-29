@@ -8,6 +8,8 @@
     flex: 1;
     overflow-y: auto;
     background: var(--color-bg-elevated);
+    /* Pulling past the top is the app's own refresh gesture, not the browser's. */
+    overscroll-behavior-y: contain;
 }
 
 .messages-container {

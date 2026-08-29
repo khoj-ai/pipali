@@ -38,7 +38,7 @@ import type { VoiceMode } from "./utils/voice/voice-config";
 import { isTauri, onWindowShown, onSidecarReady, listenForDeepLinks } from "./utils/tauri";
 
 // Components
-import { Header, Sidebar, InputArea } from "./components/layout";
+import { Header, Sidebar, InputArea, PullToRefresh } from "./components/layout";
 import { MessageList } from "./components/messages";
 import { ToastContainer } from "./components/confirmation/ToastContainer";
 import { HomePage } from "./components/home";
@@ -1950,6 +1950,8 @@ const App = () => {
                         onToggleSidebar={() => updateSidebarOpen(!sidebarOpen)}
                         onGoHome={goToHomePage}
                     />
+
+                    <PullToRefresh onRefresh={() => window.location.reload()} />
 
                     {currentPage === 'home' && (
                         <HomePage

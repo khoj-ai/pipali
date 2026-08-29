@@ -1,0 +1,49 @@
+/*
+ * Pipali Styles - Pull to Refresh
+ *
+ * A zero height rail between the header and the page gives the indicator somewhere to
+ * come from: it rests just above the top of the content, hidden behind the header, and
+ * slides down as the page is pulled. Only the indicator moves. The page stays put, which
+ * is what phones do and what keeps a pull off the rest of the layout.
+ *
+ * How far it has come is carried in --pull-progress, set from the gesture, so the fade
+ * and the turning arrow follow the finger without a second write from script.
+ */
+
+.pull-refresh-rail {
+    position: relative;
+    height: 0;
+}
+
+.pull-refresh-indicator {
+    position: absolute;
+    top: -44px;
+    left: 50%;
+    /* Over the page it is pulled from, under the header it slides out of. */
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-full);
+    background: var(--color-bg-elevated);
+    box-shadow: var(--shadow-sm);
+    color: var(--color-text-secondary);
+    opacity: var(--pull-progress, 0);
+    transform: translate(-50%, 0);
+    pointer-events: none;
+}
+
+.pull-refresh-icon {
+    transform: rotate(calc(var(--pull-progress, 0) * 270deg));
+}
+
+.pull-refresh-indicator.refreshing {
+    color: var(--color-text);
+}
+
+.pull-refresh-indicator.refreshing .pull-refresh-icon {
+    animation: spin 1s linear infinite;
+}
