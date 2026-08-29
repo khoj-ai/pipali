@@ -109,12 +109,13 @@ export class SpeechSegmenter {
         this.speaking = speaking;
     }
 
+    /** Keeps `frame` rather than copying it, so the caller must not reuse the buffer. */
     pushFrame(frame: Float32Array): SegmenterEvent[] {
         this.framesSinceSpeech = this.speaking ? 0 : this.framesSinceSpeech + 1;
         const voiced = this.vad.isVoiced(frame, this.speaking);
 
         if (!this.collecting) {
-            this.preRoll.push(frame.slice());
+            this.preRoll.push(frame);
             if (this.preRoll.length > this.maxPreRollFrames) this.preRoll.shift();
 
             // Majority vote over a sliding window, not strictly consecutive
@@ -136,7 +137,7 @@ export class SpeechSegmenter {
             return [{ type: 'speech_start' }];
         }
 
-        this.collected.push(frame.slice());
+        this.collected.push(frame);
         if (voiced) {
             this.voicedFrames++;
             this.silenceRun = 0;

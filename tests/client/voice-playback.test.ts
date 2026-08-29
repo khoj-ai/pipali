@@ -1,5 +1,6 @@
-import { afterAll, expect, test } from 'bun:test';
+import { afterAll, beforeAll, expect, test } from 'bun:test';
 import type { PcmStream } from '../../src/client/utils/notifications';
+import { realignAudioContext } from '../../src/client/utils/audio-context';
 
 const originalAudioContext = globalThis.AudioContext;
 
@@ -8,10 +9,13 @@ interface Scheduled { start: number; duration: number; rate: number }
 const scheduled: Scheduled[] = [];
 let ctx: FakeAudioContext | null = null;
 
+/** The rate the next context reports; varying it forces a rebuild. */
+let deviceRate = 48_000;
+
 class FakeAudioContext {
     state = 'running';
     currentTime = 0;
-    sampleRate = 48_000;
+    sampleRate = deviceRate;
     destination = {};
 
     constructor() {
@@ -45,12 +49,35 @@ class FakeAudioContext {
         return node;
     }
 
+    private listeners: Array<() => void> = [];
+
+    addEventListener(_type: 'statechange', listener: () => void) {
+        this.listeners.push(listener);
+    }
+
     resume() {
+        return Promise.resolve();
+    }
+
+    close() {
+        this.state = 'closed';
+        for (const listener of this.listeners) listener();
         return Promise.resolve();
     }
 }
 
 globalThis.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+
+// Playback runs on the AudioContext the whole app shares, so take it over
+// before the first readout: moving the device rate is what makes the module
+// build a context of ours rather than reuse whatever another suite left.
+beforeAll(async () => {
+    globalThis.AudioContext = FakeAudioContext as unknown as typeof AudioContext;
+    deviceRate = 44_100;
+    await realignAudioContext();
+    deviceRate = 48_000;
+    await realignAudioContext();
+});
 
 afterAll(() => {
     globalThis.AudioContext = originalAudioContext;
@@ -168,4 +195,29 @@ test('resampling preserves the length of a readout', async () => {
 
     const played = scheduled.reduce((total, s) => total + s.duration, 0);
     expect(played).toBeCloseTo((count * CHUNK_SAMPLES) / RATE, 3);
+});
+
+test('a readout settles when its context is closed underneath it', async () => {
+    const { speakPcm, stopSpeaking } = await import('../../src/client/utils/notifications');
+    stopSpeaking();    // earlier readouts never end on the fake, so start a fresh queue
+    let done = false;
+    const stalled: PcmStream = {
+        sampleRate: RATE,
+        async *blocks() {
+            yield new Float32Array(CHUNK_SAMPLES);
+            await new Promise<void>(() => {});    // the producer never finishes
+        },
+    };
+    const playback = speakPcm(stalled).then(() => { done = true; });
+    for (let i = 0; i < 20; i++) await Promise.resolve();
+    expect(done).toBe(false);
+
+    // What realignAudioContext does to a context whose device has moved.
+    await ctx!.close();
+    await playback;
+    expect(done).toBe(true);
+
+    // Leave later suites a context that is not closed.
+    deviceRate = 44_100;
+    await realignAudioContext();
 });

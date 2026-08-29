@@ -12,24 +12,54 @@
  * Pipali's voice at the mic to well under the voiced threshold. `setSpeaking`
  * tells the segmenter when a readout is on so it can raise that threshold for
  * the residual, and mark the segments that caught any of it.
+ *
+ * Capture shares the app's one AudioContext rather than opening a second, so a
+ * phone holding the microphone open is driving a single output stream.
  */
 
 import { VOICE_TUNABLES } from './voice-config';
 import { SpeechSegmenter, EnergyVad, defaultSegmenterConfig } from './voice-segmenter';
 import { downsample, encodeWavPcm16 } from './voice-pcm';
+import { realignAudioContext } from '../audio-context';
 
 // Inlined worklet processor, loaded via Blob URL so no bundler asset plumbing
-// is needed. It forwards each 128-sample render quantum to the main thread.
-const WORKLET_SOURCE = `
+// is needed. It gathers whole analysis frames before handing them over: this
+// runs on the audio thread that also renders speech, and posting every
+// 128-sample render quantum meant allocating and crossing threads a few
+// hundred times a second there for frames the segmenter cannot use singly.
+export const PCM_TAP_WORKLET = `
 class PipaliPcmTap extends AudioWorkletProcessor {
+    constructor(options) {
+        super();
+        this.size = options.processorOptions.frameSamples;
+        this.frame = new Float32Array(this.size);
+        this.fill = 0;
+    }
     process(inputs) {
         const channel = inputs[0] && inputs[0][0];
-        if (channel && channel.length) this.port.postMessage(channel.slice(0));
+        if (!channel) return true;
+        let offset = 0;
+        while (offset < channel.length) {
+            const take = Math.min(channel.length - offset, this.size - this.fill);
+            this.frame.set(channel.subarray(offset, offset + take), this.fill);
+            this.fill += take;
+            offset += take;
+            if (this.fill === this.size) {
+                const full = this.frame;
+                this.frame = new Float32Array(this.size);
+                this.fill = 0;
+                this.port.postMessage(full, [full.buffer]);
+            }
+        }
         return true;
     }
 }
 registerProcessor('pipali-pcm-tap', PipaliPcmTap);
 `;
+
+// A processor name can only be registered once per context, and the context
+// outlives any one session.
+const workletRegistered = new WeakSet<BaseAudioContext>();
 
 export interface CapturedSegment {
     /** WAV-encoded audio at the STT sample rate. */
@@ -62,8 +92,6 @@ export class SegmentedCapture {
     private node?: AudioWorkletNode;
     private sink?: GainNode;
     private segmenter?: SpeechSegmenter;
-    private frameBuf?: Float32Array;
-    private frameFill = 0;
     private seq = 0;
     private stopped = false;
 
@@ -80,31 +108,38 @@ export class SegmentedCapture {
             echoCancellation: settings?.echoCancellation ?? 'unreported',
             noiseSuppression: settings?.noiseSuppression ?? 'unreported',
         });
-        this.ctx = new AudioContext();
-        if (this.ctx.state === 'suspended') await this.ctx.resume();
+        // Only now that the microphone is open does the output route settle, so
+        // this is where the shared context is squared with the actual device.
+        const ctx = await realignAudioContext();
+        if (!ctx) throw new Error('Audio output unavailable');
+        this.ctx = ctx;
+        if (ctx.state === 'suspended') await ctx.resume();
 
-        const workletUrl = URL.createObjectURL(new Blob([WORKLET_SOURCE], { type: 'application/javascript' }));
-        try {
-            await this.ctx.audioWorklet.addModule(workletUrl);
-        } finally {
-            URL.revokeObjectURL(workletUrl);
+        if (!workletRegistered.has(ctx)) {
+            const workletUrl = URL.createObjectURL(new Blob([PCM_TAP_WORKLET], { type: 'application/javascript' }));
+            try {
+                await ctx.audioWorklet.addModule(workletUrl);
+                workletRegistered.add(ctx);
+            } finally {
+                URL.revokeObjectURL(workletUrl);
+            }
         }
 
-        const config = defaultSegmenterConfig(this.ctx.sampleRate);
+        const config = defaultSegmenterConfig(ctx.sampleRate);
         this.segmenter = new SpeechSegmenter(config, new EnergyVad());
-        this.frameBuf = new Float32Array(config.frameSamples);
-        this.frameFill = 0;
 
-        this.source = this.ctx.createMediaStreamSource(this.stream);
-        this.node = new AudioWorkletNode(this.ctx, 'pipali-pcm-tap');
+        this.source = ctx.createMediaStreamSource(this.stream);
+        this.node = new AudioWorkletNode(ctx, 'pipali-pcm-tap', {
+            processorOptions: { frameSamples: config.frameSamples },
+        });
         this.node.port.onmessage = (e: MessageEvent<Float32Array>) => this.ingest(e.data);
         this.source.connect(this.node);
         // Some engines only run worklets connected toward the destination;
         // a zero-gain sink keeps the graph alive without mic→speaker feedback.
-        this.sink = this.ctx.createGain();
+        this.sink = ctx.createGain();
         this.sink.gain.value = 0;
         this.node.connect(this.sink);
-        this.sink.connect(this.ctx.destination);
+        this.sink.connect(ctx.destination);
     }
 
     /** A readout is on: raise the voiced bar, and mark segments that catch it. */
@@ -125,25 +160,16 @@ export class SegmentedCapture {
         try { this.node?.disconnect(); } catch { /* already disconnected */ }
         try { this.sink?.disconnect(); } catch { /* already disconnected */ }
         this.stream?.getTracks().forEach((t) => t.stop());
-        void this.ctx?.close().catch(() => {});
+        // The context is shared with playback and outlives the session.
         this.stream = undefined;
         this.ctx = undefined;
         this.segmenter = undefined;
     }
 
-    private ingest(chunk: Float32Array): void {
-        if (this.stopped || !this.segmenter || !this.frameBuf) return;
-        let offset = 0;
-        while (offset < chunk.length) {
-            const take = Math.min(chunk.length - offset, this.frameBuf.length - this.frameFill);
-            this.frameBuf.set(chunk.subarray(offset, offset + take), this.frameFill);
-            this.frameFill += take;
-            offset += take;
-            if (this.frameFill === this.frameBuf.length) {
-                this.frameFill = 0;
-                for (const event of this.segmenter.pushFrame(this.frameBuf)) this.handleEvent(event);
-            }
-        }
+    /** One whole analysis frame, gathered by the worklet. */
+    private ingest(frame: Float32Array): void {
+        if (this.stopped || !this.segmenter) return;
+        for (const event of this.segmenter.pushFrame(frame)) this.handleEvent(event);
     }
 
     private handleEvent(event: ReturnType<SpeechSegmenter['pushFrame']>[number]): void {

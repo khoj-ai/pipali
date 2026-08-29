@@ -10,11 +10,9 @@ import i18n from '../i18n';
 import { VOICE_EARCONS, TRANSCRIPT_TICK, clampTickCount, tickBurstDurationMs, type EarconNote, type VoiceCueProfile } from './voice/voice-earcons';
 import { VOICE_TUNABLES } from './voice/voice-config';
 import { StreamResampler } from './voice/voice-pcm';
+import { ensureAudioContext, currentAudioContext } from './audio-context';
 
 let notificationPermissionGranted: boolean | null = null;
-
-// Shared AudioContext for notification sounds (created lazily)
-let audioCtx: AudioContext | null = null;
 
 // Speech sits behind its own gain so a suspected barge-in can duck it without
 // touching the cue vocabulary, which stays at full level.
@@ -60,19 +58,10 @@ function playNotificationSound(): void {
 // Voice companion audio: distinct attention cues + a TTS playback queue
 // ============================================================================
 
-/** Lazily create (and resume) the shared AudioContext. */
-function ensureAudioContext(): AudioContext | null {
-    try {
-        if (!audioCtx) audioCtx = new AudioContext();
-        if (audioCtx.state === 'suspended') void audioCtx.resume();
-        return audioCtx;
-    } catch {
-        return null;
-    }
-}
-
+// The gain belongs to the context that made it, so a context replaced after a
+// route change gets a fresh one rather than a node wired to a closed graph.
 function ensureSpeechGain(ctx: AudioContext): GainNode {
-    if (!speechGain) {
+    if (!speechGain || speechGain.context !== ctx) {
         speechGain = ctx.createGain();
         speechGain.connect(ctx.destination);
     }
@@ -86,10 +75,11 @@ function ensureSpeechGain(ctx: AudioContext): GainNode {
  * response to a real interruption immediate instead of a transcription away.
  */
 export function duckSpeech(ducked: boolean): void {
-    if (!audioCtx || !speechGain) return;
+    const ctx = currentAudioContext();
+    if (!ctx || !speechGain || speechGain.context !== ctx) return;
     const target = ducked ? VOICE_TUNABLES.duckGain : 1;
-    speechGain.gain.cancelScheduledValues(audioCtx.currentTime);
-    speechGain.gain.setTargetAtTime(target, audioCtx.currentTime, 0.02);
+    speechGain.gain.cancelScheduledValues(ctx.currentTime);
+    speechGain.gain.setTargetAtTime(target, ctx.currentTime, 0.02);
 }
 
 // Earcon vocabulary (pure data + duration math) lives in voice-earcons.ts so
@@ -187,6 +177,8 @@ async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void
         maybeSettle();
     };
     stopActiveSpeech = stop;
+    // A context replaced after a route change is closed; its sources never end.
+    ctx.addEventListener('statechange', () => { if (ctx.state === 'closed') stop(); });
     // Consume in the background: a stop must release this readout immediately,
     // even while the loop is suspended waiting on a stalled producer.
     void (async () => {
