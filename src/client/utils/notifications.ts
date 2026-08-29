@@ -159,9 +159,11 @@ export interface PcmStream {
 }
 
 /**
- * Play a decoded PCM stream gaplessly: each block is scheduled right behind
- * the previous one, so playback starts on the first block while later ones
- * are still arriving. A network stall leaves a silence, then speech resumes.
+ * Play a decoded PCM stream gaplessly: blocks are coalesced and scheduled
+ * behind one another on a running clock kept a lead ahead of the speaker, so
+ * playback starts early while later blocks are still arriving and ordinary
+ * arrival jitter is absorbed by the lead. Only a real underrun — the schedule
+ * falling back to the speaker — leaves a silence and re-leads after it.
  */
 async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void> {
     const gain = ensureSpeechGain(ctx);
@@ -186,24 +188,41 @@ async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void
     // Consume in the background: a stop must release this readout immediately,
     // even while the loop is suspended waiting on a stalled producer.
     void (async () => {
+        let queued: Float32Array[] = [];
+        let queuedSamples = 0;
+        const schedule = () => {
+            if (!queuedSamples) return;
+            const samples = new Float32Array(queuedSamples);
+            let at = 0;
+            for (const part of queued) { samples.set(part, at); at += part.length; }
+            queued = [];
+            queuedSamples = 0;
+
+            const buffer = ctx.createBuffer(1, samples.length, stream.sampleRate);
+            buffer.copyToChannel(samples, 0);
+            const source = ctx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(gain);
+            if (nextStart - ctx.currentTime < VOICE_TUNABLES.speechMinLeadMs / 1000) {
+                nextStart = ctx.currentTime + VOICE_TUNABLES.speechLeadMs / 1000;
+            }
+            source.start(nextStart);
+            nextStart += buffer.duration;
+            active.add(source);
+            source.onended = () => { active.delete(source); maybeSettle(); };
+        };
         try {
             for await (const block of stream.blocks()) {
                 if (stopped) break;
                 if (!block.length || !stream.sampleRate) continue;
-                const buffer = ctx.createBuffer(1, block.length, stream.sampleRate);
-                buffer.copyToChannel(block, 0);
-                const source = ctx.createBufferSource();
-                source.buffer = buffer;
-                source.connect(gain);
-                nextStart = Math.max(nextStart, ctx.currentTime + 0.03);
-                source.start(nextStart);
-                nextStart += buffer.duration;
-                active.add(source);
-                source.onended = () => { active.delete(source); maybeSettle(); };
+                queued.push(block);
+                queuedSamples += block.length;
+                if (queuedSamples >= (VOICE_TUNABLES.speechBlockMs / 1000) * stream.sampleRate) schedule();
             }
         } catch {
-            // Synthesis failed mid-stream — let whatever was scheduled finish.
+            // Synthesis failed mid-stream — play whatever did arrive.
         }
+        if (!stopped) schedule();
         streamEnded = true;
         maybeSettle();
     })();
