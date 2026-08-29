@@ -9,6 +9,7 @@ import type { ConfirmationRequest } from '../../server/processor/confirmation/co
 import i18n from '../i18n';
 import { VOICE_EARCONS, TRANSCRIPT_TICK, clampTickCount, tickBurstDurationMs, type EarconNote, type VoiceCueProfile } from './voice/voice-earcons';
 import { VOICE_TUNABLES } from './voice/voice-config';
+import { StreamResampler } from './voice/voice-pcm';
 
 let notificationPermissionGranted: boolean | null = null;
 
@@ -159,11 +160,12 @@ export interface PcmStream {
 }
 
 /**
- * Play a decoded PCM stream gaplessly: blocks are coalesced and scheduled
- * behind one another on a running clock kept a lead ahead of the speaker, so
- * playback starts early while later blocks are still arriving and ordinary
- * arrival jitter is absorbed by the lead. Only a real underrun — the schedule
- * falling back to the speaker — leaves a silence and re-leads after it.
+ * Play a decoded PCM stream gaplessly: blocks are resampled to the context's
+ * own rate, coalesced, and scheduled behind one another on a running clock
+ * kept a lead ahead of the speaker, so playback starts early while later
+ * blocks are still arriving and ordinary arrival jitter is absorbed by the
+ * lead. Only a real underrun — the schedule falling back to the speaker —
+ * leaves a silence and re-leads after it.
  */
 async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void> {
     const gain = ensureSpeechGain(ctx);
@@ -190,6 +192,28 @@ async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void
     void (async () => {
         let queued: Float32Array[] = [];
         let queuedSamples = 0;
+        // Built on the first block, once the stream's header has given a rate.
+        let resampler: StreamResampler | null = null;
+        const toContextRate = (block: Float32Array): Float32Array => {
+            if (stream.sampleRate === ctx.sampleRate) return block;
+            if (!resampler) {
+                if (ctx.sampleRate < stream.sampleRate) {
+                    // The speech is wider than the output can carry, so the top
+                    // of it is being filtered away. Worth knowing about: it
+                    // means the device put us on a narrowband route.
+                    console.warn(`[voice] output runs at ${ctx.sampleRate}Hz, below the ${stream.sampleRate}Hz speech`);
+                }
+                resampler = new StreamResampler(stream.sampleRate, ctx.sampleRate);
+            }
+            return resampler.push(block);
+        };
+        /** The resampler's tail, once no more input is coming. */
+        const drainContextRate = (): Float32Array => resampler?.flush() ?? new Float32Array(0);
+        const enqueue = (block: Float32Array) => {
+            if (!block.length) return;
+            queued.push(block);
+            queuedSamples += block.length;
+        };
         const schedule = () => {
             if (!queuedSamples) return;
             const samples = new Float32Array(queuedSamples);
@@ -198,7 +222,7 @@ async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void
             queued = [];
             queuedSamples = 0;
 
-            const buffer = ctx.createBuffer(1, samples.length, stream.sampleRate);
+            const buffer = ctx.createBuffer(1, samples.length, ctx.sampleRate);
             buffer.copyToChannel(samples, 0);
             const source = ctx.createBufferSource();
             source.buffer = buffer;
@@ -215,14 +239,16 @@ async function playPcmStream(ctx: AudioContext, stream: PcmStream): Promise<void
             for await (const block of stream.blocks()) {
                 if (stopped) break;
                 if (!block.length || !stream.sampleRate) continue;
-                queued.push(block);
-                queuedSamples += block.length;
-                if (queuedSamples >= (VOICE_TUNABLES.speechBlockMs / 1000) * stream.sampleRate) schedule();
+                enqueue(toContextRate(block));
+                if (queuedSamples >= (VOICE_TUNABLES.speechBlockMs / 1000) * ctx.sampleRate) schedule();
             }
         } catch {
             // Synthesis failed mid-stream — play whatever did arrive.
         }
-        if (!stopped) schedule();
+        if (!stopped) {
+            enqueue(drainContextRate());
+            schedule();
+        }
         streamEnded = true;
         maybeSettle();
     })();

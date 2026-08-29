@@ -1,7 +1,8 @@
 /**
  * PCM helpers for both voice directions: downsampling and WAV-encoding
  * captured audio for STT, and incrementally decoding streamed WAV audio from
- * TTS for playback. Pure functions and classes — no audio APIs.
+ * TTS and resampling it to the output's rate for playback. Pure functions and
+ * classes — no audio APIs.
  */
 
 /** Averaging decimator: good enough for speech, no ringing, O(n). */
@@ -197,4 +198,131 @@ export class PcmBlockBuffer {
             this.wake = null;
         }
     }
+}
+
+// Sinc lobes kept either side of each output sample: the wider the kernel, the
+// narrower the transition band it can cut. Sixteen holds the mirror images
+// around 60dB down across the speech band.
+const RESAMPLE_LOBES = 16;
+// Kernel samples per lobe. Taps land at fractional offsets and interpolate
+// between neighbouring entries, so this only has to be fine enough that that
+// interpolation stays under the stopband.
+const RESAMPLE_RESOLUTION = 256;
+
+/** Blackman window, peak at x = 0 and zero from |x| = 1 outward. */
+function blackman(x: number): number {
+    const t = Math.PI * (Math.min(Math.abs(x), 1) + 1);
+    return 0.42 - 0.5 * Math.cos(t) + 0.08 * Math.cos(2 * t);
+}
+
+/**
+ * Windowed-sinc kernel indexed by distance from an output's centre, so it
+ * covers one side only. Shape is fixed, so every resampler shares one table.
+ */
+let resampleKernel: Float32Array | null = null;
+function ensureResampleKernel(): Float32Array {
+    if (resampleKernel) return resampleKernel;
+    const table = new Float32Array(RESAMPLE_LOBES * RESAMPLE_RESOLUTION + 2);
+    for (let i = 0; i < table.length; i++) {
+        const lobes = i / RESAMPLE_RESOLUTION;
+        const t = Math.PI * lobes;
+        table[i] = (i === 0 ? 1 : Math.sin(t) / t) * blackman(lobes / RESAMPLE_LOBES);
+    }
+    resampleKernel = table;
+    return table;
+}
+
+/**
+ * Band-limited resampler for a stream arriving in blocks.
+ *
+ * Browsers resample an AudioBuffer whose rate differs from its context by
+ * interpolating between neighbouring samples, which leaves a mirror image of
+ * the signal around the input's Nyquist — for 24kHz speech in a 48kHz context
+ * that puts a copy of every sibilant a few dB under the voice. Feeding the
+ * context audio already at its own rate is what avoids it, so the conversion
+ * has to happen here, where the filter can be band-limited.
+ *
+ * State carries across blocks: history samples the next block's leading
+ * outputs need, and the fractional read position. Converting each block alone
+ * would just move the seam rather than remove it.
+ */
+export class StreamResampler {
+    private readonly ratio: number;
+    private readonly cutoff: number;
+    private readonly halfWidth: number;
+    private readonly kernel: Float32Array;
+    private pending: Float32Array;
+    /** Read position of the next output sample, in samples into `pending`. */
+    private position: number;
+
+    constructor(fromRate: number, toRate: number) {
+        this.ratio = fromRate / toRate;
+        // Downsampling has to filter to the *output* Nyquist or the band above
+        // it folds back in; upsampling keeps the whole input band.
+        this.cutoff = Math.min(1, toRate / fromRate);
+        this.halfWidth = Math.ceil(RESAMPLE_LOBES / this.cutoff);
+        this.kernel = ensureResampleKernel();
+        // Lead the stream with the history a first output centred on input
+        // sample 0 would read, so output and input start at the same instant.
+        this.pending = new Float32Array(this.halfWidth);
+        this.position = this.halfWidth;
+    }
+
+    /** Resample a block; returns every output sample the input so far supports. */
+    push(block: Float32Array): Float32Array<ArrayBuffer> {
+        this.pending = concatSamples(this.pending, block);
+        return this.drain();
+    }
+
+    /**
+     * Emit the tail, treating the samples past the end as silence. Call once
+     * the stream is complete; the resampler is spent afterwards.
+     */
+    flush(): Float32Array<ArrayBuffer> {
+        this.pending = concatSamples(this.pending, new Float32Array(this.halfWidth + 1));
+        return this.drain();
+    }
+
+    /** Emit every output whose taps all fall inside the input held so far. */
+    private drain(): Float32Array<ArrayBuffer> {
+        const { kernel, cutoff, halfWidth, ratio, pending } = this;
+        const furthest = pending.length - halfWidth - 1;
+        const count = this.position > furthest ? 0 : Math.floor((furthest - this.position) / ratio) + 1;
+        const out = new Float32Array(count);
+        for (let n = 0; n < count; n++) {
+            const centre = this.position + n * ratio;
+            const first = Math.max(0, Math.ceil(centre) - halfWidth);
+            const last = Math.min(pending.length - 1, Math.floor(centre) + halfWidth);
+            let sum = 0;
+            let weight = 0;
+            for (let i = first; i <= last; i++) {
+                const offset = Math.abs(centre - i) * cutoff * RESAMPLE_RESOLUTION;
+                const index = Math.floor(offset);
+                if (index >= kernel.length - 1) continue;
+                const frac = offset - index;
+                const tap = kernel[index]! * (1 - frac) + kernel[index + 1]! * frac;
+                sum += pending[i]! * tap;
+                weight += tap;
+            }
+            // Normalising per output sample holds the passband exactly flat
+            // whatever fractional phase the taps land on.
+            out[n] = weight ? sum / weight : 0;
+        }
+        this.position += count * ratio;
+        // Drop input no remaining output can reach, keeping the taps' history.
+        const consumed = Math.max(0, Math.floor(this.position) - halfWidth);
+        if (consumed > 0) {
+            this.pending = pending.slice(consumed);
+            this.position -= consumed;
+        }
+        return out;
+    }
+}
+
+function concatSamples(a: Float32Array, b: Float32Array): Float32Array {
+    if (!b.length) return a;
+    const out = new Float32Array(a.length + b.length);
+    out.set(a);
+    out.set(b, a.length);
+    return out;
 }

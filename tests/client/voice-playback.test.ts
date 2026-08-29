@@ -4,7 +4,7 @@ import type { PcmStream } from '../../src/client/utils/notifications';
 const originalAudioContext = globalThis.AudioContext;
 
 /** Every buffer handed to the speaker, in scheduling order. */
-interface Scheduled { start: number; duration: number }
+interface Scheduled { start: number; duration: number; rate: number }
 const scheduled: Scheduled[] = [];
 let ctx: FakeAudioContext | null = null;
 
@@ -34,11 +34,13 @@ class FakeAudioContext {
 
     createBufferSource() {
         const node = {
-            buffer: null as { duration: number } | null,
+            buffer: null as { duration: number; sampleRate: number } | null,
             onended: null,
             connect: () => {},
             stop: () => {},
-            start: (when: number) => scheduled.push({ start: when, duration: node.buffer!.duration }),
+            start: (when: number) => scheduled.push({
+                start: when, duration: node.buffer!.duration, rate: node.buffer!.sampleRate,
+            }),
         };
         return node;
     }
@@ -145,4 +147,25 @@ test('a stall breaks speech once, then playback rebuilds its lead', async () => 
     // after it into a gap per block.
     expect(breaks.length).toBe(1);
     expect(breaks[0]).toBeGreaterThan(0.3);
+});
+
+test('speech is handed to the speaker at the context\'s own rate', async () => {
+    // Left at its own 24kHz the browser converts each buffer by interpolating
+    // between neighbouring samples, which mirrors every partial of the voice
+    // around 12kHz. Converting first is what keeps that resampler out of the
+    // path — see the StreamResampler tests for what the mirror sounds like.
+    await playWithArrivals(jitteredArrivals(20, 0));
+
+    expect(scheduled.length).toBeGreaterThan(0);
+    expect(scheduled.every((s) => s.rate === ctx!.sampleRate)).toBe(true);
+});
+
+test('resampling preserves the length of a readout', async () => {
+    // Speech that came out longer or shorter than it went in would drift
+    // against the schedule and eventually tear.
+    const count = 40;
+    await playWithArrivals(jitteredArrivals(count, 0));
+
+    const played = scheduled.reduce((total, s) => total + s.duration, 0);
+    expect(played).toBeCloseTo((count * CHUNK_SAMPLES) / RATE, 3);
 });
