@@ -1,5 +1,5 @@
 import { useSyncExternalStore, useCallback } from 'react';
-import type { VoiceMode } from '../utils/voice/voice-config';
+import type { VoiceGender, VoiceMode } from '../utils/voice/voice-config';
 
 /**
  * Per-device voice settings. While feature flag is off, no voice UI renders and
@@ -20,10 +20,11 @@ export interface VoiceSettings {
     enabled: boolean;
     mode: VoiceMode;
     lastActiveMode: Exclude<VoiceMode, 'off'>;
+    gender: VoiceGender;
 }
 
 const STORAGE_KEY = 'pipali.voiceSettings.v1';
-const DEFAULTS: VoiceSettings = { enabled: false, mode: 'off', lastActiveMode: 'ask_first' };
+const DEFAULTS: VoiceSettings = { enabled: false, mode: 'off', lastActiveMode: 'ask_first', gender: 'male' };
 
 type PersistedV1 = { v: 1 } & VoiceSettings;
 
@@ -37,7 +38,8 @@ export function parseVoiceSettings(raw: string | null): VoiceSettings {
         const mode = enabled && (parsed.mode === 'ask_first' || parsed.mode === 'speak_freely' || parsed.mode === 'off')
             ? parsed.mode : 'off';
         const last = parsed.lastActiveMode === 'speak_freely' ? 'speak_freely' : 'ask_first';
-        return { enabled, mode, lastActiveMode: mode !== 'off' ? mode : last };
+        const gender = parsed.gender === 'female' ? 'female' : 'male';
+        return { enabled, mode, lastActiveMode: mode !== 'off' ? mode : last, gender };
     } catch {
         return DEFAULTS;
     }
@@ -97,7 +99,19 @@ function setMode(mode: VoiceMode): void {
     emit();
 }
 
+function setGender(gender: VoiceGender): void {
+    if (current.gender === gender) return;
+    current = { ...current, gender };
+    persist();
+    emit();
+}
+
 export function useVoiceSettings() {
     const settings = useSyncExternalStore(subscribe, () => current, () => DEFAULTS);
-    return { ...settings, setEnabled: useCallback(setEnabled, []), setMode: useCallback(setMode, []) };
+    return {
+        ...settings,
+        setEnabled: useCallback(setEnabled, []),
+        setMode: useCallback(setMode, []),
+        setGender: useCallback(setGender, []),
+    };
 }

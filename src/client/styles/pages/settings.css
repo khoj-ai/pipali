@@ -366,6 +366,19 @@
     gap: 6px;
 }
 
+/* Compact control beside its label, like the section header's toggle */
+.settings-field-inline {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 16px;
+}
+
+.settings-field-inline .settings-field-hint {
+    margin-bottom: 0;
+}
+
 .settings-field label {
     font-size: 14px;
     font-weight: 500;

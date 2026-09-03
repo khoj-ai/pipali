@@ -289,6 +289,12 @@
             "spokenHint": "随时可以说 \"Pipali, speak freely\" 或 \"Pipali, ask first\""
         },
         "enabledHint": "语音模式开启期间，设备附近的语音会被转写，以判断你是否在呼唤 Pipali；未呼唤 Pipali 的语音会被丢弃，绝不存储。",
+        "gender": {
+            "label": "声音",
+            "hint": "Pipali 朗读时使用的声音。",
+            "female": "女声",
+            "male": "男声"
+        },
         "status": {
             "idle": "等待 \"Pipali…\" 唤醒——点按说话",
             "dormant": "语音已休眠——点按唤醒",

@@ -289,6 +289,12 @@
             "spokenHint": "いつでも「Pipali, speak freely」または「Pipali, ask first」と言えます"
         },
         "enabledHint": "音声モードが有効な間、この端末の近くの音声は、Pipaliへの呼びかけかどうかを確認するために文字起こしされます。呼びかけでない音声は破棄され、保存されることはありません。",
+        "gender": {
+            "label": "声",
+            "hint": "Pipaliが読み上げるときの声。",
+            "female": "女性",
+            "male": "男性"
+        },
         "status": {
             "idle": "「Pipali…」の呼びかけを待機中 — タップして話す",
             "dormant": "音声モードは休止中 — タップして再開",

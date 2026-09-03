@@ -44,7 +44,7 @@ import { CONFIRMATION_OPTIONS } from '../../server/processor/confirmation/confir
 import { isVoiceCaptureSupported, transcribeAudio, startSpeech, summarizeForSpeech, type SpeechHandle } from '../utils/voice/voice-audio';
 import { SegmentedCapture, type CapturedSegment } from '../utils/voice/voice-capture';
 import { TurnTranscript, isHallucination, isSelfEcho, isImplausibleSpeechRate } from '../utils/voice/voice-turn';
-import { VOICE_TUNABLES, STT_BIAS_PROMPT, type VoiceMode, type VoiceStatus } from '../utils/voice/voice-config';
+import { VOICE_TUNABLES, STT_BIAS_PROMPT, type VoiceGender, type VoiceMode, type VoiceStatus } from '../utils/voice/voice-config';
 import { playVoiceCue, playTranscriptTicks, speakPcm, stopSpeaking, duckSpeech, voiceCueDurationMs, type VoiceCueProfile } from '../utils/notifications';
 import { keepScreenAwake, releaseScreenAwake } from '../utils/wake-lock';
 import { parseConfirmationIntent, parseAddressing, parseStopWork, routeOpenVoice } from '../utils/voice/voice-intent';
@@ -87,6 +87,7 @@ interface ActiveTurn {
 
 export interface UseVoiceCompanionParams {
     mode: VoiceMode;
+    voice?: VoiceGender;
     activeConversationId: string | undefined;
     sendMessage: (text: string, conversationId?: string) => void;
     respondToConfirmation: (conversationId: string, runId: string, requestId: string, optionId: string, guidance?: string) => void;
@@ -404,7 +405,7 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         await speakThenListen(pending.summary, () => {
             const cached = prefetchRef.current.get(pending.key);
             prefetchRef.current.delete(pending.key);
-            return cached ?? startSpeech(pending.summary);
+            return cached ?? startSpeech(pending.summary, { voice: cbRef.current.voice });
         });
     }, [speakThenListen]);
 
@@ -427,7 +428,7 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
     /** Short spoken confirmation that doesn't invite a reply (unlike speakThenListen). */
     const speakAck = useCallback(async (text: string) => {
         const generation = ++speechGenerationRef.current;
-        const speech = startSpeech(text);
+        const speech = startSpeech(text, { voice: cbRef.current.voice });
         activeSpeechRef.current.add(speech);
         setStatus('speaking');
         beginSpeaking(text);
@@ -518,7 +519,7 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
                 }
             }
             return pending.summary;
-        })());
+        })(), { voice: cbRef.current.voice });
         handle.ready.catch((err: unknown) => {
             // A cancelled prefetch (superseded, dismissed, session end) is not a failure.
             if ((err as { name?: string })?.name === 'AbortError') return;

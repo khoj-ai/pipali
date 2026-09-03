@@ -80,6 +80,9 @@ export const VOICE_TUNABLES = {
  */
 export type VoiceMode = 'off' | 'ask_first' | 'speak_freely';
 
+/** Spoken voice preset; the platform maps it to a provider-specific voice. */
+export type VoiceGender = 'female' | 'male';
+
 /**
  * Where a live voice session is in its cycle. `dormant` is the mic off after an
  * idle timeout; `announced` is Pipali holding something back until the user

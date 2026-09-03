@@ -289,6 +289,12 @@
             "spokenHint": "Dis \"Pipali, speak freely\" ou \"Pipali, ask first\" à tout moment"
         },
         "enabledHint": "Quand le mode vocal est actif, la parole captée près de cet appareil est transcrite pour vérifier si tu t'adresses à Pipali ; la parole non adressée est ignorée et jamais conservée.",
+        "gender": {
+            "label": "Voix",
+            "hint": "La voix de Pipali quand il lit à voix haute.",
+            "female": "Féminine",
+            "male": "Masculine"
+        },
         "status": {
             "idle": "À l'écoute de \"Pipali…\" — appuie pour parler",
             "dormant": "Mode vocal en veille — appuie pour le réveiller",

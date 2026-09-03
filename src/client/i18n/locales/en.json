@@ -116,6 +116,12 @@
             "spokenHint": "Say \"Pipali, speak freely\" or \"Pipali, ask first\" anytime"
         },
         "enabledHint": "While voice is on, speech near this device is transcribed to check whether you're addressing Pipali; unaddressed speech is discarded and never stored.",
+        "gender": {
+            "label": "Voice",
+            "hint": "How Pipali sounds when it reads aloud.",
+            "female": "Female",
+            "male": "Male"
+        },
         "status": {
             "idle": "Listening for \"Pipali…\" — tap to talk",
             "dormant": "Voice asleep — tap to wake",

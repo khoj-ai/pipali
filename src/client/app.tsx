@@ -356,7 +356,7 @@ const App = () => {
 
     // Voice companion — hands-free layer over the chat run flow.
     // While feature flag off, no voice UI renders and voice mode is 'off', so no session can start.
-    const { enabled: voiceFeatureEnabled, mode: voiceMode, lastActiveMode: lastVoiceMode, setMode: setVoiceMode } = useVoiceSettings();
+    const { enabled: voiceFeatureEnabled, mode: voiceMode, lastActiveMode: lastVoiceMode, setMode: setVoiceMode, gender: voiceGender } = useVoiceSettings();
 
     // Late-bound: stopResearch is defined below, and voice only calls it on speech.
     const stopResearchRef = useRef<() => void>(() => {});
@@ -368,6 +368,7 @@ const App = () => {
 
     const voice = useVoiceCompanion({
         mode: voiceMode,
+        voice: voiceGender,
         activeConversationId: conversationId,
         sendMessage: sendVoiceMessage,
         respondToConfirmation,

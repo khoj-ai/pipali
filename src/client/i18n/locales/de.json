@@ -289,6 +289,12 @@
             "spokenHint": "Sage jederzeit \"Pipali, speak freely\" oder \"Pipali, ask first\""
         },
         "enabledHint": "Solange der Sprachmodus aktiv ist, wird Sprache in der Nähe dieses Geräts transkribiert, um zu prüfen, ob du Pipali ansprichst; nicht adressierte Sprache wird verworfen und nie gespeichert.",
+        "gender": {
+            "label": "Stimme",
+            "hint": "Wie Pipali klingt, wenn es vorliest.",
+            "female": "Weiblich",
+            "male": "Männlich"
+        },
         "status": {
             "idle": "Wartet auf \"Pipali…\" – zum Sprechen tippen",
             "dormant": "Sprachmodus schläft – zum Aufwecken tippen",
