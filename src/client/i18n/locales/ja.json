@@ -309,7 +309,7 @@
             "dormant": "音声モードは休止中 — マイクをタップして再開",
             "goAheadPending": "Pipaliからお知らせがあります — 「Pipali, go ahead」と言ってください",
             "goAheadResult": "結果ができました — 「Pipali, go ahead」で読み上げます",
-            "speaking": "そのまま話すと割り込めます — 「stop」で停止",
+            "speaking": "「Pipali…」と言うと割り込めます — 「Pipali, stop」で停止",
             "listening": "終わったら「send it」、やり直すなら「scratch that」",
             "listeningDecision": "「yes」「no」、または自由に指示してください",
             "listeningQuestion": "声で答えてください — 終わったら「send it」"

@@ -136,7 +136,7 @@
             "dormant": "Voice is asleep — tap the mic to wake it",
             "goAheadPending": "Pipali has something for you — say \"Pipali, go ahead\"",
             "goAheadResult": "Your results are ready — say \"Pipali, go ahead\" to hear them",
-            "speaking": "Just talk to cut in — or say \"stop\" for quiet",
+            "speaking": "Say \"Pipali…\" to cut in — or \"Pipali, stop\" for quiet",
             "listening": "Say \"send it\" when you're done, \"scratch that\" to redo",
             "listeningDecision": "Say \"yes\", \"no\", or give your own instructions",
             "listeningQuestion": "Answer out loud — say \"send it\" when you're done"

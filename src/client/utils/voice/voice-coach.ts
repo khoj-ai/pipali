@@ -45,7 +45,7 @@ export function voiceCoachKey({ mode, status, pending, isProcessing }: VoiceCoac
         case 'dormant':
             return 'voice.coach.dormant';
         case 'speaking':
-            // Barge-in accepts bare speech, so the address word is not required.
+            // Barge-in takes the address word like open context does.
             return 'voice.coach.speaking';
         case 'announced':
             // A go-ahead is only the user's move in ask_first. speak_freely reads

@@ -309,7 +309,7 @@
             "dormant": "Le mode vocal dort — touche le micro pour le réveiller",
             "goAheadPending": "Pipali a quelque chose pour toi — dis \"Pipali, go ahead\"",
             "goAheadResult": "Tes résultats sont prêts — dis \"Pipali, go ahead\" pour les entendre",
-            "speaking": "Parle pour interrompre — ou dis \"stop\" pour le silence",
+            "speaking": "Dis \"Pipali…\" pour interrompre — ou \"Pipali, stop\" pour le silence",
             "listening": "Dis \"send it\" quand tu as fini, \"scratch that\" pour recommencer",
             "listeningDecision": "Dis \"yes\", \"no\", ou donne tes propres instructions",
             "listeningQuestion": "Réponds à voix haute — dis \"send it\" quand tu as fini"

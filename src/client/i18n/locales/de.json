@@ -309,7 +309,7 @@
             "dormant": "Sprachmodus schläft – tippe auf das Mikrofon zum Aufwecken",
             "goAheadPending": "Pipali hat etwas für dich – sage \"Pipali, go ahead\"",
             "goAheadResult": "Deine Ergebnisse sind fertig – sage \"Pipali, go ahead\" zum Anhören",
-            "speaking": "Sprich einfach los, um zu unterbrechen – oder sage \"stop\" für Ruhe",
+            "speaking": "Sage \"Pipali…\", um zu unterbrechen – oder \"Pipali, stop\" für Ruhe",
             "listening": "Sage \"send it\", wenn du fertig bist, \"scratch that\" zum Neuanfangen",
             "listeningDecision": "Sage \"yes\", \"no\" oder gib eigene Anweisungen",
             "listeningQuestion": "Antworte laut – sage \"send it\", wenn du fertig bist"

@@ -309,7 +309,7 @@
             "dormant": "语音已休眠——点击麦克风唤醒",
             "goAheadPending": "Pipali 有事要告诉你——说 \"Pipali, go ahead\"",
             "goAheadResult": "结果已就绪——说 \"Pipali, go ahead\" 收听",
-            "speaking": "直接说话即可打断——或说 \"stop\" 让它安静",
+            "speaking": "说 \"Pipali…\" 即可打断——或说 \"Pipali, stop\" 让它安静",
             "listening": "说完后说 \"send it\"，想重说就说 \"scratch that\"",
             "listeningDecision": "说 \"yes\"、\"no\"，或给出你自己的指示",
             "listeningQuestion": "直接说出答案——说完后说 \"send it\""
