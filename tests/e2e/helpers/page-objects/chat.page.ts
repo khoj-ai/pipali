@@ -249,7 +249,7 @@ export class ChatPage extends AppPage {
         const userMessage = this.userMessages.nth(index);
         await userMessage.hover();
         // Wait for the action button to appear
-        const deleteBtn = userMessage.locator(Selectors.messageActionBtn);
+        const deleteBtn = userMessage.locator(Selectors.messageActionDelete);
         await deleteBtn.waitFor({ state: 'visible', timeout: 5000 });
         // Use force click since the button appears on hover and may shift position
         await deleteBtn.click({ force: true });
@@ -263,7 +263,7 @@ export class ChatPage extends AppPage {
         const assistantMessage = this.assistantMessages.nth(index);
         await assistantMessage.hover();
         // Wait for the action button to appear
-        const deleteBtn = assistantMessage.locator(Selectors.messageActionBtn);
+        const deleteBtn = assistantMessage.locator(Selectors.messageActionDelete);
         await deleteBtn.waitFor({ state: 'visible', timeout: 5000 });
         // Use force click since the button appears on hover and may shift position
         await deleteBtn.click({ force: true });

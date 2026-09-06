@@ -30,6 +30,10 @@ export const Selectors = {
     messageContent: '.message-content',
     messageActions: '.message-actions',
     messageActionBtn: '.message-action-btn',
+    messageActionCopy: '.message-action-btn.copy',
+    messageActionEdit: '.message-action-btn.edit',
+    messageActionFork: '.message-action-btn.fork',
+    messageActionDelete: '.message-action-btn.delete',
 
     // Thoughts / Train of Thought
     thoughtsSection: '.thoughts-section',

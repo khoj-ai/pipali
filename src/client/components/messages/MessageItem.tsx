@@ -127,7 +127,7 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
                         )}
                         {canCopy && (
                             <button
-                                className="message-action-btn"
+                                className="message-action-btn copy"
                                 onClick={copyContent}
                                 title={copied ? t('errors.copied') : t('messages.copyMessage')}
                             >
@@ -136,7 +136,7 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
                         )}
                         {canEdit && (
                             <button
-                                className="message-action-btn"
+                                className="message-action-btn edit"
                                 onClick={() => setDraft(message.content)}
                                 title={t('messages.editMessage')}
                             >
@@ -145,7 +145,7 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
                         )}
                         {canFork && (
                             <button
-                                className="message-action-btn"
+                                className="message-action-btn fork"
                                 onClick={() => onFork(message.id)}
                                 title={t('messages.forkConversation')}
                             >
@@ -154,7 +154,7 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
                         )}
                         {canDelete && (
                             <button
-                                className="message-action-btn"
+                                className="message-action-btn delete"
                                 onClick={() => onDelete(message.id, message.role)}
                                 title={t('messages.deleteMessage')}
                             >
