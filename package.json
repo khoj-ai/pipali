@@ -62,6 +62,7 @@
     "drizzle-kit": "^0.31.8",
     "drizzle-orm": "^0.44.7",
     "exceljs": "^4.4.0",
+    "highlight.js": "^11",
     "hono": "^4.11.1",
     "i18next": "^26.0.4",
     "i18next-browser-languagedetector": "^8.2.1",

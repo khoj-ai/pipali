@@ -4,6 +4,7 @@
  */
 
 import { getApiBaseUrl } from './api';
+import { fileUrlToPath } from './formatting';
 
 /**
  * Check if the app is running inside the Tauri desktop app.
@@ -143,27 +144,7 @@ export async function onWindowShown(callback: () => void): Promise<() => void> {
  * @returns true if the file was opened successfully, false otherwise
  */
 export async function openFile(filePath: string): Promise<boolean> {
-    // Convert file:// URL to a local filesystem path if needed
-    let path = filePath;
-    if (filePath.startsWith('file://')) {
-        try {
-            const url = new URL(filePath);
-            // Typical macOS file URLs are file:///Users/...
-            // URL.pathname is already decoded for most characters, but keep it explicit.
-            path = decodeURIComponent(url.pathname);
-            // Windows drive paths come through as /C:/Users/...; strip the leading slash.
-            if (/^\/[a-zA-Z]:\//.test(path)) {
-                path = path.slice(1);
-            }
-        } catch {
-            // Fallback: strip scheme prefix
-            try {
-                path = decodeURIComponent(filePath.replace(/^file:\/\//, ''));
-            } catch {
-                path = filePath.replace(/^file:\/\//, '');
-            }
-        }
-    }
+    const path = fileUrlToPath(filePath);
 
     console.log('[openFile] Opening file:', path, { isTauri: isTauri(), isDesktop: isDesktopMode() });
 

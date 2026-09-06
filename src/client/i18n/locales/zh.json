@@ -629,6 +629,18 @@
         "errorDetails": "错误详情",
         "failedToCopy": "复制对话失败"
     },
+    "fileViewer": {
+        "openInViewer": "在 Pipali 中打开",
+        "openExternally": "用默认应用打开",
+        "reload": "重新加载",
+        "close": "关闭",
+        "loading": "加载中...",
+        "notAllowed": "此文件位于 Pipali 可显示的文件夹之外。",
+        "notFound": "未找到文件。",
+        "tooLarge": "此文件太大，无法在此处显示。请改用外部应用打开。",
+        "binary": "此文件不是文本，无法在此处显示。",
+        "failed": "无法加载此文件。"
+    },
     "findInPage": {
         "placeholder": "在页面中查找...",
         "noResults": "无结果",

@@ -44,6 +44,15 @@ export const Selectors = {
     thoughtStep: '.thought-step',
     thoughtTool: '.thought-tool',
 
+    // File Viewer
+    fileViewer: '.file-viewer',
+    fileViewerName: '.file-viewer-name',
+    fileViewerFrame: '.file-viewer-frame',
+    fileViewerSource: '.file-viewer-source',
+    fileViewerGutter: '.file-viewer-gutter',
+    fileViewerMarkdown: '.file-viewer-markdown',
+    fileViewerClose: '.file-viewer-close',
+
     // Home Page
     emptyState: '.empty-state',
     homeEmpty: '.home-empty',

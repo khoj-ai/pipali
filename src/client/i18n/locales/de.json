@@ -629,6 +629,18 @@
         "errorDetails": "Fehlerdetails",
         "failedToCopy": "Unterhaltung konnte nicht kopiert werden"
     },
+    "fileViewer": {
+        "openInViewer": "In Pipali öffnen",
+        "openExternally": "Mit Standard-App öffnen",
+        "reload": "Neu laden",
+        "close": "Schließen",
+        "loading": "Wird geladen...",
+        "notAllowed": "Diese Datei liegt außerhalb der Ordner, die Pipali anzeigen kann.",
+        "notFound": "Datei nicht gefunden.",
+        "tooLarge": "Diese Datei ist zu groß, um sie hier anzuzeigen. Öffne sie stattdessen extern.",
+        "binary": "Diese Datei ist kein Text und kann hier nicht angezeigt werden.",
+        "failed": "Diese Datei konnte nicht geladen werden."
+    },
     "findInPage": {
         "placeholder": "Auf der Seite suchen...",
         "noResults": "Keine Treffer",
