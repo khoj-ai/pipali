@@ -44,6 +44,7 @@ describe('highlightSource', () => {
         expect(highlightLanguage('changes.patch')).toBe('diff');
         expect(highlightLanguage('paper.tex')).toBe('latex');
         expect(highlightLanguage('deploy.ps1')).toBe('powershell');
+        expect(highlightLanguage('journal.org')).toBe('org');
         expect(highlightLanguage('a.txt')).toBeNull();
     });
 
@@ -52,6 +53,24 @@ describe('highlightSource', () => {
         expect(html).toContain('hljs-keyword');
         expect(html).toContain('&lt;b&gt;');
         expect(html).not.toContain('<b>');
+    });
+
+    test('marks org-mode structure and leaves paths alone', () => {
+        const html = highlightSource(
+            '* TODO [#A] Call the bank :finance:\n'
+            + 'SCHEDULED: <2026-09-08 Mon>\n'
+            + '- [ ] see [[https://example.com][the site]] under /usr/bin/ for *this* one',
+            'org',
+        );
+        expect(html).toContain('<span class="hljs-section">* <span class="hljs-keyword">TODO</span>');
+        expect(html).toContain('<span class="hljs-number">[#A]</span>');
+        expect(html).toContain('<span class="hljs-symbol">:finance:</span>');
+        expect(html).toContain('<span class="hljs-keyword">SCHEDULED:</span>');
+        expect(html).toContain('<span class="hljs-number">&lt;2026-09-08 Mon&gt;</span>');
+        expect(html).toContain('<span class="hljs-literal">[ ]</span>');
+        expect(html).toContain('<span class="hljs-link">[[https://example.com][the site]]</span>');
+        expect(html).toContain('<span class="hljs-strong">*this*</span>');
+        expect(html).not.toContain('hljs-emphasis');
     });
 
     test('skips highlighting without a grammar or past the size limit', () => {

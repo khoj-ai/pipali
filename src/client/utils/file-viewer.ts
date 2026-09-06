@@ -25,11 +25,12 @@ import sql from 'highlight.js/lib/languages/sql';
 import typescript from 'highlight.js/lib/languages/typescript';
 import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
+import org from './org-grammar';
 import { apiFetch } from './api';
 import { fileUrlToPath } from './formatting';
 
 const GRAMMARS = {
-    bash, css, diff, dos, go, ini, javascript, json, latex, powershell, properties,
+    bash, css, diff, dos, go, ini, javascript, json, latex, org, powershell, properties,
     python, rust, sql, typescript, xml, yaml,
 };
 for (const [name, grammar] of Object.entries(GRAMMARS)) hljs.registerLanguage(name, grammar);
@@ -63,6 +64,7 @@ const LANGUAGE_BY_EXTENSION: Record<string, keyof typeof GRAMMARS> = {
     js: 'javascript', jsx: 'javascript', mjs: 'javascript', cjs: 'javascript',
     json: 'json', jsonl: 'json',
     tex: 'latex', ltx: 'latex', sty: 'latex', cls: 'latex', bib: 'latex',
+    org: 'org', org_archive: 'org',
     ps1: 'powershell', psm1: 'powershell', psd1: 'powershell',
     properties: 'properties',
     py: 'python',

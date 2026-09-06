@@ -228,6 +228,19 @@
     color: var(--hl-title);
 }
 
+.file-viewer .hljs-section {
+    font-weight: 600;
+}
+
+.file-viewer .hljs-link {
+    color: var(--hl-string);
+    text-decoration: underline;
+}
+
+.file-viewer .hljs-code {
+    color: var(--hl-string);
+}
+
 .file-viewer .hljs-tag,
 .file-viewer .hljs-name,
 .file-viewer .hljs-bullet {
