@@ -1,5 +1,6 @@
 /**
- * YAML frontmatter parsing for the markdown files Pipali owns (SKILL.md, USER.md).
+ * YAML frontmatter parsing for markdown files, shared by the server (SKILL.md, USER.md,
+ * memories) and the client.
  *
  * Covers the subset those files use: top-level scalars — bare, single or double
  * quoted, or a `>`/`|` folded block — and one level of nesting under `metadata:`.

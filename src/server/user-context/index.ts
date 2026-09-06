@@ -8,7 +8,7 @@
 import path from 'path';
 import os from 'os';
 import { mkdir } from 'fs/promises';
-import { parseFrontmatter } from '../frontmatter';
+import { parseFrontmatter } from '../../shared/frontmatter';
 import { createChildLogger } from '../logger';
 
 const log = createChildLogger({ component: 'user-context' });

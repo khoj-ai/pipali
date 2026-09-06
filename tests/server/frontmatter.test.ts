@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { parseFrontmatter } from '../../src/server/frontmatter';
+import { parseFrontmatter } from '../../src/shared/frontmatter';
 
 describe('parseFrontmatter', () => {
     test('separates arbitrary top-level fields from the body', () => {

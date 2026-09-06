@@ -23,7 +23,7 @@ import {
     deleteMemory,
     deleteAllMemories,
 } from '../../src/server/memory';
-import { parseFrontmatter } from '../../src/server/frontmatter';
+import { parseFrontmatter } from '../../src/shared/frontmatter';
 import { writeFile } from '../../src/server/processor/actor/write_file';
 import { editFile } from '../../src/server/processor/actor/edit_file';
 

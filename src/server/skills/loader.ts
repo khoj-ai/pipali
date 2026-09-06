@@ -3,7 +3,7 @@
  */
 
 import path from 'path';
-import { parseFrontmatter as parseYamlFrontmatter } from '../frontmatter';
+import { parseFrontmatter as parseYamlFrontmatter } from '../../shared/frontmatter';
 import type { Skill, SkillLoadResult, SkillLoadError, SkillFrontmatter } from './types';
 
 /**

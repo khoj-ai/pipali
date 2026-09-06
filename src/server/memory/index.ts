@@ -10,7 +10,7 @@
 import path from 'path';
 import os from 'os';
 import { lstat, mkdir, readdir, unlink } from 'fs/promises';
-import { parseFrontmatter } from '../frontmatter';
+import { parseFrontmatter } from '../../shared/frontmatter';
 import { createChildLogger } from '../logger';
 import { PIPALI_MEMORY_RELATIVE_DIR } from '../../shared';
 

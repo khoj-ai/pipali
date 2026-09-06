@@ -17,7 +17,7 @@ import {
     readSkillDirectory,
     type SkillFiles,
 } from './builtin-versions';
-import { parseFrontmatter } from '../frontmatter';
+import { parseFrontmatter } from '../../shared/frontmatter';
 import { IS_COMPILED_BINARY, EMBEDDED_BUILTIN_SKILLS } from '../embedded-assets';
 import { getSkillsDir as getSkillsDirFromPaths } from '../paths';
 import { createChildLogger } from '../logger';
