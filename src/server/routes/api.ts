@@ -1,6 +1,5 @@
 import os from 'os';
 import path from 'path';
-import { realpath } from 'fs/promises';
 import { Hono, type Context } from 'hono';
 import { cors } from 'hono/cors';
 import { z } from 'zod';
@@ -15,6 +14,7 @@ import automations from './automations';
 import mcp from './mcp';
 import auth from './auth';
 import push from './push';
+import files from './files';
 
 import { getDefaultUser } from '../utils';
 import { atifConversationService } from '../processor/conversation/atif/atif.service';
@@ -1007,68 +1007,6 @@ api.post('/upload', async (c) => {
     return c.json({ files: results });
 });
 
-// Serve local image files referenced in model responses
-const IMAGE_MIME: Record<string, string> = {
-    '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-    '.gif': 'image/gif', '.webp': 'image/webp',
-};
-
-const ALLOWED_IMAGE_ROOTS_RAW = [
-    os.homedir(),
-    '/tmp/pipali',
-    '/private/tmp/pipali', // macOS: /tmp symlinks to /private/tmp
-    os.tmpdir(),
-];
-
-// Resolve symlinks in allowed roots so realpath-resolved file paths still match.
-// On macOS, /var → /private/var, so os.tmpdir() "/var/folders/..." resolves to "/private/var/folders/...".
-let resolvedImageRoots: string[] | null = null;
-async function getAllowedImageRoots(): Promise<string[]> {
-    if (resolvedImageRoots) return resolvedImageRoots;
-    const roots = new Set(ALLOWED_IMAGE_ROOTS_RAW);
-    for (const root of ALLOWED_IMAGE_ROOTS_RAW) {
-        try { roots.add(await realpath(root)); } catch {}
-    }
-    resolvedImageRoots = [...roots];
-    return resolvedImageRoots;
-}
-
-function isUnderAllowedRoot(filePath: string, roots: string[]): boolean {
-    return roots.some(root => filePath.startsWith(root + '/'));
-}
-
-api.get('/files', async (c) => {
-    const filePath = c.req.query('path');
-    if (!filePath) return c.json({ error: 'Missing path parameter' }, 400);
-
-    const ext = path.extname(filePath).toLowerCase();
-    if (!IMAGE_MIME[ext]) return c.json({ error: 'Only image files can be served' }, 403);
-
-    const roots = await getAllowedImageRoots();
-    const resolved = path.resolve(filePath);
-    if (!isUnderAllowedRoot(resolved, roots)) {
-        return c.json({ error: 'Path not within allowed directories' }, 403);
-    }
-
-    try {
-        const real = await realpath(resolved);
-        if (!isUnderAllowedRoot(real, roots)) {
-            return c.json({ error: 'Path not within allowed directories' }, 403);
-        }
-
-        const file = Bun.file(real);
-        if (!await file.exists()) return c.json({ error: 'File not found' }, 404);
-
-        return c.body(await file.arrayBuffer(), 200, {
-            'Content-Type': IMAGE_MIME[ext],
-            'Cache-Control': 'private, max-age=3600',
-        });
-    } catch (err) {
-        log.error({ err, path: resolved }, 'Failed to serve file');
-        return c.json({ error: 'Failed to read file' }, 500);
-    }
-});
-
 // Client-side error telemetry
 const clientErrorSchema = z.object({
     message: z.string(),
@@ -1179,5 +1117,8 @@ api.route('/auth', auth);
 
 // Mount the Web Push router
 api.route('/push', push);
+
+// Local files: inline images and viewer content
+api.route('/files', files);
 
 export default api;
