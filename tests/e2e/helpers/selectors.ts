@@ -51,6 +51,7 @@ export const Selectors = {
     fileViewerSource: '.file-viewer-source',
     fileViewerGutter: '.file-viewer-gutter',
     fileViewerMarkdown: '.file-viewer-markdown',
+    fileViewerFrontmatter: '.file-viewer-frontmatter',
     fileViewerClose: '.file-viewer-close',
 
     // Home Page

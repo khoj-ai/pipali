@@ -34,6 +34,7 @@ test.describe('File viewer', () => {
     test.afterAll(async () => {
         await rm(`${FILE_VIEWER_DIR}/report.html`, { force: true });
         await rm(`${FILE_VIEWER_DIR}/summarize.ts`, { force: true });
+        await rm(`${FILE_VIEWER_DIR}/notes.md`, { force: true });
         await rm(`${FILE_VIEWER_DIR}/export.md`, { force: true });
         await rm(FILE_VIEWER_DIR, { recursive: true, force: true });
     });
@@ -66,6 +67,15 @@ test.describe('File viewer', () => {
         await expect(viewer.locator(Selectors.fileViewerName)).toHaveText('summarize.ts');
         await expect(viewer.locator(`${Selectors.fileViewerSource} .hljs-keyword`).first()).toBeVisible();
         await expect(viewer.locator(Selectors.fileViewerGutter)).toHaveText(/^1\s+2\s+3$/);
+    });
+
+    test('shows markdown frontmatter as yaml rather than a heading', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="notes.md"]`).first().click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        await expect(viewer.locator(`${Selectors.fileViewerFrontmatter} .hljs-attr`).first()).toHaveText('title:');
+        await expect(viewer.locator(`${Selectors.fileViewerMarkdown} h1`)).toHaveText('Agenda');
+        await expect(viewer.locator(`${Selectors.fileViewerMarkdown} h2`)).toHaveCount(0);
     });
 
     test('shows a large markdown file as plain text and switches away from it promptly', async ({ page }) => {

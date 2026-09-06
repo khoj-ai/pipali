@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ExternalLink as ExternalLinkIcon, FileText, Loader2, RotateCw, X } from 'lucide-react';
-import { ChatMarkdown } from '../ChatMarkdown';
 import { HtmlFileView } from './HtmlFileView';
+import { MarkdownFileView } from './MarkdownFileView';
 import { TextFileView } from './TextFileView';
 import { useFileViewer } from '../../hooks/useFileViewer';
 import { fetchFileContent, fileViewKind, resolveDocumentLink, RICH_RENDER_MAX_CHARS } from '../../utils/file-viewer';
@@ -110,11 +110,7 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
             case 'markdown':
                 return state.text.length > RICH_RENDER_MAX_CHARS
                     ? <TextFileView text={state.text} path={path} />
-                    : (
-                        <div className="file-viewer-markdown message-content">
-                            <ChatMarkdown>{state.text}</ChatMarkdown>
-                        </div>
-                    );
+                    : <MarkdownFileView text={state.text} />;
             default:
                 return <TextFileView text={state.text} path={path} />;
         }

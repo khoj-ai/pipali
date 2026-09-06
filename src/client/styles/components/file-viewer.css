@@ -111,6 +111,19 @@
     max-width: 760px;
 }
 
+.file-viewer-frontmatter {
+    margin: 0 0 16px;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: var(--color-text-secondary);
+    background: var(--color-bg-muted);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+}
+
 .file-viewer-image {
     display: block;
     max-width: calc(100% - 32px);

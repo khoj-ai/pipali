@@ -385,12 +385,21 @@ export function fileViewerScenario(): MockScenario {
                         },
                         tool_call_id: 'tc-viewer-ts',
                     },
+                    {
+                        function_name: 'write_file',
+                        arguments: {
+                            file_path: `${FILE_VIEWER_DIR}/notes.md`,
+                            content: '---\ntitle: Weekly sync\ntags: [ops, planning]\n---\n# Agenda\n\n- Budget\n',
+                        },
+                        tool_call_id: 'tc-viewer-md',
+                    },
                 ],
             },
         ],
         // export.md is not written here: the spec writes it, at a size no tool call should carry
         finalResponse: `Saved the report to [report.html](file://${FILE_VIEWER_DIR}/report.html), `
-            + `the script to [summarize.ts](file://${FILE_VIEWER_DIR}/summarize.ts) `
+            + `the script to [summarize.ts](file://${FILE_VIEWER_DIR}/summarize.ts), `
+            + `the notes to [notes.md](file://${FILE_VIEWER_DIR}/notes.md) `
             + `and the export to [export.md](file://${FILE_VIEWER_DIR}/export.md).`,
     };
 }
