@@ -349,6 +349,61 @@ export function writeFileScenario(): MockScenario {
     };
 }
 
+export const FILE_VIEWER_DIR = '/tmp/pipali/e2e-file-viewer';
+
+/**
+ * Write an HTML report and a TypeScript file for real, then link both, so a test can open
+ * each in the viewer panel. The report carries a script that must never run.
+ */
+export function fileViewerScenario(): MockScenario {
+    return {
+        name: 'file-viewer',
+        queryPattern: '.*viewer report.*',
+        iterations: [
+            {
+                thought: 'Writing the report and its helper script.',
+                toolCalls: [
+                    {
+                        function_name: 'write_file',
+                        arguments: {
+                            file_path: `${FILE_VIEWER_DIR}/report.html`,
+                            content: '<!doctype html><html><body>'
+                                + '<h1 id="viewer-heading">Quarterly report</h1>'
+                                + '<script>document.body.dataset.ran = "yes";</script>'
+                                + '<a href="https://example.com">Source</a>'
+                                + '</body></html>',
+                        },
+                        tool_call_id: 'tc-viewer-html',
+                    },
+                    {
+                        function_name: 'write_file',
+                        arguments: {
+                            file_path: `${FILE_VIEWER_DIR}/summarize.ts`,
+                            content: 'export function summarize(rows: number[]): number {\n'
+                                + '    return rows.reduce((sum, row) => sum + row, 0);\n'
+                                + '}\n',
+                        },
+                        tool_call_id: 'tc-viewer-ts',
+                    },
+                    {
+                        function_name: 'write_file',
+                        arguments: {
+                            file_path: `${FILE_VIEWER_DIR}/notes.md`,
+                            content: '---\ntitle: Weekly sync\ntags: [ops, planning]\n---\n# Agenda\n\n- Budget\n',
+                        },
+                        tool_call_id: 'tc-viewer-md',
+                    },
+                ],
+            },
+        ],
+        // export.md is not written here: the spec writes it, at a size no tool call should carry
+        finalResponse: `Saved the report to [report.html](file://${FILE_VIEWER_DIR}/report.html), `
+            + `the script to [summarize.ts](file://${FILE_VIEWER_DIR}/summarize.ts), `
+            + `the notes to [notes.md](file://${FILE_VIEWER_DIR}/notes.md) `
+            + `and the export to [export.md](file://${FILE_VIEWER_DIR}/export.md).`,
+    };
+}
+
 /**
  * Create a read file scenario with thought interleaved
  */
@@ -953,6 +1008,7 @@ export const defaultMockScenarios: MockScenario[] = [
     shellCommandScenario(),
     readWriteShellCommandScenario(),
     writeFileScenario(),
+    fileViewerScenario(),
     readFileScenario(),
     multiToolScenario(),
     pubSubReloadReproScenario(),

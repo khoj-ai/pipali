@@ -1,0 +1,294 @@
+/*
+ * Pipali Styles - File Viewer
+ * Includes: chat/viewer split, viewer panel, source view, highlight palette
+ */
+
+/* Chat with the viewer beside it; the input area stays below both */
+.chat-split {
+    flex: 1;
+    display: flex;
+    min-height: 0;
+}
+
+.chat-split > .main-content {
+    min-width: 0;
+}
+
+.file-viewer {
+    width: min(50%, 720px);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    border-left: 1px solid var(--color-border);
+    background: var(--color-bg);
+}
+
+.file-viewer-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.file-viewer-icon {
+    flex-shrink: 0;
+    color: var(--color-text-muted);
+}
+
+.file-viewer-title {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.file-viewer-name,
+.file-viewer-folder {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.file-viewer-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--color-text);
+}
+
+.file-viewer-folder {
+    font-size: 11px;
+    color: var(--color-text-muted);
+}
+
+.file-viewer-action {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 6px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    color: var(--color-text-muted);
+    transition: all var(--transition);
+}
+
+.file-viewer-action:hover {
+    background: var(--color-bg-muted);
+    color: var(--color-text);
+}
+
+.file-viewer-body {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+}
+
+.file-viewer-status {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 32px 24px;
+    font-size: 13px;
+    color: var(--color-text-muted);
+    text-align: center;
+}
+
+/* Documents keep their own styling; a generated page assumes a white ground */
+.file-viewer-frame {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: 0;
+    background: #ffffff;
+}
+
+.file-viewer-markdown {
+    padding: 16px 24px 32px;
+    max-width: 760px;
+}
+
+.file-viewer-frontmatter {
+    margin: 0 0 16px;
+    padding: 10px 12px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    color: var(--color-text-secondary);
+    background: var(--color-bg-muted);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-sm);
+}
+
+.file-viewer-image {
+    display: block;
+    max-width: calc(100% - 32px);
+    margin: 16px auto;
+}
+
+/* Source view */
+.file-viewer-code {
+    display: flex;
+    min-height: 100%;
+    min-width: max-content;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.6;
+}
+
+.file-viewer-gutter,
+.file-viewer-source {
+    margin: 0;
+    padding: 12px 0;
+    font: inherit;
+    line-height: inherit;
+    white-space: pre;
+}
+
+.file-viewer-gutter {
+    position: sticky;
+    left: 0;
+    padding-left: 12px;
+    padding-right: 10px;
+    text-align: right;
+    color: var(--color-text-muted);
+    background: var(--color-bg-muted);
+    border-right: 1px solid var(--color-border-subtle);
+    user-select: none;
+}
+
+.file-viewer-source {
+    flex: 1;
+    padding-left: 16px;
+    padding-right: 24px;
+    color: var(--color-text);
+}
+
+.file-viewer-source code {
+    font: inherit;
+}
+
+/* Highlight palette on the app's colour scheme */
+.file-viewer {
+    --hl-keyword: #cf222e;
+    --hl-string: #0a3069;
+    --hl-number: #0550ae;
+    --hl-title: #8250df;
+    --hl-tag: #116329;
+    --hl-attr: #953800;
+    --hl-meta: #6639ba;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not(.light) .file-viewer {
+        --hl-keyword: #ff7b72;
+        --hl-string: #a5d6ff;
+        --hl-number: #79c0ff;
+        --hl-title: #d2a8ff;
+        --hl-tag: #7ee787;
+        --hl-attr: #ffa657;
+        --hl-meta: #d2a8ff;
+    }
+}
+
+:root.dark .file-viewer {
+    --hl-keyword: #ff7b72;
+    --hl-string: #a5d6ff;
+    --hl-number: #79c0ff;
+    --hl-title: #d2a8ff;
+    --hl-tag: #7ee787;
+    --hl-attr: #ffa657;
+    --hl-meta: #d2a8ff;
+}
+
+.file-viewer .hljs-comment,
+.file-viewer .hljs-quote {
+    color: var(--color-text-muted);
+    font-style: italic;
+}
+
+.file-viewer .hljs-keyword,
+.file-viewer .hljs-selector-tag,
+.file-viewer .hljs-doctag,
+.file-viewer .hljs-template-tag {
+    color: var(--hl-keyword);
+}
+
+.file-viewer .hljs-string,
+.file-viewer .hljs-regexp,
+.file-viewer .hljs-addition {
+    color: var(--hl-string);
+}
+
+.file-viewer .hljs-number,
+.file-viewer .hljs-literal,
+.file-viewer .hljs-built_in,
+.file-viewer .hljs-type,
+.file-viewer .hljs-variable,
+.file-viewer .hljs-template-variable,
+.file-viewer .hljs-symbol {
+    color: var(--hl-number);
+}
+
+.file-viewer .hljs-title,
+.file-viewer .hljs-section,
+.file-viewer .hljs-selector-id,
+.file-viewer .hljs-selector-class {
+    color: var(--hl-title);
+}
+
+.file-viewer .hljs-section {
+    font-weight: 600;
+}
+
+.file-viewer .hljs-link {
+    color: var(--hl-string);
+    text-decoration: underline;
+}
+
+.file-viewer .hljs-code {
+    color: var(--hl-string);
+}
+
+.file-viewer .hljs-tag,
+.file-viewer .hljs-name,
+.file-viewer .hljs-bullet {
+    color: var(--hl-tag);
+}
+
+.file-viewer .hljs-attr,
+.file-viewer .hljs-attribute,
+.file-viewer .hljs-property,
+.file-viewer .hljs-params,
+.file-viewer .hljs-deletion {
+    color: var(--hl-attr);
+}
+
+.file-viewer .hljs-meta,
+.file-viewer .hljs-meta .hljs-string {
+    color: var(--hl-meta);
+}
+
+.file-viewer .hljs-emphasis {
+    font-style: italic;
+}
+
+.file-viewer .hljs-strong {
+    font-weight: 600;
+}
+
+/* Narrow screens: the viewer takes the chat's place, the input stays put */
+@media (max-width: 768px) {
+    .chat-split.has-viewer > .main-content {
+        display: none;
+    }
+
+    .file-viewer {
+        width: 100%;
+        border-left: 0;
+    }
+}

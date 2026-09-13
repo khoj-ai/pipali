@@ -629,6 +629,18 @@
         "errorDetails": "Error details",
         "failedToCopy": "Failed to copy conversation"
     },
+    "fileViewer": {
+        "openInViewer": "Open in Pipali",
+        "openExternally": "Open with default app",
+        "reload": "Reload",
+        "close": "Close",
+        "loading": "Loading...",
+        "notAllowed": "This file is outside the folders Pipali can show.",
+        "notFound": "File not found.",
+        "tooLarge": "This file is too large to show here. Open it externally instead.",
+        "binary": "This file isn't text, so it can't be shown here.",
+        "failed": "Couldn't load this file."
+    },
     "findInPage": {
         "placeholder": "Find in page...",
         "noResults": "No results",

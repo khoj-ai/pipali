@@ -629,6 +629,18 @@
         "errorDetails": "D\u00e9tails de l'erreur",
         "failedToCopy": "\u00c9chec de la copie de la conversation"
     },
+    "fileViewer": {
+        "openInViewer": "Ouvrir dans Pipali",
+        "openExternally": "Ouvrir avec l'application par défaut",
+        "reload": "Recharger",
+        "close": "Fermer",
+        "loading": "Chargement...",
+        "notAllowed": "Ce fichier est en dehors des dossiers que Pipali peut afficher.",
+        "notFound": "Fichier introuvable.",
+        "tooLarge": "Ce fichier est trop volumineux pour être affiché ici. Ouvrez-le avec une autre application.",
+        "binary": "Ce fichier n'est pas du texte et ne peut pas être affiché ici.",
+        "failed": "Impossible de charger ce fichier."
+    },
     "findInPage": {
         "placeholder": "Rechercher dans la page...",
         "noResults": "Aucun r\u00e9sultat",

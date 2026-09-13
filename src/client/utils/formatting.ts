@@ -136,6 +136,34 @@ export function getFileName(path: string): string {
     return parts[parts.length - 1] || path;
 }
 
+/**
+ * Local filesystem path for a file:// URL. Anything else passes through unchanged.
+ *
+ * Tool calls name files the way the model wrote them, so `file://~/notes.md` and
+ * `file://Code/x.ts` occur; a URL parser would read `~` or `Code` as a host. Those come
+ * back as the home-relative path they are, which the server expands the way its file
+ * tools do.
+ */
+export function fileUrlToPath(fileUrl: string): string {
+    if (!fileUrl.startsWith('file://')) return fileUrl;
+    const rest = fileUrl.slice('file://'.length).replace(/^localhost\//, '/');
+    const decode = (value: string) => {
+        try {
+            return decodeURIComponent(value);
+        } catch {
+            return value;
+        }
+    };
+    if (!rest.startsWith('/')) return decode(rest);
+    try {
+        const path = decodeURIComponent(new URL(fileUrl).pathname);
+        // Windows drive paths come through as /C:/Users/...; strip the leading slash.
+        return /^\/[a-zA-Z]:\//.test(path) ? path.slice(1) : path;
+    } catch {
+        return decode(rest);
+    }
+}
+
 const MEMORY_FILE_TOOLS = new Set(['view_file', 'edit_file', 'write_file']);
 
 /** Whether a file tool is operating on Pipali's persistent memory store. */

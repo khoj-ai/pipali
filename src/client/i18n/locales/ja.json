@@ -629,6 +629,18 @@
         "errorDetails": "エラー詳細",
         "failedToCopy": "会話をコピーできませんでした"
     },
+    "fileViewer": {
+        "openInViewer": "Pipaliで開く",
+        "openExternally": "既定のアプリで開く",
+        "reload": "再読み込み",
+        "close": "閉じる",
+        "loading": "読み込み中...",
+        "notAllowed": "このファイルはPipaliが表示できるフォルダの外にあります。",
+        "notFound": "ファイルが見つかりません。",
+        "tooLarge": "このファイルは大きすぎてここに表示できません。外部アプリで開いてください。",
+        "binary": "このファイルはテキストではないため、ここに表示できません。",
+        "failed": "このファイルを読み込めませんでした。"
+    },
     "findInPage": {
         "placeholder": "ページ内を検索...",
         "noResults": "結果なし",

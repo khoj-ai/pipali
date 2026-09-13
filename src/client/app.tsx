@@ -32,6 +32,7 @@ import { generateUUID, generateDeterministicId, getToolCategory, formatAttachedF
 import { ensureServiceWorker } from "./utils/push";
 import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupNotificationClickListener, warmAudioContext } from "./utils/notifications";
 import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
+import { FileViewerContext } from "./hooks/useFileViewer";
 import { useVoiceSettings } from "./hooks/useVoiceSettings";
 import { useVoiceCompanion } from "./hooks/useVoiceCompanion";
 import type { VoiceMode } from "./utils/voice/voice-config";
@@ -48,12 +49,15 @@ import { McpToolsPage } from "./components/mcp-tools";
 import { SettingsPage } from "./components/settings";
 import { LoginPage } from "./components/auth";
 import { FindInPage } from "./components/FindInPage";
+import { FileViewerPanel } from "./components/file-viewer";
 import { getRandomBillingMessage } from "./components/billing";
 import type { AutomationPendingConfirmation } from "./types/automations";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 // Page types
 type PageType = 'home' | 'chat' | 'skills' | 'automations' | 'mcp-tools' | 'settings';
+
+const FILE_WRITE_TOOLS = new Set(['write_file', 'edit_file']);
 
 /** The page a URL names, for both the first render and any history entry returned to */
 function pageFromUrl(): PageType {
@@ -129,6 +133,7 @@ const App = () => {
     // Find in page state
     const [showFindInPage, setShowFindInPage] = useState(false);
     const [findInPageQuery, setFindInPageQuery] = useState<string | undefined>(undefined);
+    const [viewerPath, setViewerPath] = useState<string | null>(null);
     const pendingHighlightRef = useRef<{ term: string; conversationId: string } | undefined>(undefined);
     // Billing alerts state
     const [billingAlerts, setBillingAlerts] = useState<BillingAlert[]>([]);
@@ -707,6 +712,26 @@ const App = () => {
         if (!conversationId || !isConnected) return;
         observe(conversationId);
     }, [conversationId, isConnected, observe]);
+
+    // The viewer shows a file from the conversation on screen, so it closes with it
+    useEffect(() => {
+        setViewerPath(null);
+    }, [conversationId]);
+
+    // Counts completed writes to the open file, so the viewer refetches after Pipali edits it
+    const viewerRevision = useMemo(() => {
+        if (!viewerPath) return 0;
+        let revision = 0;
+        for (const message of messages) {
+            for (const thought of message.thoughts ?? []) {
+                if (thought.toolName && FILE_WRITE_TOOLS.has(thought.toolName)
+                    && thought.toolArgs?.file_path === viewerPath && thought.toolResult) {
+                    revision++;
+                }
+            }
+        }
+        return revision;
+    }, [messages, viewerPath]);
 
     // A dropped connection misses every event published while it was down, and the bus replays
     // nothing once the run it belonged to has finished. Re-read persisted state on reconnect.
@@ -1912,6 +1937,7 @@ const App = () => {
 
     return (
         <ConversationNavigationContext.Provider value={selectConversation}>
+        <FileViewerContext.Provider value={setViewerPath}>
         <ErrorBoundary>
             <div className="app-wrapper">
                 <Sidebar
@@ -1987,9 +2013,17 @@ const App = () => {
                         <SettingsPage onUserContextSaved={fetchUserName} />
                     )}
                     {currentPage === 'chat' && (
-                        <ErrorBoundary>
-                            <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onForkConversation={forkConversationFrom} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} zoom={mainViewZoom} />
-                        </ErrorBoundary>
+                        <div className={`chat-split${viewerPath ? ' has-viewer' : ''}`}>
+                            <ErrorBoundary>
+                                <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onForkConversation={forkConversationFrom} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} zoom={mainViewZoom} />
+                            </ErrorBoundary>
+                            {viewerPath && (
+                                <ErrorBoundary>
+                                    {/* Keyed so a new file starts from loading instead of rendering the last file's text under its kind */}
+                                    <FileViewerPanel key={viewerPath} path={viewerPath} revision={viewerRevision} onClose={() => setViewerPath(null)} />
+                                </ErrorBoundary>
+                            )}
+                        </div>
                     )}
 
                     <InputArea
@@ -2073,6 +2107,7 @@ const App = () => {
                 />
             </div>
         </ErrorBoundary>
+        </FileViewerContext.Provider>
         </ConversationNavigationContext.Provider>
     );
 };

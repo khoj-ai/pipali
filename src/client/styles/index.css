@@ -27,6 +27,7 @@
 @import './components/thoughts.css';
 @import './components/confirmations.css';
 @import './components/find-in-page.css';
+@import './components/file-viewer.css';
 @import './components/billing.css';
 @import './components/error-boundary.css';
 @import './components/pull-to-refresh.css';
