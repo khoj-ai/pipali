@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.10.0
+
+### 🎁 New
+- View files directly in the app. Click file links to view them in chat right side panel.
+- Copy, edit messages and fork conversations for more efficient workflow control.
+- Get notified on your phone when Pipali finishes a task or needs approvals. Install Pipali PWA and Enable in Settings
+
+### 🧪 Improve
+- Make live chat UX more lively: Live stream each step and track time taken by each task
+- Improve UX on phones: Pull to refresh, edge-to-edge display, roomier touch targets, screen awake while voice mode in listening
+- Pick a model for each routine instead of always using your default
+- Ensure app stays fast even with a long chat history
+- Choose between a male or female voice for voice mode
+
+### 🛠️ Fix
+- Voice readouts no longer hiss or stutter, especially on phones
+- Require explicitly saying "Pipali…" to cut in to avoid inadvertently interrupting Pipali mid-readout
+- Routine confirmations appear immediately instead of up to 30 seconds late
+
 ## 0.9.0
 
 ### 🎁 New
