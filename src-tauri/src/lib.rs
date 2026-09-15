@@ -421,6 +421,19 @@ fn is_process_alive(pid: u32) -> bool {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebKitGTK 2.42+ defaults to a DMA-BUF renderer that fails to paint on many
+    // Linux GPU stacks, leaving a blank/white window that only a manual reload
+    // recovers (tauri-apps/tauri#13885, #9394). Force the legacy rendering paths
+    // before GTK initializes. The accepted workaround disables both the DMA-BUF
+    // renderer and accelerated compositing together. Each is set only when unset
+    // so a user can still override it.
+    #[cfg(target_os = "linux")]
+    for var in ["WEBKIT_DISABLE_DMABUF_RENDERER", "WEBKIT_DISABLE_COMPOSITING_MODE"] {
+        if std::env::var_os(var).is_none() {
+            std::env::set_var(var, "1");
+        }
+    }
+
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
     tauri::Builder::default()
