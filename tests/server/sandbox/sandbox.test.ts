@@ -17,11 +17,16 @@ import {
 } from '../../../src/server/sandbox/config';
 import {
     getSandboxEnvOverrides,
+    initializeSandboxWithConfig,
     isPathDeniedForRead,
+    isPathWithinAllowedWrite,
     resolveHostTimezone,
     SANDBOX_TEMP_DIR,
+    type PathStyle,
 } from '../../../src/server/sandbox';
 import { expandPath, expandPaths } from '../../../src/server/utils';
+
+const WINDOWS: PathStyle = { path: path.win32, home: 'C:\\Users\\alice', caseInsensitive: true };
 
 describe('Sandbox Config', () => {
     describe('getDefaultConfig', () => {
@@ -172,6 +177,51 @@ describe('Sandbox Config', () => {
             // Neighbours and prefix look-alikes stay denied
             expect(isPathDeniedForRead('/etc/sslkeys/private.key')).toBe(true);
             expect(isPathDeniedForRead('/private/etc/sudoers')).toBe(true);
+        });
+
+        test('should deny protected Windows paths however their case and separators are spelled', () => {
+            expect(isPathDeniedForRead('c:\\users\\ALICE\\.SSH\\id_rsa', WINDOWS)).toBe(true);
+            expect(isPathDeniedForRead('C:/Users/alice/.ssh/config', WINDOWS)).toBe(true);
+            expect(isPathDeniedForRead('D:\\backup\\.Aws\\credentials', WINDOWS)).toBe(true);
+            expect(isPathDeniedForRead('C:\\work\\app\\.ENV.local', WINDOWS)).toBe(true);
+            // Look-alikes stay readable
+            expect(isPathDeniedForRead('C:\\Users\\alice\\.ssh-notes.txt', WINDOWS)).toBe(false);
+            expect(isPathDeniedForRead('C:\\work\\app\\.envrc', WINDOWS)).toBe(false);
+        });
+
+        test('should fold case exactly where the filesystem does', () => {
+            const macos: PathStyle = { path: path.posix, home: '/Users/alice', caseInsensitive: true };
+            const linux: PathStyle = { path: path.posix, home: '/home/alice', caseInsensitive: false };
+            expect(isPathDeniedForRead('/Users/alice/.SSH/id_rsa', macos)).toBe(true);
+            expect(isPathDeniedForRead('/home/alice/.SSH/id_rsa', linux)).toBe(false);
+        });
+
+        test('should apply a drive-letter rule added on Windows', async () => {
+            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, deniedReadPaths: ['D:\\Finance'] });
+            try {
+                expect(isPathDeniedForRead('d:\\finance\\2026\\payroll.xlsx', WINDOWS)).toBe(true);
+                expect(isPathDeniedForRead('D:\\Finance-public\\report.pdf', WINDOWS)).toBe(false);
+            } finally {
+                await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false });
+            }
+        });
+    });
+
+    describe('isPathWithinAllowedWrite', () => {
+        test('should hold Windows write rules however the path is cased', async () => {
+            await initializeSandboxWithConfig({
+                ...getDefaultConfig(),
+                enabled: false,
+                allowedWritePaths: ['~/.pipali'],
+                deniedWritePaths: ['~/.pipali/skills'],
+            });
+            try {
+                expect(isPathWithinAllowedWrite('C:\\Users\\Alice\\.Pipali\\notes.md', WINDOWS)).toBe(true);
+                expect(isPathWithinAllowedWrite('c:\\users\\alice\\.pipali\\SKILLS\\x\\SKILL.md', WINDOWS)).toBe(false);
+                expect(isPathWithinAllowedWrite('C:\\Users\\alice\\.pipali-evil\\x', WINDOWS)).toBe(false);
+            } finally {
+                await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false });
+            }
         });
     });
 

@@ -2,10 +2,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
 import type { Dirent } from 'fs';
-
-// Linux is typically case-sensitive, macOS/Windows are case-insensitive.
-// Only do case-insensitive path resolution on case-insensitive filesystems.
-const isCaseInsensitiveFS = process.platform === 'darwin' || process.platform === 'win32';
+import { isCaseInsensitiveFS } from '../../utils';
 
 async function resolveCaseInsensitivePath(absolutePath: string): Promise<string | null> {
     // Cross-platform resolver for absolute paths (Windows/macOS/Linux).

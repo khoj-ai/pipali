@@ -11,6 +11,7 @@
  * 2. Path validation for file operations (skip confirmation for allowed paths)
  */
 
+import os from 'os';
 import path from 'path';
 import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
 import { createChildLogger } from '../logger';
@@ -21,7 +22,7 @@ import {
     getDefaultConfig,
     buildRuntimeConfig,
 } from './config';
-import { expandPath } from '../utils';
+import { isCaseInsensitiveFS } from '../utils';
 import { loadSandboxSettings, saveSandboxSettings, ensureSandboxSettings } from './settings';
 
 const log = createChildLogger({ component: 'sandbox' });
@@ -217,12 +218,36 @@ export async function wrapCommandWithSandbox(command: string): Promise<string> {
 }
 
 /**
- * Check if a path is within a directory (not just starts with the same prefix).
+ * How a platform spells and compares paths. Defaults to the host's; tests pass
+ * another platform's to check its rules from any machine.
+ */
+export interface PathStyle {
+    path: path.PlatformPath;
+    home: string;
+    caseInsensitive: boolean;
+}
+
+function hostPathStyle(): PathStyle {
+    return { path, home: os.homedir(), caseInsensitive: isCaseInsensitiveFS };
+}
+
+/**
+ * Put a path or rule in the form rules are compared in: ~ expanded, forward
+ * slashes as rules are written, and lowercase where the filesystem ignores case,
+ * so C:\Users\me\.SSH falls under ~/.ssh.
+ */
+function toMatchForm(p: string, style: PathStyle): string {
+    const expanded = p === '~' || p.startsWith('~/') ? style.home + p.slice(1) : p;
+    const slashed = style.path.normalize(expanded).split(style.path.sep).join('/');
+    return style.caseInsensitive ? slashed.toLowerCase() : slashed;
+}
+
+/**
+ * Check if a path is within a directory (not just starts with the same prefix), both in match form.
  * e.g., '/tmp/pipali/file.txt' is within '/tmp/pipali', but '/tmp/pipali-fake' is not.
  */
 function isPathWithinDirectory(testPath: string, directory: string): boolean {
-    // Ensure directory path ends with separator for proper matching
-    const dirWithSep = directory.endsWith(path.sep) ? directory : directory + path.sep;
+    const dirWithSep = directory.endsWith('/') ? directory : directory + '/';
     return testPath === directory || testPath.startsWith(dirWithSep);
 }
 
@@ -233,22 +258,19 @@ function isPathWithinDirectory(testPath: string, directory: string): boolean {
  * @param absolutePath - The absolute path to check
  * @returns true if the path is allowed for writing
  */
-export function isPathWithinAllowedWrite(absolutePath: string): boolean {
-    // Normalize the path
-    const normalizedPath = path.normalize(absolutePath);
+export function isPathWithinAllowedWrite(absolutePath: string, style: PathStyle = hostPathStyle()): boolean {
+    const matchPath = toMatchForm(absolutePath, style);
 
     // Check if path is in denied write paths (these always require confirmation)
     for (const deniedPath of currentConfig.deniedWritePaths) {
-        const expandedDenied = expandPath(deniedPath);
-        if (isPathWithinDirectory(normalizedPath, expandedDenied)) {
+        if (isPathWithinDirectory(matchPath, toMatchForm(deniedPath, style))) {
             return false;
         }
     }
 
     // Check if path is within allowed write paths
     for (const allowedPath of currentConfig.allowedWritePaths) {
-        const expandedAllowed = expandPath(allowedPath);
-        if (isPathWithinDirectory(normalizedPath, expandedAllowed)) {
+        if (isPathWithinDirectory(matchPath, toMatchForm(allowedPath, style))) {
             return true;
         }
     }
@@ -263,13 +285,12 @@ export function isPathWithinAllowedWrite(absolutePath: string): boolean {
  * @param absolutePath - The absolute path to check
  * @returns true if the path requires confirmation for reading
  */
-export function isPathDeniedForRead(absolutePath: string): boolean {
-    // Normalize the path
-    const normalizedPath = path.normalize(absolutePath);
+export function isPathDeniedForRead(absolutePath: string, style: PathStyle = hostPathStyle()): boolean {
+    const matchPath = toMatchForm(absolutePath, style);
 
     // Carve-outs take precedence over the deny list, matching the sandbox profile
     for (const allowedPath of DEFAULT_ALLOWED_READ_PATHS) {
-        if (isPathWithinDirectory(normalizedPath, expandPath(allowedPath))) {
+        if (isPathWithinDirectory(matchPath, toMatchForm(allowedPath, style))) {
             return false;
         }
     }
@@ -277,41 +298,41 @@ export function isPathDeniedForRead(absolutePath: string): boolean {
     for (const deniedPath of currentConfig.deniedReadPaths) {
         // Handle **/ prefix - match directory anywhere in path
         if (deniedPath.startsWith('**/')) {
-            const dirName = deniedPath.slice(3); // Remove **/ prefix
+            const dirName = toMatchForm(deniedPath.slice(3), style); // Remove **/ prefix
             // Match /.dirname/ or /.dirname at end of path
             if (
-                normalizedPath.includes(`/${dirName}/`) ||
-                normalizedPath.endsWith(`/${dirName}`)
+                matchPath.includes(`/${dirName}/`) ||
+                matchPath.endsWith(`/${dirName}`)
             ) {
                 return true;
             }
             continue;
         }
 
-        // Handle ~ and / prefixed paths (absolute paths)
-        if (deniedPath.startsWith('/') || deniedPath.startsWith('~')) {
-            const expandedDenied = expandPath(deniedPath);
-            if (isPathWithinDirectory(normalizedPath, expandedDenied)) {
+        // Handle ~ and absolute paths, drive-letter ones included
+        if (style.path.isAbsolute(deniedPath) || deniedPath.startsWith('~')) {
+            if (isPathWithinDirectory(matchPath, toMatchForm(deniedPath, style))) {
                 return true;
             }
             continue;
         }
 
         // Handle filename patterns (no prefix - match basename)
-        const basename = path.basename(normalizedPath);
+        const fileName = toMatchForm(deniedPath, style);
+        const basename = path.posix.basename(matchPath);
 
         // Exact filename match
-        if (basename === deniedPath) {
+        if (basename === fileName) {
             return true;
         }
 
         // Special handling for .env - match .env.* variants but NOT .envrc
-        if (deniedPath === '.env' && basename.match(/^\.env(\.[a-zA-Z]+)?$/)) {
+        if (fileName === '.env' && basename.match(/^\.env(\.[a-zA-Z]+)?$/)) {
             return true;
         }
 
         // Check if it's a directory in the path (e.g., /project/.env/something)
-        if (normalizedPath.includes(`/${deniedPath}/`)) {
+        if (matchPath.includes(`/${fileName}/`)) {
             return true;
         }
     }

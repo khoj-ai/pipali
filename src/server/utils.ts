@@ -3,6 +3,9 @@ import os from 'os';
 
 const maxIterations = parseInt(process.env.PIPALI_RESEARCH_ITERATIONS || '1000', 10);
 
+// Linux is typically case-sensitive, macOS/Windows are case-insensitive.
+const isCaseInsensitiveFS = process.platform === 'darwin' || process.platform === 'win32';
+
 function getDefaultUser() {
     return {
         email: 'admin@localhost',
@@ -43,4 +46,4 @@ function expandPaths(paths: string[]): string[] {
     return paths.map(expandPath);
 }
 
-export { getDefaultUser, getMigrationsFolder, maxIterations, isFirstRunEasterEgg, expandPath, expandPaths };
+export { getDefaultUser, getMigrationsFolder, maxIterations, isFirstRunEasterEgg, isCaseInsensitiveFS, expandPath, expandPaths };

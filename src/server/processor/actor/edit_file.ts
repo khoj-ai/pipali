@@ -9,6 +9,7 @@ import {
 import { isPathWithinAllowedWrite } from '../../sandbox';
 import { isMemoryFile, memoryWriteError, stampProvenance } from '../../memory';
 import { createChildLogger } from '../../logger';
+import { isCaseInsensitiveFS } from '../../utils';
 
 const log = createChildLogger({ component: 'edit_file' });
 
@@ -21,9 +22,7 @@ interface ResolvedEditPath {
 
 function getEditQueueKey(filePath: string): string {
     const normalized = path.normalize(filePath);
-    return process.platform === 'darwin' || process.platform === 'win32'
-        ? normalized.toLowerCase()
-        : normalized;
+    return isCaseInsensitiveFS ? normalized.toLowerCase() : normalized;
 }
 
 async function runWithFileEditQueue<T>(filePath: string, operation: () => Promise<T>): Promise<T> {
