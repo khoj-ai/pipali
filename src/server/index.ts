@@ -20,6 +20,7 @@ import { loadEnabledMcpServers, startMcpRetrySweep, stopMcpRetrySweep, closeMcpC
 import { configureAuth, isAuthenticated, getPlatformUserInfo } from "./auth";
 import { createChildLogger } from './logger';
 import { initializeSandbox, shutdownSandbox } from './sandbox';
+import { announceSettingsToken } from './routes/settings-token';
 import { killAllBackgroundProcesses } from './events/background-processes';
 import { initPlatformTransport, shutdownPlatformTransport } from './telemetry/platform-transport';
 import { setServer } from './server-instance';
@@ -327,6 +328,7 @@ async function main() {
     setServer(server);
 
     log.info(`Server listening on http://${config.host}:${server.port}`);
+    announceSettingsToken();
 
     // Log auth status (authentication is now handled via the frontend login page)
     if (!config.anon && !alreadyAuthenticated) {

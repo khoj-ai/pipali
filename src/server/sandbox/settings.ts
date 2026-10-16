@@ -45,6 +45,35 @@ function toUserOnly(config: Partial<SandboxConfig>): Partial<SandboxConfig> {
 }
 
 /**
+ * The settings that applying this update would produce.
+ *
+ * Saving strips defaults and loading merges them back, so a list the update sets lands as
+ * the defaults plus whatever else it names, and a field it leaves out does not move.
+ */
+export function previewSandboxSettings(
+    current: SandboxConfig,
+    update: Partial<SandboxConfig>
+): SandboxConfig {
+    const defaults = getDefaultConfig();
+    return {
+        enabled: update.enabled ?? current.enabled,
+        allowedWritePaths: update.allowedWritePaths
+            ? mergeWithDefaults(update.allowedWritePaths, defaults.allowedWritePaths)
+            : current.allowedWritePaths,
+        deniedWritePaths: update.deniedWritePaths
+            ? mergeWithDefaults(update.deniedWritePaths, defaults.deniedWritePaths)
+            : current.deniedWritePaths,
+        deniedReadPaths: update.deniedReadPaths
+            ? mergeWithDefaults(update.deniedReadPaths, defaults.deniedReadPaths)
+            : current.deniedReadPaths,
+        allowedDomains: update.allowedDomains
+            ? mergeWithDefaults(update.allowedDomains, defaults.allowedDomains)
+            : current.allowedDomains,
+        allowLocalBinding: update.allowLocalBinding ?? current.allowLocalBinding,
+    };
+}
+
+/**
  * Load sandbox settings for a user from the database.
  * DB stores only user-added paths; this merges them with current defaults.
  * Returns default config if no settings exist.

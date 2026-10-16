@@ -233,7 +233,8 @@
             "mcp_tool_call": "确认调用工具",
             "read_sensitive_file": "确认访问敏感文件",
             "grep_sensitive_path": "确认搜索敏感路径",
-            "fetch_internal_url": "确认访问内部网络"
+            "fetch_internal_url": "确认访问内部网络",
+            "change_sandbox_settings": "确认权限更改"
         },
         "options": {
             "yes": "是",
@@ -358,6 +359,7 @@
         "protectedReadHint": "访问这些文件或文件夹始终需要确认。",
         "failedToLoadSandbox": "加载沙盒设置失败",
         "failedToToggleSandbox": "切换沙盒失败",
+        "sandboxChangedInDesktopApp": "沙盒权限只能在 Pipali 桌面应用中更改。",
         "failedToSavePermissions": "保存文件权限失败",
         "language": "语言",
         "languageHint": "你与 Pipali 交互时偏好使用的语言。",

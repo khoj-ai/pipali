@@ -233,7 +233,8 @@
             "mcp_tool_call": "Tool-Aufruf bestätigen",
             "read_sensitive_file": "Zugriff auf sensible Datei bestätigen",
             "grep_sensitive_path": "Suche in sensiblem Pfad bestätigen",
-            "fetch_internal_url": "Zugriff auf internes Netzwerk bestätigen"
+            "fetch_internal_url": "Zugriff auf internes Netzwerk bestätigen",
+            "change_sandbox_settings": "Berechtigungsänderung bestätigen"
         },
         "options": {
             "yes": "Ja",
@@ -358,6 +359,7 @@
         "protectedReadHint": "Für diese Dateien oder Ordner immer deine Bestätigung verlangen.",
         "failedToLoadSandbox": "Sandbox-Einstellungen konnten nicht geladen werden",
         "failedToToggleSandbox": "Sandbox konnte nicht umgeschaltet werden",
+        "sandboxChangedInDesktopApp": "Sandbox-Berechtigungen lassen sich nur in der Pipali-Desktop-App ändern.",
         "failedToSavePermissions": "Dateiberechtigungen konnten nicht gespeichert werden",
         "language": "Sprache",
         "languageHint": "Deine bevorzugte Sprache für die Interaktion mit Pipali.",

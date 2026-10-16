@@ -279,7 +279,8 @@
             "mcp_tool_call": "Confirm Tool Call",
             "read_sensitive_file": "Confirm Sensitive File Access",
             "grep_sensitive_path": "Confirm Sensitive Path Search",
-            "fetch_internal_url": "Confirm Internal Network Access"
+            "fetch_internal_url": "Confirm Internal Network Access",
+            "change_sandbox_settings": "Confirm Permission Change"
         },
         "options": {
             "yes": "Yes",
@@ -358,6 +359,7 @@
         "protectedReadHint": "Always require your confirmation to view these files or folders.",
         "failedToLoadSandbox": "Failed to load sandbox settings",
         "failedToToggleSandbox": "Failed to toggle sandbox",
+        "sandboxChangedInDesktopApp": "Sandbox permissions can only be changed in the Pipali desktop app.",
         "failedToSavePermissions": "Failed to save file permissions",
         "language": "Language",
         "languageHint": "Your preferred language to interact with Pipali.",

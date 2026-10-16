@@ -14,7 +14,7 @@ import type {
     ReasoningDeltaMessage,
     ToolCallProgressMessage,
 } from '../routes/ws/message-types';
-import type { ConfirmationPreferences } from '../processor/confirmation';
+import type { ConfirmationContext, ConfirmationPreferences } from '../processor/confirmation';
 import type { ATIFStep } from '../processor/conversation/atif/atif.types';
 import type { User } from '../db/schema';
 import { createChildLogger } from '../logger';
@@ -28,7 +28,14 @@ export interface RunHandle {
     runId: string;
     clientMessageId: string;
     conversationId: string;
+    startedAt: number;
     abortController: AbortController;
+    /**
+     * How this run asks the user something. Set once the run is executing, and reachable
+     * from outside the loop so work arriving by another road - Pipali calling our own
+     * API - can ask on the run that is making it.
+     */
+    confirmationContext?: ConfirmationContext;
     stopMode: 'none' | 'soft' | 'hard';
     stopReason?: StopReason;
     queuedMessages: QueuedMessage[];
@@ -45,6 +52,7 @@ export function createRunHandle(runId: string, clientMessageId: string, conversa
         runId,
         clientMessageId,
         conversationId,
+        startedAt: Date.now(),
         abortController: new AbortController(),
         stopMode: 'none',
         stopReason: undefined,
@@ -245,6 +253,23 @@ export function getOrCreateBus(conversationId: string): ConversationEventBus {
 
 export function getBus(conversationId: string): ConversationEventBus | undefined {
     return buses.get(conversationId);
+}
+
+/**
+ * The most recently started run that is in flight and able to ask the user something.
+ *
+ * Pipali reaching our API from a command it is running arrives with no handle on the run
+ * that sent it. In practice the run making the request is the one that started last, and
+ * whichever run is picked, the user sees what they are answering before it takes effect.
+ */
+export function newestActiveRun(): { bus: ConversationEventBus; run: RunHandle } | undefined {
+    let newest: { bus: ConversationEventBus; run: RunHandle } | undefined;
+    for (const bus of buses.values()) {
+        const run = bus.activeRun;
+        if (!run?.confirmationContext || run.abortController.signal.aborted) continue;
+        if (!newest || run.startedAt > newest.run.startedAt) newest = { bus, run };
+    }
+    return newest;
 }
 
 export function removeBus(conversationId: string): void {

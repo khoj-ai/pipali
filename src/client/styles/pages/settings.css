@@ -594,6 +594,11 @@
     transform: translateX(20px);
 }
 
+.toggle-switch input:disabled + .toggle-slider {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
 /* Path List Editor */
 .path-list-editor {
     display: flex;

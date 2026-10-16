@@ -6,6 +6,9 @@
  * quietly parsing a format nobody produces any more.
  */
 
+/** Carries the settings token on requests that change what the sandbox allows. */
+export const SETTINGS_TOKEN_HEADER = 'X-Pipali-Settings-Token';
+
 /** Pipali's persistent memory directory, relative to the user's home directory. */
 export const PIPALI_MEMORY_RELATIVE_DIR = '.pipali/memory';
 

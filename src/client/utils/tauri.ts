@@ -5,6 +5,7 @@
 
 import { getApiBaseUrl } from './api';
 import { fileUrlToPath } from './formatting';
+import { SETTINGS_TOKEN_HEADER } from '../../shared';
 
 /**
  * Check if the app is running inside the Tauri desktop app.
@@ -286,6 +287,22 @@ export async function getDroppedFileMetadata(paths: string[]): Promise<AttachedF
     } catch (err) {
         console.error('[getDroppedFileMetadata] Failed:', err);
         return [];
+    }
+}
+
+/**
+ * Headers that let a request change sandbox settings. Only the desktop app holds the
+ * settings token the server asks for; a browser gets none.
+ */
+export async function getSandboxSettingsHeaders(): Promise<Record<string, string>> {
+    if (!isTauri()) return {};
+    try {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const token = await invoke<string | null>('get_settings_token');
+        return token ? { [SETTINGS_TOKEN_HEADER]: token } : {};
+    } catch (err) {
+        console.warn('[getSandboxSettingsHeaders] Failed:', err);
+        return {};
     }
 }
 

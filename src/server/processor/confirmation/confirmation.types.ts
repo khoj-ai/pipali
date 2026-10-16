@@ -69,6 +69,12 @@ export interface ConfirmationRequest {
     title: string;
     /** Detailed message explaining what will happen */
     message?: string;
+    /**
+     * The one line that says which request this is, where the whole message does not fit.
+     * A push notification can be answered from a lock screen, so it carries this instead
+     * of a title every request of its kind shares.
+     */
+    summary?: string;
     /** The operation being confirmed (for logging/tracking) */
     operation: string;
     /** Additional context about the operation */

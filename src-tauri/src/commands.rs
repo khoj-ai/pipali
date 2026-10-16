@@ -43,6 +43,12 @@ pub fn get_sidecar_config(state: State<'_, SidecarState>) -> SidecarConfig {
     }
 }
 
+/// The server's settings token, which the settings page presents to change what the sandbox allows
+#[tauri::command]
+pub fn get_settings_token(state: State<'_, SidecarState>) -> Option<String> {
+    state.settings_token.lock().unwrap().clone()
+}
+
 /// Restart the sidecar (exposed to frontend)
 #[tauri::command]
 pub async fn restart_sidecar(app: AppHandle) -> Result<(), String> {

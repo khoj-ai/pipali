@@ -233,7 +233,8 @@
             "mcp_tool_call": "Confirmer l'appel d'outil",
             "read_sensitive_file": "Confirmer l'acc\u00e8s au fichier sensible",
             "grep_sensitive_path": "Confirmer la recherche dans un chemin sensible",
-            "fetch_internal_url": "Confirmer l'acc\u00e8s au r\u00e9seau interne"
+            "fetch_internal_url": "Confirmer l'acc\u00e8s au r\u00e9seau interne",
+            "change_sandbox_settings": "Confirmer le changement d'autorisation"
         },
         "options": {
             "yes": "Oui",
@@ -367,6 +368,7 @@
         "protectedReadPlaceholder": "ex. Documents/mots-de-passe.docx",
         "failedToLoadSandbox": "Échec du chargement des paramètres du bac à sable",
         "failedToToggleSandbox": "Échec de l'activation/désactivation du bac à sable",
+        "sandboxChangedInDesktopApp": "Les autorisations du bac à sable ne peuvent être modifiées que dans l'application de bureau Pipali.",
         "failedToSavePermissions": "Échec de l'enregistrement des permissions de fichiers"
     },
     "skills": {

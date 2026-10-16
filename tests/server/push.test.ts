@@ -5,6 +5,7 @@ import type {
     ConfirmationRequest,
     ConfirmationResponse,
 } from '../../src/server/processor/confirmation/confirmation.types';
+import { createPermissionChangeConfirmation } from '../../src/server/processor/confirmation';
 import { clearAllBuses, createRunHandle, getOrCreateBus } from '../../src/server/events/conversation-event-bus';
 
 /**
@@ -249,6 +250,13 @@ describe('what a confirmation says it is about', () => {
         }));
 
         expect(body).toBe('Confirm File Edit: /repo/src/index.ts');
+    });
+
+    /** Answerable from a lock screen, so it has to name the permission it would grant. */
+    test('a permission change carries what it would change', async () => {
+        const body = await bodyFor(createPermissionChangeConfirmation(['Let commands reach: api.example.com']));
+
+        expect(body).toBe('Confirm Permission Change: Let commands reach: api.example.com');
     });
 
     /**

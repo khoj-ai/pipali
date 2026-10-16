@@ -9,6 +9,7 @@ import { Automation, Conversation } from '../db/schema';
 import { asc, eq, desc, and, sql } from 'drizzle-orm';
 import { AiModelApi, ChatModel, User, UserChatModel } from '../db/schema';
 import { isAllowedOrigin } from './origin-guard';
+import { hasSettingsToken } from './settings-token';
 import openapi from './openapi';
 import automations from './automations';
 import mcp from './mcp';
@@ -39,6 +40,8 @@ import {
     isSandboxEnabled,
     isSandboxSupported,
 } from '../sandbox';
+import { confirmSandboxChange } from '../sandbox/permission-change';
+import { SETTINGS_TOKEN_HEADER } from '../../shared';
 
 const log = createChildLogger({ component: 'api' });
 
@@ -52,7 +55,7 @@ api.use('*', cors({
         return isAllowedOrigin(origin, c.req.header('Host')) ? origin : null;
     },
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', SETTINGS_TOKEN_HEADER],
     credentials: true,
 }));
 
@@ -968,9 +971,27 @@ const sandboxSettingsSchema = z.object({
     allowLocalBinding: z.boolean().optional(),
 });
 
+/** What a change the user did not approve answers with. */
+const UNAPPLIED_CHANGE_STATUS = {
+    declined: 403,
+    unanswered: 408,
+    unreachable: 409,
+} as const;
+
 api.put('/user/sandbox', zValidator('json', sandboxSettingsSchema), async (c) => {
     try {
         const body = c.req.valid('json');
+
+        // With the settings token, the user is changing their own permissions in the desktop
+        // app. Without it the request is Pipali asking, and the user decides before it applies.
+        if (!hasSettingsToken(c.req.raw)) {
+            const decision = await confirmSandboxChange(body, { signal: c.req.raw.signal });
+            if (decision.verdict !== 'approved') {
+                log.info(`Sandbox settings unchanged: ${decision.verdict}`);
+                return c.json({ error: decision.error }, UNAPPLIED_CHANGE_STATUS[decision.verdict]);
+            }
+        }
+
         await updateSandboxConfig(body);
         log.info('Sandbox settings updated');
         return c.json({ success: true });

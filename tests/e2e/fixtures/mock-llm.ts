@@ -992,6 +992,40 @@ export function memoryRecallUserScenario(): MockScenario {
 }
 
 /**
+ * Pipali changing its own sandbox permissions the way it can in the real app: a shell
+ * command against its own API.
+ *
+ * The body pins `enabled` to what the test server runs with, so approving the change
+ * cannot switch the sandbox on under the specs that follow.
+ */
+export function sandboxPermissionScenario(): MockScenario {
+    const domain = 'e2e-approved.example.com';
+    const body = JSON.stringify({ allowedDomains: [domain], enabled: false });
+    return {
+        name: 'sandbox-permission',
+        queryPattern: '^allow e2e-approved through the sandbox$',
+        iterations: [
+            {
+                thought: 'I will add the domain to my sandbox allowlist through my own API.',
+                toolCalls: [
+                    {
+                        function_name: 'shell_command',
+                        arguments: {
+                            justification: 'User asked to allow a domain out of the sandbox',
+                            command: `curl -s -o /dev/null -w '%{http_code}' -X PUT "http://127.0.0.1:$PIPALI_PORT/api/user/sandbox" -H 'Content-Type: application/json' -d '${body}'`,
+                            cwd: '.',
+                            operation_type: 'read-write',
+                        },
+                        tool_call_id: 'tc-sandbox-permission',
+                    },
+                ],
+            },
+        ],
+        finalResponse: `Took your answer on allowing ${domain}.`,
+    };
+}
+
+/**
  * Default scenarios used in tests
  */
 export const defaultMockScenarios: MockScenario[] = [
@@ -1024,6 +1058,7 @@ export const defaultMockScenarios: MockScenario[] = [
     backgroundUpdateMidRunScenario(),
     backgroundUpdateDuringFinalResponseScenario(),
     delegateAndStopScenario(),
+    sandboxPermissionScenario(),
     memoryRecallUserScenario(),
     // Last, so selector queries match here before the user-message scenario,
     // whose pattern also appears inside the selector query

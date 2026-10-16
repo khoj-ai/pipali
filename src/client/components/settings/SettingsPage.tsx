@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Save, Loader2, Check, AlertCircle, Shield, User, FolderLock, Headphones } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { apiFetch } from '../../utils/api';
+import { getSandboxSettingsHeaders, isTauri } from '../../utils/tauri';
 import { SUPPORTED_LANGUAGES } from '../../i18n';
 import { PathListEditor } from './PathListEditor';
 import { MemorySettingsSection } from './MemorySettingsSection';
@@ -73,6 +74,8 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
     const [sandboxConfig, setSandboxConfig] = useState<SandboxConfig | null>(null);
     const [defaultPaths, setDefaultPaths] = useState<DefaultPaths | null>(null);
     const [sandboxError, setSandboxError] = useState<string | null>(null);
+    // Only the desktop app holds the settings token the server asks for to change the sandbox
+    const canChangeSandbox = isTauri();
 
     // Track if form has unsaved changes
     const [originalValues, setOriginalValues] = useState<UserContext>({});
@@ -169,7 +172,7 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
         try {
             const res = await apiFetch('/api/user/sandbox', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getSandboxSettingsHeaders()) },
                 body: JSON.stringify({ enabled }),
             });
             if (res.ok) {
@@ -196,7 +199,7 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
         try {
             const res = await apiFetch('/api/user/sandbox', {
                 method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
+                headers: { 'Content-Type': 'application/json', ...(await getSandboxSettingsHeaders()) },
                 body: JSON.stringify({
                     allowedWritePaths: updated.allowedWritePaths,
                     deniedReadPaths: updated.deniedReadPaths,
@@ -434,12 +437,21 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                                             id="sandbox-enabled"
                                             type="checkbox"
                                             checked={sandboxConfig.enabled}
+                                            disabled={!canChangeSandbox}
                                             onChange={(e) => handleToggleSandbox(e.target.checked)}
                                         />
                                         <span className="toggle-slider"></span>
                                     </label>
                                 )}
                             </div>
+                            {!canChangeSandbox && (
+                                <div className="settings-section-body">
+                                    <p className="settings-notice">
+                                        <AlertCircle size={14} />
+                                        <span>{t('settings.sandboxChangedInDesktopApp')}</span>
+                                    </p>
+                                </div>
+                            )}
                         </div>}
 
                         {/* File permissions */}
@@ -463,6 +475,7 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                                         paths={getUserPaths(sandboxConfig.allowedWritePaths, defaultPaths?.allowedWritePaths ?? [])}
                                         onChange={(paths) => savePaths({ allowedWritePaths: mergeWithDefaults(paths, defaultPaths?.allowedWritePaths ?? []) })}
                                         placeholder={t('settings.allowedWritePlaceholder')}
+                                        disabled={!canChangeSandbox}
                                     />
                                 </div>
 
@@ -476,6 +489,7 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                                         onChange={(paths) => savePaths({ deniedReadPaths: mergeWithDefaults(paths, defaultPaths?.deniedReadPaths ?? []) })}
                                         placeholder={t('settings.protectedReadPlaceholder')}
                                         mode="any"
+                                        disabled={!canChangeSandbox}
                                     />
                                 </div>
 

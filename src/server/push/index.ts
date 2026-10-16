@@ -170,8 +170,8 @@ function confirmationSummary(request: ConfirmationRequest): string {
     const command = request.context?.commandInfo?.command;
     if (command) return command;
 
-    const file = request.diff?.filePath ?? request.context?.affectedFiles?.[0];
-    return file ? `${request.title}: ${file}` : request.title;
+    const subject = request.summary ?? request.diff?.filePath ?? request.context?.affectedFiles?.[0];
+    return subject ? `${request.title}: ${subject}` : request.title;
 }
 
 /**
