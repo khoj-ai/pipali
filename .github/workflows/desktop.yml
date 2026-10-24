@@ -339,6 +339,10 @@ jobs:
       - name: ⤵️ Install Tauri Frontend Dependencies
         run: cd src-tauri-frontend && bun install
 
+      - name: ⤵️ Install Azure Artifact Signing CLI
+        if: github.event_name != 'pull_request' && !inputs.debug_build
+        run: cargo install artifact-signing-cli --version 0.12.0 --locked
+
       - name: 🔨 Build Desktop App (Windows) (PR)
         if: github.event_name == 'pull_request'
         run: bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }} -- --no-updater-artifacts
@@ -348,29 +352,19 @@ jobs:
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          # Tauri signs the app, its sidecars, srt-win.exe and the installer with Azure Artifact
+          # Signing before it signs the installer for the updater. "Pipali" is the program name
+          # Windows shows in a UAC prompt from any of them.
+          PIPALI_WINDOWS_SIGN_COMMAND: ${{ !inputs.debug_build && format('artifact-signing-cli -e https://eus.codesigning.azure.net/ -a {0} -c {1} -d Pipali %1', vars.AZURE_SIGNING_ACCOUNT, vars.AZURE_CERTIFICATE_PROFILE) || '' }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
         shell: pwsh
         run: |
           # Remove newlines from secrets (GitHub may add newlines)
           $env:TAURI_SIGNING_PRIVATE_KEY = ($env:TAURI_SIGNING_PRIVATE_KEY) -replace "`r|`n", ""
           $env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD = ($env:TAURI_SIGNING_PRIVATE_KEY_PASSWORD) -replace "`r|`n", ""
           bun run ${{ inputs.debug_build && 'tauri:build:debug' || 'tauri:build' }}
-
-      - name: ⚡ Sign Windows Installers with Azure Artifact Signing
-        if: github.event_name != 'pull_request' && !inputs.debug_build
-        uses: azure/artifact-signing-action@v1
-        with:
-          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
-          endpoint: https://eus.codesigning.azure.net/
-          signing-account-name: ${{ vars.AZURE_SIGNING_ACCOUNT }}
-          certificate-profile-name: ${{ vars.AZURE_CERTIFICATE_PROFILE }}
-          files-folder: ${{ github.workspace }}\src-tauri\target\release\bundle
-          files-folder-filter: exe,msi
-          files-folder-recurse: true
-          file-digest: SHA256
-          timestamp-rfc3161: http://timestamp.acs.microsoft.com
-          timestamp-digest: SHA256
 
       - name: 📁 List Build Artifacts
         shell: bash

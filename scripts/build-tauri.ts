@@ -20,6 +20,9 @@
  *   - linux-x64 (Linux x64)
  *   - linux-arm64 (Linux ARM64)
  *   - windows-x64 (Windows x64)
+ *
+ * Environment:
+ *   PIPALI_WINDOWS_SIGN_COMMAND - command Tauri signs each Windows binary with, %1 being the file
  */
 
 import path from "path";
@@ -982,8 +985,19 @@ async function buildTauri(debug: boolean, platform: Platform, disableUpdaterArti
     if (debug) {
         args.push("--debug");
     }
+    const bundleConfig: Record<string, unknown> = {};
     if (disableUpdaterArtifacts) {
-        args.push("--config", JSON.stringify({ bundle: { createUpdaterArtifacts: false } }));
+        bundleConfig.createUpdaterArtifacts = false;
+    }
+    // Tauri signs the app, its sidecars, executables among its resources (srt-win.exe, which
+    // raises the sandbox setup's UAC prompt) and the installer, before signing the installer
+    // for the updater. Signing after the build would leave that updater signature stale.
+    const windowsSignCommand = process.env.PIPALI_WINDOWS_SIGN_COMMAND;
+    if (platform.startsWith("windows") && windowsSignCommand) {
+        bundleConfig.windows = { signCommand: windowsSignCommand };
+    }
+    if (Object.keys(bundleConfig).length > 0) {
+        args.push("--config", JSON.stringify({ bundle: bundleConfig }));
     }
 
     const proc = Bun.spawn(["bunx", ...args], {
