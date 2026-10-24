@@ -1,9 +1,8 @@
 /**
- * Integration test for the shell-quote \! escaping fix in wrapCommandWithSandbox.
+ * Integration test for how wrapCommandWithSandbox quotes a command.
  *
- * shell-quote escapes ! to \! when falling back to double-quote wrapping (triggered
- * by single quotes in heredocs). Non-interactive bash doesn't consume \!, so the
- * backslash leaks into scripts causing SyntaxErrors (e.g. Python's != becomes \!=).
+ * The wrapped command reaches a non-interactive bash, which keeps a backslash
+ * before ! inside double quotes, so every ! must arrive as written.
  *
  * Requires: SANDBOX_INTEGRATION_TESTS=true, run outside any existing sandbox.
  */
@@ -34,8 +33,7 @@ describe('Sandbox command quoting', () => {
     testFn('Python heredoc with != runs correctly through wrapCommandWithSandbox', async () => {
         await initializeSandboxWithConfig(config);
 
-        // This command triggers shell-quote's double-quote fallback (due to <<'PY')
-        // which would escape ! to \!, breaking Python's != without proper escaping
+        // Single quotes beside a ! are the shape that once got it escaped to \!
         const cmd = `python3 - <<'PY'
 data = {'key': 'value'}
 for k, v in data.items():

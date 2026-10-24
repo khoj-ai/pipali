@@ -221,6 +221,9 @@ export async function shellCommand(
         }
     }
 
+    // Files this run's sandbox violations, so a rerun is not told of an earlier run's
+    const commandId = crypto.randomUUID();
+
     try {
         // Determine shell command based on platform and sandbox mode
         let shellCmd: string[];
@@ -231,7 +234,7 @@ export async function shellCommand(
             log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
         } else if (useSandbox) {
             // Unix with sandbox: wrap the command
-            const sandboxedCommand = await wrapCommandWithSandbox(command);
+            const sandboxedCommand = await wrapCommandWithSandbox(command, commandId);
             shellCmd = ['/bin/bash', '-c', sandboxedCommand];
             log.debug(`Executing (sandboxed): ${command} in ${workingDir}`);
         } else {
@@ -275,24 +278,17 @@ export async function shellCommand(
                 .trim();
         }
 
-        const originalStderr = stderr;
-
-        // Annotate stderr with sandbox violation information if running in sandbox mode
-        // This uses sandbox-runtime's built-in violation detection (reads macOS sandbox logs)
-        if (useSandbox && stderr) {
-            stderr = annotateStderrWithSandboxFailures(command, stderr);
-        }
-
-        // Detect sandbox violations:
-        // 1. Check if annotateStderrWithSandboxFailures added violation info (most reliable on macOS)
-        // 2. Fall back to pattern matching for common sandbox error messages
-        const annotationAdded = stderr !== originalStderr;
-        const hasViolationPatterns = exitCode !== 0 && (
-            originalStderr.includes('Operation not permitted') ||
-            originalStderr.includes('EPERM') ||
-            originalStderr.includes('Permission denied')
+        // A refused file operation reads the same with or without the runtime's annotation
+        const isSandboxViolation = useSandbox && exitCode !== 0 && (
+            stderr.includes('Operation not permitted') ||
+            stderr.includes('EPERM') ||
+            stderr.includes('Permission denied')
         );
-        const isSandboxViolation = useSandbox && (annotationAdded || hasViolationPatterns);
+
+        // Add what the sandbox runtime recorded refusing, such as a domain off the allowlist
+        if (useSandbox && stderr) {
+            stderr = annotateStderrWithSandboxFailures(commandId, stderr);
+        }
 
         // Build output message
         let output = '';

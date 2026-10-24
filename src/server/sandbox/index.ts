@@ -56,7 +56,7 @@ export async function initializeSandbox(): Promise<void> {
         currentConfig = await ensureSandboxSettings(DEFAULT_USER_ID);
 
         // Check if sandboxing is supported on this platform
-        const supported = SandboxManager.isSupportedPlatform();
+        const supported = isSandboxSupported();
 
         if (!supported) {
             log.info(`Sandbox not supported on ${process.platform}, will use confirmation-based security`);
@@ -146,7 +146,7 @@ export async function reloadSandboxConfig(): Promise<void> {
         return;
     }
 
-    if (!SandboxManager.isSupportedPlatform()) {
+    if (!isSandboxSupported()) {
         return;
     }
 
@@ -165,9 +165,11 @@ export function isSandboxEnabled(): boolean {
 
 /**
  * Check if sandboxing is supported on this platform.
+ * Windows stays on confirmations: sandbox-runtime supports it, but commands here are not
+ * yet wrapped the way it needs.
  */
 export function isSandboxSupported(): boolean {
-    return SandboxManager.isSupportedPlatform();
+    return SandboxManager.isSupportedPlatform() && process.platform !== 'win32';
 }
 
 /**
@@ -182,9 +184,10 @@ export function isSandboxActive(): boolean {
  * Returns the sandboxed command string to execute.
  *
  * @param command - The command to wrap
+ * @param commandId - Files the run's violations for annotateStderrWithSandboxFailures
  * @returns The sandboxed command string
  */
-export async function wrapCommandWithSandbox(command: string): Promise<string> {
+export async function wrapCommandWithSandbox(command: string, commandId?: string): Promise<string> {
     if (!isSandboxActive()) {
         // Return original command if sandbox not active
         return command;
@@ -197,19 +200,13 @@ export async function wrapCommandWithSandbox(command: string): Promise<string> {
         const sandboxedCommand = await SandboxManager.wrapWithSandbox(
             command,
             '/bin/bash',
-            runtimeConfig
+            runtimeConfig,
+            undefined,
+            { commandId },
         );
 
         log.debug({ command: command.substring(0, 100) }, 'Command wrapped with sandbox');
-
-        // Fix shell-quote over-escaping: when the command contains single quotes,
-        // shell-quote falls back to double-quote wrapping and escapes ! to \!
-        // (for interactive bash history expansion). But sandbox-exec runs bash -c
-        // non-interactively, so history expansion is disabled and the backslash
-        // leaks through as a literal character, breaking scripts (e.g. Python's !=).
-        // This is safe: ! is the only char where shell-quote's escaping diverges
-        // from non-interactive bash behavior (\$ and \` are correctly consumed).
-        return sandboxedCommand.replace(/\\!/g, '!');
+        return sandboxedCommand;
     } catch (error) {
         log.error({ err: error }, 'Failed to wrap command with sandbox');
         // Return original command on error
@@ -357,20 +354,19 @@ export async function updateSandboxConfig(config: Partial<SandboxConfig>): Promi
 }
 
 /**
- * Annotate stderr with sandbox failure information.
- * Uses the sandbox-runtime's built-in violation detection on macOS.
+ * Annotate stderr with the violations the sandbox runtime recorded for a run.
  *
- * @param command - The command that was executed
+ * @param commandId - The id the run's command was wrapped with
  * @param stderr - The stderr output from the command
  * @returns The annotated stderr with sandbox failure information
  */
-export function annotateStderrWithSandboxFailures(command: string, stderr: string): string {
+export function annotateStderrWithSandboxFailures(commandId: string, stderr: string): string {
     if (!isSandboxActive()) {
         return stderr;
     }
 
     try {
-        return SandboxManager.annotateStderrWithSandboxFailures(command, stderr);
+        return SandboxManager.annotateStderrWithSandboxFailures(commandId, stderr);
     } catch (error) {
         log.error({ err: error }, 'Failed to annotate stderr with sandbox failures');
         return stderr;
