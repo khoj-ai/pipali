@@ -8,6 +8,7 @@ import {
     isSandboxActive,
     prepareSandboxedCommand,
     annotateStderrWithSandboxFailures,
+    SANDBOX_TEMP_DIR,
     type SandboxedCommand,
 } from '../../sandbox';
 import { createChildLogger } from '../../logger';
@@ -21,6 +22,11 @@ import type { User } from '../../db/schema';
 
 const log = createChildLogger({ component: 'shell' });
 
+/** How stderr reads when the OS refuses a file operation. */
+const ACCESS_DENIED_MARKERS = process.platform === 'win32'
+    ? ['Access is denied', 'Access to the path', 'EPERM', 'EACCES', 'Permission denied']
+    : ['Operation not permitted', 'EPERM', 'Permission denied'];
+
 /**
  * Operation type indicating whether command modifies state
  * - read-only: No side effects (e.g., ls, cat, grep)
@@ -31,7 +37,7 @@ export type ShellOperationType = 'read-only' | 'write-only' | 'read-write';
 
 /**
  * Execution mode for shell commands
- * - sandbox: Run in OS-enforced sandbox (macOS/Linux only), skips user confirmation
+ * - sandbox: Run in OS-enforced sandbox, skips user confirmation
  * - direct: Run directly without sandbox, requires user confirmation
  */
 export type ShellExecutionMode = 'sandbox' | 'direct';
@@ -194,7 +200,7 @@ export async function shellCommand(
     let sandboxed: SandboxedCommand | undefined;
     if (useSandbox) {
         try {
-            sandboxed = await prepareSandboxedCommand(command, commandId);
+            sandboxed = await prepareSandboxedCommand(command, commandId, workingDir);
         } catch (error) {
             log.warn({ err: error }, 'Could not sandbox the command, asking to run it directly instead');
             useSandbox = false;
@@ -284,11 +290,8 @@ export async function shellCommand(
         }
 
         // A refused file operation reads the same with or without the runtime's annotation
-        const isSandboxViolation = useSandbox && exitCode !== 0 && (
-            stderr.includes('Operation not permitted') ||
-            stderr.includes('EPERM') ||
-            stderr.includes('Permission denied')
-        );
+        const isSandboxViolation = useSandbox && exitCode !== 0 &&
+            ACCESS_DENIED_MARKERS.some(marker => stderr.includes(marker));
 
         // Add what the sandbox runtime recorded refusing, such as a domain off the allowlist
         if (useSandbox && stderr) {
@@ -319,7 +322,7 @@ export async function shellCommand(
         // Add sandbox violation notice if detected
         if (isSandboxViolation) {
             output += `\n\n[Sandbox violation: The command attempted an operation outside the allowed sandbox paths. ` +
-                `Write operations are only allowed in /tmp/pipali and ~/.pipali. ` +
+                `Write operations are only allowed in ${SANDBOX_TEMP_DIR} and ~/.pipali. ` +
                 `Use execution_mode: "direct" if you need full filesystem access (requires user confirmation).]`;
             log.error(`Sandbox violation detected for command: ${command}`);
         }

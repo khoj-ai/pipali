@@ -4,25 +4,33 @@
  * Uses @anthropic-ai/sandbox-runtime to provide OS-enforced sandboxing:
  * - macOS: Apple Seatbelt (sandbox-exec)
  * - Linux: bubblewrap (bwrap)
- * - Windows: Not supported (falls back to confirmation-based security)
+ * - Windows: a dedicated sandbox account behind a network filter (srt-win), set up once
  *
  * This module provides:
  * 1. Sandboxed shell command execution (skips confirmation when sandboxed)
  * 2. Path validation for file operations (skip confirmation for allowed paths)
  */
 
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
+import {
+    SandboxManager,
+    parseWindowsBinShell,
+    type FilesystemPathEntry,
+    type SandboxRuntimeConfig,
+} from '@anthropic-ai/sandbox-runtime';
 import { createChildLogger } from '../logger';
 
 import {
     type SandboxConfig,
     DEFAULT_ALLOWED_READ_PATHS,
     getDefaultConfig,
+    getSandboxTempDir,
     buildRuntimeConfig,
 } from './config';
-import { isCaseInsensitiveFS } from '../utils';
+import { getBundledRuntimes } from '../bundled-runtimes';
+import { expandPath, isCaseInsensitiveFS } from '../utils';
 import { loadSandboxSettings, saveSandboxSettings, ensureSandboxSettings } from './settings';
 
 const log = createChildLogger({ component: 'sandbox' });
@@ -37,6 +45,9 @@ let runtimeReady = false;
 // stale policy in force or tear down a runtime another just started
 let runtimeQueue: Promise<void> = Promise.resolve();
 
+// What the running Windows session applied, to tell which changes it can take live
+let windowsSession: { runtimeConfig: SandboxRuntimeConfig; filesystemKey: string; denies: string } | undefined;
+
 // Default user ID (we're single-user for now)
 const DEFAULT_USER_ID = 1;
 
@@ -48,10 +59,15 @@ async function startRuntime(): Promise<void> {
     runtimeReady = false;
     try {
         // Set CLAUDE_TMPDIR so sandbox-runtime uses /tmp/pipali instead of /tmp/claude
-        // This must be set before SandboxManager.initialize() as it reads from process.env
-        process.env.CLAUDE_TMPDIR = '/tmp/pipali';
+        // This must be set before SandboxManager.initialize() as it reads from process.env.
+        // Windows children get no TMPDIR.
+        if (process.platform !== 'win32') {
+            process.env.CLAUDE_TMPDIR = SANDBOX_TEMP_DIR;
+        }
 
-        const runtimeConfig = buildRuntimeConfig(currentConfig);
+        const runtimeConfig = process.platform === 'win32'
+            ? prepareWindowsSession(currentConfig)
+            : buildRuntimeConfig(currentConfig);
         await SandboxManager.initialize(runtimeConfig);
 
         const { warnings } = await SandboxManager.checkDependenciesAsync();
@@ -77,9 +93,13 @@ function queueRuntime(task: () => Promise<void>): Promise<void> {
     return run;
 }
 
-/** Restart the runtime on the current config. */
-function restartRuntime(): Promise<void> {
+/**
+ * Restart the runtime on the current config. With `skipIf`, a restart that is no longer
+ * needed by the time its turn comes is skipped.
+ */
+function restartRuntime(skipIf?: () => boolean): Promise<void> {
     return queueRuntime(async () => {
+        if (skipIf?.()) return;
         runtimeReady = false;
         await SandboxManager.reset();
         await startRuntime();
@@ -174,7 +194,18 @@ export async function reloadSandboxConfig(): Promise<void> {
 
     // Update the sandbox manager with new config
     const runtimeConfig = buildRuntimeConfig(currentConfig);
-    SandboxManager.updateConfig(runtimeConfig);
+    if (process.platform === 'win32') {
+        // Windows applies file access and the loopback mode only as its runtime starts; the
+        // domain list swaps live
+        if (JSON.stringify(runtimeConfig.filesystem) !== windowsSession?.filesystemKey
+            || runtimeConfig.network.allowLocalBinding !== windowsSession.runtimeConfig.network.allowLocalBinding) {
+            await restartRuntime();
+            return;
+        }
+        SandboxManager.updateConfig({ ...windowsSession.runtimeConfig, network: runtimeConfig.network });
+    } else {
+        SandboxManager.updateConfig(runtimeConfig);
+    }
     log.info('Sandbox configuration reloaded');
 }
 
@@ -187,11 +218,9 @@ export function isSandboxEnabled(): boolean {
 
 /**
  * Check if sandboxing is supported on this platform.
- * Windows stays on confirmations: sandbox-runtime supports it, but commands here are not
- * yet wrapped the way it needs.
  */
 export function isSandboxSupported(): boolean {
-    return SandboxManager.isSupportedPlatform() && process.platform !== 'win32';
+    return SandboxManager.isSupportedPlatform();
 }
 
 /**
@@ -229,15 +258,134 @@ export interface SandboxedCommand {
 }
 
 /**
- * The argv and environment that run a command inside the sandbox.
+ * The argv and environment that run a command inside the sandbox, from a working directory.
  * Throws rather than hand back anything that would run outside it.
  */
-export async function prepareSandboxedCommand(command: string, commandId: string): Promise<SandboxedCommand> {
+export async function prepareSandboxedCommand(
+    command: string,
+    commandId: string,
+    cwd: string,
+): Promise<SandboxedCommand> {
+    if (process.platform === 'win32') {
+        return prepareWindowsCommand(command, commandId, cwd);
+    }
     return {
         cmd: ['/bin/bash', '-c', await wrapCommandWithSandbox(command, commandId)],
         // Redirect tool caches to paths the sandbox lets them write
         env: { ...process.env, ...getSandboxEnvOverrides() },
     };
+}
+
+/**
+ * Windows runs the command as its sandbox account through srt-win, which only spawns from
+ * an argv. PowerShell flags match the shell tool's direct mode.
+ */
+async function prepareWindowsCommand(command: string, commandId: string, cwd: string): Promise<SandboxedCommand> {
+    const deniesChanged = () => windowsSession?.denies !== windowsDenyState(buildRuntimeConfig(currentConfig));
+    if (isSandboxActive() && deniesChanged()) {
+        log.info('A protected path appeared or was replaced, restarting the sandbox to cover it');
+        await restartRuntime(() => !deniesChanged());
+    }
+    if (!isSandboxActive()) {
+        throw new Error('The sandbox is not running');
+    }
+
+    const { argv, env } = await SandboxManager.wrapWithSandboxArgv(
+        `${await windowsPreamble()}; ${command}`,
+        { ...parseWindowsBinShell('powershell'), args: ['-NoProfile', '-NonInteractive', '-Command'] },
+        undefined,
+        undefined,
+        cwd,
+        { commandId, commandText: command },
+    );
+    log.debug({ command: command.substring(0, 100) }, 'Command wrapped with sandbox');
+    return { cmd: argv, env };
+}
+
+/**
+ * PowerShell run ahead of each command. The sandbox account brings its own profile, so ~
+ * and the home variables point back at the user's, as on macOS and Linux, with bun's cache
+ * kept where the sandbox can write. The shell inherits Pipali's PATH, which lacks the
+ * bundled runtimes, so they go first on it.
+ */
+async function windowsPreamble(): Promise<string> {
+    const home = toPowerShellLiteral(os.homedir());
+    const statements = [
+        `$env:USERPROFILE = ${home}`,
+        `$env:HOME = ${home}`,
+        `try { (Get-PSProvider FileSystem).Home = ${home} } catch {}`,
+        `Set-Variable HOME ${home} -Scope Global -Force -ErrorAction Ignore`,
+        `$env:BUN_INSTALL_CACHE_DIR = ${toPowerShellLiteral(path.join(SANDBOX_TEMP_DIR, 'bun-cache'))}`,
+    ];
+    const runtimes = await getBundledRuntimes();
+    if (runtimes.isBundled) {
+        statements.push(`$env:Path = ${toPowerShellLiteral(`${path.dirname(runtimes.bun)};`)} + $env:Path`);
+    }
+    return statements.join('; ');
+}
+
+/** A PowerShell single-quoted string, doubling each character PowerShell reads as a single quote. */
+function toPowerShellLiteral(value: string): string {
+    return `'${value.replace(/['\u2018\u2019\u201A\u201B]/g, '$&$&')}'`;
+}
+
+function entryPath(entry: FilesystemPathEntry): string {
+    return typeof entry === 'string' ? entry : entry.path;
+}
+
+function isGlob(p: string): boolean {
+    return p.includes('*') || p.includes('?');
+}
+
+/**
+ * Those of these paths that exist, and any patterns, which the runtime expands to what
+ * exists. Told to deny a missing path, Windows creates an empty file in its place, which
+ * would break the tool that later makes a folder there.
+ */
+function existingPaths(entries: FilesystemPathEntry[]): string[] {
+    return entries.map(entryPath).filter(p => isGlob(p) || fs.existsSync(p));
+}
+
+/**
+ * Which protected paths exist, and which file each one is. A deny lives on the file
+ * itself, so a path made since the session started, or a file written anew under the
+ * same name, stays readable until the runtime restarts.
+ */
+function windowsDenyState({ filesystem }: SandboxRuntimeConfig): string {
+    const paths = [...filesystem.denyRead, ...filesystem.denyWrite].map(entryPath).filter(p => !isGlob(p));
+    return JSON.stringify(paths.map(p => {
+        try {
+            const { dev, ino } = fs.statSync(p, { bigint: true });
+            return [p, `${dev}:${ino}`];
+        } catch {
+            return [p, null];
+        }
+    }));
+}
+
+/**
+ * Ready a Windows session for the config, returning the runtime config to start it with.
+ * Grants on missing folders are dropped, so Pipali's own write folders are made first.
+ */
+function prepareWindowsSession(config: SandboxConfig): SandboxRuntimeConfig {
+    for (const dir of [SANDBOX_TEMP_DIR, expandPath('~/.pipali')]) {
+        fs.mkdirSync(dir, { recursive: true });
+    }
+    const built = buildRuntimeConfig(config);
+    const runtimeConfig: SandboxRuntimeConfig = {
+        ...built,
+        filesystem: {
+            ...built.filesystem,
+            denyRead: existingPaths(built.filesystem.denyRead),
+            denyWrite: existingPaths(built.filesystem.denyWrite),
+        },
+    };
+    windowsSession = {
+        runtimeConfig,
+        filesystemKey: JSON.stringify(built.filesystem),
+        denies: windowsDenyState(built),
+    };
+    return runtimeConfig;
 }
 
 /**
@@ -260,7 +408,8 @@ function hostPathStyle(): PathStyle {
  * so C:\Users\me\.SSH falls under ~/.ssh.
  */
 function toMatchForm(p: string, style: PathStyle): string {
-    const expanded = p === '~' || p.startsWith('~/') ? style.home + p.slice(1) : p;
+    const homeRelative = style.path.sep === '\\' ? /^~([\\/]|$)/ : /^~(\/|$)/;
+    const expanded = homeRelative.test(p) ? style.home + p.slice(1) : p;
     const slashed = style.path.normalize(expanded).split(style.path.sep).join('/');
     return style.caseInsensitive ? slashed.toLowerCase() : slashed;
 }
@@ -400,10 +549,10 @@ export function annotateStderrWithSandboxFailures(commandId: string, stderr: str
 }
 
 /**
- * Sandbox temp directory path.
- * Used for TMPDIR and tool cache environment variables.
+ * Where sandboxed commands write scratch files.
+ * On macOS and Linux also their TMPDIR and tool caches.
  */
-export const SANDBOX_TEMP_DIR = '/tmp/pipali';
+export const SANDBOX_TEMP_DIR = getSandboxTempDir();
 
 /**
  * Resolve the host's IANA timezone, or '' if it can't be determined.

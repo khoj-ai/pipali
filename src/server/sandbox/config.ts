@@ -4,11 +4,13 @@
  * The sandbox uses @anthropic-ai/sandbox-runtime which provides:
  * - macOS: Apple Seatbelt (sandbox-exec)
  * - Linux: bubblewrap (bwrap)
- * - Windows: Not supported (falls back to confirmation-based security)
+ * - Windows: a dedicated sandbox account behind a network filter (srt-win)
  */
 
 import { execSync } from 'child_process';
-import type { SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
+import os from 'os';
+import path from 'path';
+import { VENDORED_SRT_WIN_EXE, type SandboxRuntimeConfig } from '@anthropic-ai/sandbox-runtime';
 import { expandPaths } from '../utils';
 
 /**
@@ -94,6 +96,18 @@ export const DEFAULT_DENIED_READ_PATHS: string[] = [
 ];
 
 /**
+ * Credentials and history Windows keeps where the shared list does not look.
+ */
+const WINDOWS_DENIED_READ_PATHS: string[] = [
+    // PowerShell command history
+    '~/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine',
+    // gcloud keeps its credentials here on Windows, not in ~/.config/gcloud
+    '~/AppData/Roaming/gcloud',
+    // curl and git read credentials from _netrc on Windows
+    '_netrc',
+];
+
+/**
  * Paths re-allowed for reading inside the denied system directories above.
  * All hold Apple-shipped public configuration, no secrets.
  *
@@ -146,9 +160,20 @@ export function getPlatformTempDirs(): string[] {
 }
 
 /**
+ * Where sandboxed commands write scratch files. Windows has no /tmp, and the sandbox
+ * account's own TEMP is out of the user's reach, so it gets a folder in the user's.
+ */
+export function getSandboxTempDir(platform: NodeJS.Platform = process.platform): string {
+    return platform === 'win32' ? path.join(os.tmpdir(), 'pipali') : '/tmp/pipali';
+}
+
+/**
  * Get allowed write paths including platform-specific temp directories.
  */
-function getAllowedWritePaths(): string[] {
+function getAllowedWritePaths(platform: NodeJS.Platform): string[] {
+    if (platform === 'win32') {
+        return ['~/.pipali', getSandboxTempDir(platform)];
+    }
     return [...DEFAULT_ALLOWED_WRITE_PATHS, ...getPlatformTempDirs()];
 }
 
@@ -183,12 +208,14 @@ export const DEFAULT_ALLOWED_DOMAINS: string[] = [
  * Get the default sandbox configuration.
  * Called when no settings exist in the database.
  */
-export function getDefaultConfig(): SandboxConfig {
+export function getDefaultConfig(platform: NodeJS.Platform = process.platform): SandboxConfig {
     return {
         enabled: true,
-        allowedWritePaths: getAllowedWritePaths(),
+        allowedWritePaths: getAllowedWritePaths(platform),
         deniedWritePaths: DEFAULT_DENIED_WRITE_PATHS,
-        deniedReadPaths: DEFAULT_DENIED_READ_PATHS,
+        deniedReadPaths: platform === 'win32'
+            ? [...DEFAULT_DENIED_READ_PATHS, ...WINDOWS_DENIED_READ_PATHS]
+            : DEFAULT_DENIED_READ_PATHS,
         allowedDomains: DEFAULT_ALLOWED_DOMAINS,
         allowLocalBinding: true,
     };
@@ -198,7 +225,14 @@ export function getDefaultConfig(): SandboxConfig {
  * Build the SandboxRuntimeConfig for @anthropic-ai/sandbox-runtime
  * from our user-friendly SandboxConfig.
  */
-export function buildRuntimeConfig(config: SandboxConfig): SandboxRuntimeConfig {
+export function buildRuntimeConfig(
+    config: SandboxConfig,
+    platform: NodeJS.Platform = process.platform
+): SandboxRuntimeConfig {
+    if (platform === 'win32') {
+        return buildWindowsRuntimeConfig(config);
+    }
+
     // Expand all paths
     const allowedWritePaths = expandPaths(config.allowedWritePaths);
     const deniedWritePaths = expandPaths(config.deniedWritePaths);
@@ -233,4 +267,43 @@ export function buildRuntimeConfig(config: SandboxConfig): SandboxRuntimeConfig 
             allowAllUnixSockets: true,  // Allow Unix sockets for local services
         },
     };
+}
+
+/**
+ * The runtime config for Windows, where commands run as a separate sandbox account.
+ *
+ * That account reads what every local user can, and the user's profile minus its credential
+ * stores once the one-time setup grants it, for the broad reads macOS and Linux allow. The
+ * bundled runtimes are granted for the shell to run. Denies become ACLs, which need a
+ * concrete path, so a name pattern guards the copy in the home folder.
+ */
+function buildWindowsRuntimeConfig(config: SandboxConfig): SandboxRuntimeConfig {
+    const bundledRuntimesDir = process.env.PIPALI_BUNDLED_RUNTIMES_DIR;
+    return {
+        filesystem: {
+            allowRead: bundledRuntimesDir ? [bundledRuntimesDir] : [],
+            allowWrite: expandPaths(config.allowedWritePaths),
+            denyRead: toWindowsDenyPaths(config.deniedReadPaths),
+            denyWrite: expandPaths(config.deniedWritePaths),
+        },
+        network: {
+            allowedDomains: config.allowedDomains,
+            deniedDomains: [],
+            allowLocalBinding: config.allowLocalBinding,
+        },
+        windows: {
+            srtWin: { path: VENDORED_SRT_WIN_EXE },
+        },
+    };
+}
+
+function toWindowsDenyPaths(deniedPaths: string[]): string[] {
+    const home = os.homedir();
+    const paths = deniedPaths.map(p => {
+        if (p.startsWith('**/')) return path.join(home, p.slice(3));
+        if (/^~([\\/]|$)/.test(p)) return path.join(home, p.slice(1));
+        if (path.isAbsolute(p)) return p;
+        return path.join(home, p);
+    });
+    return [...new Set(paths)];
 }

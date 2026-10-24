@@ -7,6 +7,7 @@
 import { test, expect, describe } from 'bun:test';
 import os from 'os';
 import path from 'path';
+import { VENDORED_SRT_WIN_EXE } from '@anthropic-ai/sandbox-runtime';
 import {
     getDefaultConfig,
     buildRuntimeConfig,
@@ -170,6 +171,52 @@ describe('Sandbox Config', () => {
         });
     });
 
+    describe('on Windows', () => {
+        const home = os.homedir();
+
+        test('should give sandboxed commands a scratch folder the user can reach', () => {
+            const config = getDefaultConfig('win32');
+            expect(config.allowedWritePaths).toEqual(['~/.pipali', path.join(os.tmpdir(), 'pipali')]);
+            expect(config.deniedReadPaths).toEqual(expect.arrayContaining([
+                ...DEFAULT_DENIED_READ_PATHS,
+                '~/AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine',
+                '~/AppData/Roaming/gcloud',
+                '_netrc',
+            ]));
+        });
+
+        test('should leave reads of the profile to its setup grant and turn every deny into a concrete path', () => {
+            const { filesystem, windows } = buildRuntimeConfig(getDefaultConfig('win32'), 'win32');
+
+            // The runtime refuses a session grant that reaches a credential store the setup excluded
+            expect(filesystem.allowRead).toEqual([]);
+            expect(filesystem.allowWrite).toEqual([path.join(home, '.pipali'), path.join(os.tmpdir(), 'pipali')]);
+            expect(windows?.srtWin?.path).toBe(VENDORED_SRT_WIN_EXE);
+
+            // Anywhere and file-name patterns guard the copy in the home folder, once each
+            const denyRead = filesystem.denyRead as string[];
+            expect(denyRead.filter(p => p === path.join(home, '.ssh'))).toHaveLength(1);
+            expect(denyRead).toContain(path.join(home, '.npmrc'));
+            expect(denyRead).toContain(path.join(home, '_netrc'));
+            expect(denyRead).toContain(path.join(home, 'AppData/Roaming/Microsoft/Windows/PowerShell/PSReadLine'));
+            expect(denyRead).toContain(path.join(home, 'AppData/Roaming/gcloud'));
+            expect(denyRead.every(p => path.isAbsolute(p))).toBe(true);
+        });
+
+        test('should let the sandbox account run the bundled runtimes', () => {
+            const previous = process.env.PIPALI_BUNDLED_RUNTIMES_DIR;
+            process.env.PIPALI_BUNDLED_RUNTIMES_DIR = path.join(home, 'AppData', 'Local', 'Pipali');
+            try {
+                const { filesystem } = buildRuntimeConfig(getDefaultConfig('win32'), 'win32');
+                expect(filesystem.allowRead).toEqual([path.join(home, 'AppData', 'Local', 'Pipali')]);
+                expect(filesystem.allowWrite).not.toContain(path.join(home, 'AppData', 'Local', 'Pipali'));
+            } finally {
+                if (previous === undefined) delete process.env.PIPALI_BUNDLED_RUNTIMES_DIR;
+                else process.env.PIPALI_BUNDLED_RUNTIMES_DIR = previous;
+            }
+        });
+    });
+
     describe('isPathDeniedForRead', () => {
         test('should scope the /etc/ssl carve-out to that directory alone', () => {
             expect(isPathDeniedForRead('/etc/ssl/cert.pem')).toBe(false);
@@ -196,11 +243,16 @@ describe('Sandbox Config', () => {
             expect(isPathDeniedForRead('/home/alice/.SSH/id_rsa', linux)).toBe(false);
         });
 
-        test('should apply a drive-letter rule added on Windows', async () => {
-            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, deniedReadPaths: ['D:\\Finance'] });
+        test('should apply drive-letter and home rules added on Windows', async () => {
+            await initializeSandboxWithConfig({
+                ...getDefaultConfig(),
+                enabled: false,
+                deniedReadPaths: ['D:\\Finance', '~\\Taxes'],
+            });
             try {
                 expect(isPathDeniedForRead('d:\\finance\\2026\\payroll.xlsx', WINDOWS)).toBe(true);
                 expect(isPathDeniedForRead('D:\\Finance-public\\report.pdf', WINDOWS)).toBe(false);
+                expect(isPathDeniedForRead('C:\\Users\\alice\\Taxes\\2026.pdf', WINDOWS)).toBe(true);
             } finally {
                 await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false });
             }

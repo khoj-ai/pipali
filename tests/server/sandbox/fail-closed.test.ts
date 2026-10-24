@@ -20,6 +20,7 @@ import type { ConfirmationContext } from '../../../src/server/processor/confirma
 
 const realInitialize = SandboxManager.initialize;
 const realWrap = SandboxManager.wrapWithSandbox;
+const realWrapArgv = SandboxManager.wrapWithSandboxArgv;
 
 /** A user who declines every confirmation, counting how often they were asked. */
 function decliningUser() {
@@ -45,6 +46,7 @@ describe('Sandbox fails closed', () => {
     afterEach(async () => {
         SandboxManager.initialize = realInitialize;
         SandboxManager.wrapWithSandbox = realWrap;
+        SandboxManager.wrapWithSandboxArgv = realWrapArgv;
         await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false });
     });
 
@@ -66,7 +68,11 @@ describe('Sandbox fails closed', () => {
     test('a command the running sandbox cannot wrap asks for confirmation', async () => {
         if (!isSandboxSupported()) return;
         SandboxManager.initialize = async () => {};
+        // Windows wraps to an argv, macOS and Linux to a shell string
         SandboxManager.wrapWithSandbox = async () => {
+            throw new Error('wrap failed');
+        };
+        SandboxManager.wrapWithSandboxArgv = async () => {
             throw new Error('wrap failed');
         };
         await initializeSandboxWithConfig(getDefaultConfig());
