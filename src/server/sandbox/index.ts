@@ -30,11 +30,61 @@ const log = createChildLogger({ component: 'sandbox' });
 // Current sandbox configuration (loaded from database)
 let currentConfig: SandboxConfig = getDefaultConfig();
 
-// Whether sandbox has been initialized
-let initialized = false;
+// Whether the sandbox runtime finished initializing. Commands only run sandboxed when it did.
+let runtimeReady = false;
+
+// Starts and stops of the runtime run one at a time, so overlapping ones cannot leave a
+// stale policy in force or tear down a runtime another just started
+let runtimeQueue: Promise<void> = Promise.resolve();
 
 // Default user ID (we're single-user for now)
 const DEFAULT_USER_ID = 1;
+
+/**
+ * Start the sandbox runtime on the current config. If it fails to start, commands ask for
+ * confirmation instead, so a failure is logged rather than thrown.
+ */
+async function startRuntime(): Promise<void> {
+    runtimeReady = false;
+    try {
+        // Set CLAUDE_TMPDIR so sandbox-runtime uses /tmp/pipali instead of /tmp/claude
+        // This must be set before SandboxManager.initialize() as it reads from process.env
+        process.env.CLAUDE_TMPDIR = '/tmp/pipali';
+
+        const runtimeConfig = buildRuntimeConfig(currentConfig);
+        await SandboxManager.initialize(runtimeConfig);
+
+        const { warnings } = await SandboxManager.checkDependenciesAsync();
+        if (warnings.length > 0) {
+            log.warn({ warnings }, 'Sandbox running with degraded dependencies');
+        }
+        runtimeReady = true;
+        log.info({
+            platform: process.platform,
+            allowWrite: runtimeConfig.filesystem.allowWrite,
+        }, 'Sandbox initialized');
+    } catch (error) {
+        log.error({ err: error }, 'Sandbox failed to start, commands will ask for confirmation');
+        // A failed start can leave part of the runtime up. Clear it so the next start begins clean.
+        await SandboxManager.reset().catch(err => log.warn({ err }, 'Could not clear the failed sandbox start'));
+    }
+}
+
+/** Run a start or stop of the runtime once those queued before it are done. */
+function queueRuntime(task: () => Promise<void>): Promise<void> {
+    const run = runtimeQueue.then(task);
+    runtimeQueue = run.catch(() => {});
+    return run;
+}
+
+/** Restart the runtime on the current config. */
+function restartRuntime(): Promise<void> {
+    return queueRuntime(async () => {
+        runtimeReady = false;
+        await SandboxManager.reset();
+        await startRuntime();
+    });
+}
 
 /**
  * Initialize the sandbox runtime.
@@ -48,54 +98,26 @@ export async function initializeSandbox(): Promise<void> {
         if (process.env.PIPALI_SANDBOX_DISABLED === 'true') {
             log.info('Sandbox disabled via PIPALI_SANDBOX_DISABLED environment variable');
             currentConfig = { ...getDefaultConfig(), enabled: false };
-            initialized = true;
             return;
         }
 
         // Load settings from database (or create defaults)
         currentConfig = await ensureSandboxSettings(DEFAULT_USER_ID);
 
-        // Check if sandboxing is supported on this platform
-        const supported = isSandboxSupported();
-
-        if (!supported) {
+        if (!isSandboxSupported()) {
             log.info(`Sandbox not supported on ${process.platform}, will use confirmation-based security`);
-            initialized = true;
             return;
         }
 
         if (!currentConfig.enabled) {
             log.info('Sandbox disabled by user settings');
-            initialized = true;
             return;
         }
 
-        // Set CLAUDE_TMPDIR so sandbox-runtime uses /tmp/pipali instead of /tmp/claude
-        // This must be set before SandboxManager.initialize() as it reads from process.env
-        process.env.CLAUDE_TMPDIR = '/tmp/pipali';
-
-        // Build runtime configuration
-        const runtimeConfig = buildRuntimeConfig(currentConfig);
-
-        // Initialize the sandbox manager
-        await SandboxManager.initialize(runtimeConfig);
-
-        // Check dependencies
-        const hasDepends = SandboxManager.checkDependencies();
-        if (!hasDepends) {
-            log.warn('Sandbox dependencies not fully available, sandboxing may be limited');
-        }
-
-        log.info({
-            platform: process.platform,
-            hasDepends,
-            allowWrite: runtimeConfig.filesystem.allowWrite,
-        }, 'Sandbox initialized');
-        initialized = true;
+        await restartRuntime();
     } catch (error) {
+        // Don't fail server startup; without a runtime, commands ask for confirmation
         log.error({ err: error }, 'Failed to initialize sandbox');
-        // Don't fail server startup, just disable sandboxing
-        initialized = true;
     }
 }
 
@@ -106,18 +128,9 @@ export async function initializeSandbox(): Promise<void> {
 export async function initializeSandboxWithConfig(config: SandboxConfig): Promise<void> {
     currentConfig = config;
     if (!isSandboxSupported() || !config.enabled) {
-        initialized = true;
         return;
     }
-    try {
-        process.env.CLAUDE_TMPDIR = '/tmp/pipali';
-        const runtimeConfig = buildRuntimeConfig(config);
-        await SandboxManager.initialize(runtimeConfig);
-        initialized = true;
-    } catch (error) {
-        log.error({ err: error }, 'Failed to initialize sandbox with config');
-        initialized = true;
-    }
+    await restartRuntime();
 }
 
 /**
@@ -125,9 +138,12 @@ export async function initializeSandboxWithConfig(config: SandboxConfig): Promis
  * Should be called on server shutdown.
  */
 export async function shutdownSandbox(): Promise<void> {
+    runtimeReady = false;
     try {
-        await SandboxManager.reset();
-        initialized = false;
+        await queueRuntime(async () => {
+            runtimeReady = false;
+            await SandboxManager.reset();
+        });
         log.info('Sandbox shutdown complete');
     } catch (error) {
         log.error({ err: error }, 'Error during sandbox shutdown');
@@ -147,6 +163,12 @@ export async function reloadSandboxConfig(): Promise<void> {
     }
 
     if (!isSandboxSupported()) {
+        return;
+    }
+
+    // A runtime that never started, or failed to, has no config to update
+    if (!runtimeReady) {
+        await restartRuntime();
         return;
     }
 
@@ -173,15 +195,15 @@ export function isSandboxSupported(): boolean {
 }
 
 /**
- * Check if sandboxing is currently active (enabled AND supported).
+ * Check if sandboxing is currently active: enabled, supported, and its runtime running.
  */
 export function isSandboxActive(): boolean {
-    return initialized && isSandboxEnabled() && isSandboxSupported();
+    return runtimeReady && isSandboxEnabled() && isSandboxSupported();
 }
 
 /**
  * Wrap a shell command with sandbox restrictions.
- * Returns the sandboxed command string to execute.
+ * Throws rather than hand back a command that would run outside the sandbox.
  *
  * @param command - The command to wrap
  * @param commandId - Files the run's violations for annotateStderrWithSandboxFailures
@@ -189,29 +211,33 @@ export function isSandboxActive(): boolean {
  */
 export async function wrapCommandWithSandbox(command: string, commandId?: string): Promise<string> {
     if (!isSandboxActive()) {
-        // Return original command if sandbox not active
-        return command;
+        throw new Error('The sandbox is not running');
     }
 
-    try {
-        const runtimeConfig = buildRuntimeConfig(currentConfig);
+    const runtimeConfig = buildRuntimeConfig(currentConfig);
+    const sandboxedCommand = await SandboxManager.wrapWithSandbox(
+        command, '/bin/bash', runtimeConfig, undefined, { commandId },
+    );
+    log.debug({ command: command.substring(0, 100) }, 'Command wrapped with sandbox');
+    return sandboxedCommand;
+}
 
-        // Wrap the command with sandbox restrictions
-        const sandboxedCommand = await SandboxManager.wrapWithSandbox(
-            command,
-            '/bin/bash',
-            runtimeConfig,
-            undefined,
-            { commandId },
-        );
+/** A command ready to spawn inside the sandbox. */
+export interface SandboxedCommand {
+    cmd: string[];
+    env: Record<string, string | undefined>;
+}
 
-        log.debug({ command: command.substring(0, 100) }, 'Command wrapped with sandbox');
-        return sandboxedCommand;
-    } catch (error) {
-        log.error({ err: error }, 'Failed to wrap command with sandbox');
-        // Return original command on error
-        return command;
-    }
+/**
+ * The argv and environment that run a command inside the sandbox.
+ * Throws rather than hand back anything that would run outside it.
+ */
+export async function prepareSandboxedCommand(command: string, commandId: string): Promise<SandboxedCommand> {
+    return {
+        cmd: ['/bin/bash', '-c', await wrapCommandWithSandbox(command, commandId)],
+        // Redirect tool caches to paths the sandbox lets them write
+        env: { ...process.env, ...getSandboxEnvOverrides() },
+    };
 }
 
 /**

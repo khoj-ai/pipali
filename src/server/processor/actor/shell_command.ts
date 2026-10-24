@@ -6,9 +6,9 @@ import {
 } from '../confirmation';
 import {
     isSandboxActive,
-    wrapCommandWithSandbox,
+    prepareSandboxedCommand,
     annotateStderrWithSandboxFailures,
-    getSandboxEnvOverrides,
+    type SandboxedCommand,
 } from '../../sandbox';
 import { createChildLogger } from '../../logger';
 import { buildBundledRuntimeEnv } from '../../bundled-runtimes';
@@ -176,7 +176,7 @@ export async function shellCommand(
     // - If explicitly set to 'sandbox' but sandbox not available, fall back to direct
     // - Default to sandbox if available, otherwise direct
     const requestedMode = args.execution_mode;
-    const useSandbox = requestedMode === 'sandbox'
+    let useSandbox = requestedMode === 'sandbox'
         ? sandboxAvailable  // Requested sandbox, use if available
         : requestedMode === 'direct'
             ? false  // Explicitly requested direct mode
@@ -185,6 +185,20 @@ export async function shellCommand(
     // Log if sandbox was requested but unavailable
     if (requestedMode === 'sandbox' && !sandboxAvailable) {
         log.debug(`Sandbox mode requested but unavailable, falling back to direct mode (requires confirmation)`);
+    }
+
+    // Files this run's sandbox violations, so a rerun is not told of an earlier run's
+    const commandId = crypto.randomUUID();
+
+    // Wrap before deciding whether to ask: a command the sandbox cannot take goes to the user instead
+    let sandboxed: SandboxedCommand | undefined;
+    if (useSandbox) {
+        try {
+            sandboxed = await prepareSandboxedCommand(command, commandId);
+        } catch (error) {
+            log.warn({ err: error }, 'Could not sandbox the command, asking to run it directly instead');
+            useSandbox = false;
+        }
     }
 
     // Request user confirmation if using direct mode (not sandboxed)
@@ -221,34 +235,25 @@ export async function shellCommand(
         }
     }
 
-    // Files this run's sandbox violations, so a rerun is not told of an earlier run's
-    const commandId = crypto.randomUUID();
-
     try {
         // Determine shell command based on platform and sandbox mode
         let shellCmd: string[];
+        let baseEnv: Record<string, string | undefined>;
 
-        if (isWindows) {
-            // Windows: no sandbox support, use PowerShell directly
-            shellCmd = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command];
-            log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
-        } else if (useSandbox) {
-            // Unix with sandbox: wrap the command
-            const sandboxedCommand = await wrapCommandWithSandbox(command, commandId);
-            shellCmd = ['/bin/bash', '-c', sandboxedCommand];
+        if (sandboxed) {
+            shellCmd = sandboxed.cmd;
+            baseEnv = sandboxed.env;
             log.debug(`Executing (sandboxed): ${command} in ${workingDir}`);
+        } else if (isWindows) {
+            shellCmd = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command];
+            baseEnv = process.env;
+            log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
         } else {
-            // Unix without sandbox
             shellCmd = ['/bin/bash', '-c', command];
+            baseEnv = process.env;
             log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
         }
 
-        // For sandboxed commands, set environment variables to redirect tool caches
-        // to sandbox-allowed directories. This prevents tools like uv, pip, npm from
-        // trying to write to ~/.cache which isn't in the sandbox allowlist.
-        const baseEnv = useSandbox
-            ? { ...process.env, ...getSandboxEnvOverrides() }
-            : process.env;
         const env = await buildBundledRuntimeEnv(baseEnv);
 
         if (args.run_in_background) {
