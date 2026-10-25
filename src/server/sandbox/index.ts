@@ -35,6 +35,7 @@ import {
     buildRuntimeConfig,
 } from './config';
 import { getBundledRuntimes } from '../bundled-runtimes';
+import { getAppDataDir } from '../paths';
 import { expandPath, isCaseInsensitiveFS } from '../utils';
 import { loadSandboxSettings, saveSandboxSettings, ensureSandboxSettings } from './settings';
 
@@ -242,8 +243,8 @@ export function isSandboxSupported(): boolean {
  * Whether the user should run the one-time Windows setup, which makes the account
  * sandboxed commands run as. Setting up again also repairs one that stopped working.
  */
-export function needsSandboxSetup(): boolean {
-    return process.platform === 'win32' && isSandboxEnabled() && isSandboxSupported() && !isSandboxActive();
+export function needsSandboxSetup(platform: NodeJS.Platform = process.platform): boolean {
+    return platform === 'win32' && isSandboxEnabled() && isSandboxSupported() && !isSandboxActive();
 }
 
 /** Why the sandbox last failed to start, if it was not just awaiting setup. */
@@ -278,42 +279,103 @@ async function isAwaitingWindowsSetup(error: unknown): Promise<boolean> {
     }
 }
 
-// The Windows setup in flight, which a second request joins
-let windowsSetup: Promise<{ cancelled: boolean }> | undefined;
+// The Windows setup in flight, which Settings and commands share
+let windowsSetup: { elevated: Promise<void>; done: Promise<{ cancelled: boolean }> } | undefined;
 
 /**
  * Run the one-time Windows setup, then start the sandbox on it. Windows asks the user for
  * administrator permission; dismissing that resolves as cancelled. Given it, the setup
  * makes the user's profile readable to the sandbox account, which can take minutes on a
- * large profile.
+ * large profile; `onElevated` is called as that starts.
  */
-export function setUpWindowsSandbox(): Promise<{ cancelled: boolean }> {
-    windowsSetup ??= queueRuntime(async (): Promise<{ cancelled: boolean }> => {
-        // The profile grant is not made while a session of ours runs
-        runtimeReady = false;
-        await SandboxManager.reset();
+export function setUpWindowsSandbox(onElevated?: () => void): Promise<{ cancelled: boolean }> {
+    if (!windowsSetup) {
+        const elevated = Promise.withResolvers<void>();
+        const done = queueRuntime(async (): Promise<{ cancelled: boolean }> => {
+            // The profile grant is not made while a session of ours runs
+            runtimeReady = false;
+            await SandboxManager.reset();
 
-        const { windows } = buildRuntimeConfig(currentConfig, 'win32');
-        const result = await installWindowsSandboxAsync({
-            srtWin: resolveSrtWin(windows?.srtWin),
-            // Loopback is open or closed for the whole install, and sessions must ask for that mode
-            allowLoopback: currentConfig.allowLocalBinding,
-            force: true,
+            const { windows } = buildRuntimeConfig(currentConfig, 'win32');
+            const result = await installWindowsSandboxAsync({
+                srtWin: resolveSrtWin(windows?.srtWin),
+                // Loopback is open or closed for the whole install, and sessions must ask for that mode
+                allowLoopback: currentConfig.allowLocalBinding,
+                force: true,
+                onProfileGrantStart: () => elevated.resolve(),
+            });
+            if (result.cancelled) {
+                return { cancelled: true };
+            }
+            const grant = result.profileGrant;
+            log.info({ profileGrant: grant?.applied ? 'applied' : grant?.reason }, 'Windows sandbox set up');
+            fs.rmSync(setupDeclinedMarker(), { force: true });
+
+            if (currentConfig.enabled) {
+                await startRuntime();
+            }
+            return { cancelled: false };
+        }).finally(() => {
+            elevated.resolve();
+            windowsSetup = undefined;
         });
-        if (result.cancelled) {
-            return { cancelled: true };
-        }
-        const grant = result.profileGrant;
-        log.info({ profileGrant: grant?.applied ? 'applied' : grant?.reason }, 'Windows sandbox set up');
+        windowsSetup = { elevated: elevated.promise, done };
+    }
+    if (onElevated) {
+        void windowsSetup.elevated.then(onElevated);
+    }
+    return windowsSetup.done;
+}
 
-        if (currentConfig.enabled) {
-            await startRuntime();
-        }
-        return { cancelled: false };
-    }).finally(() => {
-        windowsSetup = undefined;
+/** Marks a declined or failed automatic setup, so commands stop raising its prompt. */
+function setupDeclinedMarker(): string {
+    return path.join(getAppDataDir(), 'sandbox-setup-declined');
+}
+
+// The automatic setup in flight, which commands wait on until its prompt is answered
+let setupOnFirstNeed: Promise<void> | undefined;
+
+/**
+ * Run the one-time Windows setup when a command first needs it, so its UAC prompt arrives
+ * with the command it is for. Commands wait for the prompt to be answered, not for the
+ * profile grant after it, and ask for confirmation until the sandbox is up. A setup
+ * declined, left unanswered or failed is remembered and not raised again; Settings still
+ * offers it.
+ */
+export async function setUpSandboxOnFirstNeed({
+    platform = process.platform,
+    setUp = setUpWindowsSandbox,
+}: {
+    platform?: NodeJS.Platform;
+    setUp?: (onElevated: () => void) => Promise<{ cancelled: boolean }>;
+} = {}): Promise<void> {
+    if (!needsSandboxSetup(platform) || fs.existsSync(setupDeclinedMarker())) {
+        return;
+    }
+    setupOnFirstNeed ??= new Promise<void>(answered => {
+        void (async () => {
+            let outcome: string | undefined;
+            try {
+                const { cancelled } = await setUp(answered);
+                if (cancelled) outcome = 'declined';
+                else if (!isSandboxActive()) outcome = `did not start the sandbox: ${runtimeError ?? 'unknown error'}`;
+            } catch (error) {
+                outcome = `failed: ${error instanceof Error ? error.message : String(error)}`;
+            }
+            if (!outcome) return;
+            log.info(`Windows sandbox setup ${outcome}. Commands will ask for confirmation`);
+            try {
+                fs.mkdirSync(path.dirname(setupDeclinedMarker()), { recursive: true });
+                fs.writeFileSync(setupDeclinedMarker(), `${new Date().toISOString()} ${outcome}\n`);
+            } catch (error) {
+                log.warn({ err: error }, 'Could not remember the declined sandbox setup');
+            }
+        })().finally(() => {
+            setupOnFirstNeed = undefined;
+            answered();
+        });
     });
-    return windowsSetup;
+    await setupOnFirstNeed;
 }
 
 /**

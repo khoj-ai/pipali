@@ -6,6 +6,7 @@ import {
 } from '../confirmation';
 import {
     isSandboxActive,
+    setUpSandboxOnFirstNeed,
     prepareSandboxedCommand,
     annotateStderrWithSandboxFailures,
     SANDBOX_TEMP_DIR,
@@ -172,6 +173,11 @@ export async function shellCommand(
         Math.max(timeout ?? DEFAULT_TIMEOUT_MS, 1000),
         MAX_TIMEOUT_MS
     );
+
+    // On Windows the first command that would run sandboxed sets the sandbox up, prompting once
+    if (args.execution_mode !== 'direct') {
+        await setUpSandboxOnFirstNeed();
+    }
 
     // Check if sandbox is available (enabled AND supported platform)
     const sandboxAvailable = isSandboxActive();
