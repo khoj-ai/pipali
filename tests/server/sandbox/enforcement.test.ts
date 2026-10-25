@@ -1,257 +1,149 @@
 /**
- * Integration tests for OS-level sandbox enforcement.
- * These tests actually execute sandboxed commands and verify the OS blocks restricted operations.
+ * Shell commands in the macOS and Linux sandbox, end to end: Pipali's sandbox config and
+ * shell tool against the real sandbox-runtime.
  *
- * These tests run by default locally but are SKIPPED in CI because:
- * 1. They require the sandbox-runtime to initialize an HTTP proxy server
- * 2. CI runners may not have bubblewrap (Linux) or sandbox-exec permissions (macOS)
- * 3. They need actual OS-level permissions to execute sandbox-exec/bwrap
+ * Run from outside any existing sandbox, with a network for the curl test:
  *
- * To run in CI, set: SANDBOX_INTEGRATION_TESTS=true
- *
- * The tests verify:
- * - Writes outside allowed directories are blocked
- * - Writes to allowed directories succeed
- * - File copy to unauthorized locations is blocked
- * - stderr annotation correctly identifies sandbox violations
+ *   SANDBOX_INTEGRATION_TESTS=true bun test tests/server/sandbox/enforcement.test.ts
  */
 
-import { test, expect, describe } from 'bun:test';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { getDefaultConfig } from '../../../src/server/sandbox/config';
+import {
+    initializeSandboxWithConfig,
+    isSandboxActive,
+    shutdownSandbox,
+    SANDBOX_TEMP_DIR,
+} from '../../../src/server/sandbox';
+import { shellCommand } from '../../../src/server/processor/actor/shell_command';
+import type { ConfirmationContext } from '../../../src/server/processor/confirmation';
 
-describe('Sandbox OS Enforcement', () => {
-    const isSupported = process.platform === 'darwin' || process.platform === 'linux';
-    // Opt-in via environment variable (these tests need to run outside any existing sandbox)
-    const runIntegrationTests = process.env.SANDBOX_INTEGRATION_TESTS === 'true';
+const runHere = (process.platform === 'darwin' || process.platform === 'linux')
+    && process.env.SANDBOX_INTEGRATION_TESTS === 'true';
+const describeHere = runHere ? describe : describe.skip;
 
-    // Skip unless explicitly enabled via environment variable
-    const testFn = isSupported && runIntegrationTests ? test : test.skip;
+const stamp = Date.now();
+const fixtures = path.join(SANDBOX_TEMP_DIR, `sandbox-test-${stamp}`);
+const protectedDir = path.join(fixtures, 'protected');
+const readableDir = path.join(fixtures, 'readable');
+const deniedDir = path.join(fixtures, 'denied');
+const insideFile = path.join(fixtures, 'inside.txt');
+const deniedFile = path.join(deniedDir, 'escaped.txt');
+// Only the sandbox failing would create this
+const outsideFile = path.join(os.homedir(), `pipali-sandbox-test-outside-${stamp}.txt`);
+const created: string[] = [];
 
-    const testConfig = {
-        filesystem: {
-            allowWrite: ['/tmp/pipali', `${os.homedir()}/.pipali`],
-            denyWrite: ['/tmp/pipali-denied'],
-            denyRead: ['**/.ssh'],
-            allowGitConfig: false,
-        },
-        network: {
-            allowedDomains: ['localhost'],
-            deniedDomains: [],
-            allowLocalBinding: true,
-            allowAllUnixSockets: false,
+/** Run a command the way the agent does, counting confirmations asked for. */
+async function run(command: string) {
+    if (!isSandboxActive()) throw new Error('The sandbox is not running');
+    let asked = 0;
+    const confirmationContext: ConfirmationContext = {
+        preferences: { skipConfirmationFor: new Set() },
+        requestConfirmation: async (request) => {
+            asked++;
+            return { requestId: request.requestId, selectedOptionId: 'no', timestamp: new Date().toISOString() };
         },
     };
+    const result = await shellCommand(
+        { justification: 'sandbox test', command, operation_type: 'read-write', execution_mode: 'sandbox' },
+        { confirmationContext },
+    );
+    return { output: String(result.compiled), asked };
+}
 
-    testFn.each([
-        '/tmp/sandbox-test-blocked.txt',
-        '/tmp/pipali-denied/sandbox-test-blocked.txt',
-    ])('should block writes outside allowed directory: %s', async (disallowedPath) => {
-        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
+function writeFixture(file: string, content: string) {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, content);
+    created.push(file);
+}
 
-        // Initialize sandbox
-        await SandboxManager.initialize(testConfig);
+describeHere('macOS and Linux sandbox', () => {
+    beforeAll(async () => {
+        writeFixture(path.join(protectedDir, 'secret.txt'), 'protected-secret-value');
+        writeFixture(path.join(readableDir, 'note.txt'), 'readable-note-value');
+        fs.mkdirSync(deniedDir, { recursive: true });
 
-        // Create a command that tries to write outside allowed paths
-        const command = `echo "test" > ${disallowedPath}`;
-        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', testConfig);
-
-        // Execute the sandboxed command
-        const proc = Bun.spawn(['bash', '-c', wrappedCmd], {
-            stdout: 'pipe',
-            stderr: 'pipe',
+        const defaults = getDefaultConfig();
+        await initializeSandboxWithConfig({
+            ...defaults,
+            deniedReadPaths: [...defaults.deniedReadPaths, protectedDir],
+            deniedWritePaths: [...defaults.deniedWritePaths, deniedDir],
         });
-
-        const exitCode = await proc.exited;
-
-        // Command should fail due to sandbox restrictions
-        expect(exitCode).not.toBe(0);
-
-        await SandboxManager.reset();
     });
 
-    testFn.each([
-        '/tmp/pipali/sandbox-test-allowed.txt',
-        '/tmp/pipali/another-dir/sandbox-test-allowed.txt',
-        `${os.homedir()}/.pipali/sandbox-test-allowed.txt`,
-    ])('should allow writes to permitted directories: %s', async (allowedPath) => {
-        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
-        const fs = await import('fs/promises');
-
-        // Ensure test directory exists
-        const parentPath = path.dirname(allowedPath);
-        await fs.mkdir(parentPath, { recursive: true });
-
-        // Initialize sandbox
-        await SandboxManager.initialize(testConfig);
-
-        // Create a command that writes to an allowed path
-        const testFile = allowedPath;
-        const command = `echo "sandbox test" > ${testFile}`;
-        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', testConfig);
-
-        // Execute the sandboxed command
-        const proc = Bun.spawn(['bash', '-c', wrappedCmd], {
-            stdout: 'pipe',
-            stderr: 'pipe',
-        });
-
-        const exitCode = await proc.exited;
-
-        // Command should succeed
-        expect(exitCode).toBe(0);
-
-        // Verify file was created
-        const content = await fs.readFile(testFile, 'utf-8');
-        expect(content.trim()).toBe('sandbox test');
-
-        // Cleanup
-        await fs.rm(testFile, { force: true });
-        await SandboxManager.reset();
-    });
-
-    testFn('should block file copy to unauthorized location', async () => {
-        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
-        const fs = await import('fs/promises');
-
-        // Create source file in allowed directory
-        await fs.mkdir('/tmp/pipali', { recursive: true });
-        const sourceFile = '/tmp/pipali/source.txt';
-        await fs.writeFile(sourceFile, 'source content');
-
-        // Initialize sandbox
-        await SandboxManager.initialize(testConfig);
-
-        // Try to copy file to unauthorized location
-        const command = `cp ${sourceFile} /tmp/unauthorized-copy.txt`;
-        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', testConfig);
-
-        const proc = Bun.spawn(['bash', '-c', wrappedCmd], {
-            stdout: 'pipe',
-            stderr: 'pipe',
-        });
-
-        const exitCode = await proc.exited;
-
-        // Command should fail
-        expect(exitCode).not.toBe(0);
-
-        // Cleanup
-        await fs.rm(sourceFile, { force: true });
-        await SandboxManager.reset();
-    });
-
-    testFn.each([
-        '/tmp/.ssh/authorized_keys',
-    ])('should block reads from disallowed directory: %s', async (disallowedPath) => {
-        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
-
-        // Initialize sandbox
-        await SandboxManager.initialize(testConfig);
-
-        // Create a command that tries to write outside allowed paths
-        const command = `ls ${disallowedPath}`;
-        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', testConfig);
-
-        // Execute the sandboxed command
-        const proc = Bun.spawn(['bash', '-c', wrappedCmd], {
-            stdout: 'pipe',
-            stderr: 'pipe',
-        });
-
-        const exitCode = await proc.exited;
-
-        // Command should fail due to sandbox restrictions
-        expect(exitCode).not.toBe(0);
-
-        await SandboxManager.reset();
-    });
-
-    testFn.each([
-        '/tmp',
-    ])('should allow reads from non disallowed directory: %s', async (allowedPath) => {
-        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
-        const fs = await import('fs/promises');
-
-        // Ensure test directory exists
-        const parentPath = path.dirname(allowedPath);
-        await fs.mkdir(parentPath, { recursive: true });
-
-        // Initialize sandbox
-        await SandboxManager.initialize(testConfig);
-
-        // Create a command that writes to an allowed path
-        const testFile = allowedPath;
-        const command = `ls ${testFile}`;
-        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', testConfig);
-
-        // Execute the sandboxed command
-        const proc = Bun.spawn(['bash', '-c', wrappedCmd], {
-            stdout: 'pipe',
-            stderr: 'pipe',
-        });
-
-        const exitCode = await proc.exited;
-
-        // Command should succeed
-        expect(exitCode).toBe(0);
-
-        // Cleanup
-        await SandboxManager.reset();
-    });
-
-    testFn('should let curl run under the default config', async () => {
-        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
-        const { getDefaultConfig, buildRuntimeConfig } = await import('../../../src/server/sandbox/config');
-
-        // Uses the real default config: macOS curl links LibreSSL, which reads
-        // /etc/ssl/openssl.cnf on startup even for plain HTTP
-        const defaultConfig = buildRuntimeConfig(getDefaultConfig());
-        await SandboxManager.initialize(defaultConfig);
-
-        const command = 'curl -sS -o /dev/null -w "%{http_code}" https://api.github.com';
-        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', defaultConfig);
-
-        const proc = Bun.spawn(['bash', '-c', wrappedCmd], { stdout: 'pipe', stderr: 'pipe' });
-        const exitCode = await proc.exited;
-        const stdout = await new Response(proc.stdout).text();
-        const stderr = await new Response(proc.stderr).text();
-
-        expect(stderr).not.toContain('openssl.cnf');
-        expect(stderr).not.toContain('certificate verify locations');
-        expect(exitCode).toBe(0);
-        expect(stdout.trim()).toBe('200');
-
-        await SandboxManager.reset();
-    });
-
-    testFn('should annotate stderr with sandbox violation info', async () => {
-        const { SandboxManager } = await import('@anthropic-ai/sandbox-runtime');
-
-        // Initialize sandbox
-        await SandboxManager.initialize(testConfig);
-
-        // Create a command that will fail due to sandbox
-        const command = 'touch /etc/sandbox-test-file';
-        const wrappedCmd = await SandboxManager.wrapWithSandbox(command, '/bin/bash', testConfig);
-
-        const proc = Bun.spawn(['bash', '-c', wrappedCmd], {
-            stdout: 'pipe',
-            stderr: 'pipe',
-        });
-
-        await proc.exited;
-        const stderr = await new Response(proc.stderr).text();
-
-        // Use the annotation function to check for sandbox violations
-        const annotated = SandboxManager.annotateStderrWithSandboxFailures(command, stderr);
-
-        // On macOS, the annotated output should contain sandbox violation info
-        if (process.platform === 'darwin' && stderr.length > 0) {
-            // The annotation should add context about sandbox violations
-            expect(annotated.length).toBeGreaterThanOrEqual(stderr.length);
+    afterAll(async () => {
+        await shutdownSandbox();
+        for (const file of [...created, insideFile, outsideFile, deniedFile]) {
+            fs.rmSync(file, { force: true });
         }
+        for (const dir of [protectedDir, readableDir, deniedDir, fixtures]) {
+            if (fs.existsSync(dir)) fs.rmdirSync(dir);
+        }
+    });
 
-        await SandboxManager.reset();
+    test('writes inside its scratch folder without asking', async () => {
+        const { asked } = await run(`echo written > '${insideFile}'`);
+        expect(asked).toBe(0);
+        expect(fs.readFileSync(insideFile, 'utf8').trim()).toBe('written');
+    });
+
+    test.each([
+        ['outside its write folders', outsideFile],
+        ['in a denied folder inside an allowed one', deniedFile],
+    ])('is refused a write %s, and says so', async (_, file) => {
+        const { output, asked } = await run(`echo escaped > '${file}'`);
+        expect(asked).toBe(0);
+        expect(fs.existsSync(file)).toBe(false);
+        expect(output).toContain('[Sandbox violation');
+    });
+
+    test("reads the user's files, but not a protected path", async () => {
+        const readable = await run(`cat '${path.join(readableDir, 'note.txt')}'`);
+        expect(readable.asked).toBe(0);
+        expect(readable.output).toContain('readable-note-value');
+
+        const secret = await run(`cat '${path.join(protectedDir, 'secret.txt')}'`);
+        expect(secret.asked).toBe(0);
+        expect(secret.output).not.toContain('protected-secret-value');
+    });
+
+    test('reaches an allowed domain with curl', async () => {
+        // macOS curl links LibreSSL, which reads /etc/ssl/openssl.cnf on startup
+        const { output, asked } = await run(`curl -sS -o /dev/null -w '%{http_code}' https://api.github.com`);
+        expect(asked).toBe(0);
+        expect(output).not.toContain('openssl.cnf');
+        expect(output).not.toContain('certificate verify locations');
+        expect(output).toMatch(/^200\b/);
+    });
+
+    test('reports a refused domain to the run that tried it alone', async () => {
+        // The runtime tells commands apart by their first 100 characters
+        const sharedPrefix = `: ${'x'.repeat(100)};`;
+
+        const refused = await run(`${sharedPrefix} curl -sS --max-time 10 https://example.com`);
+        expect(refused.output).toContain('<sandbox_violations>');
+        expect(refused.output).toContain('example.com');
+        // A refused domain is not a refused write
+        expect(refused.output).not.toContain('[Sandbox violation');
+
+        const later = await run(`${sharedPrefix} echo later >&2`);
+        expect(later.output).toContain('later');
+        expect(later.output).not.toContain('<sandbox_violations>');
+    });
+
+    test("passes a Python heredoc's != through as written", async () => {
+        // Single quotes beside a ! are the shape that once got it escaped to \!
+        const { output, asked } = await run(`python3 - <<'PY'
+data = {'key': 'value'}
+for k, v in data.items():
+    if k != 'missing':
+        print(f'{k}={v}')
+PY`);
+        expect(asked).toBe(0);
+        expect(output).not.toContain('SyntaxError');
+        expect(output.trim()).toBe('key=value');
     });
 });

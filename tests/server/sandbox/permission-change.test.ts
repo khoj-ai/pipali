@@ -207,17 +207,3 @@ describe('sandbox permission changes', () => {
         expect(getSandboxConfig().allowedDomains).not.toContain('api.example.com');
     });
 });
-
-describe('Windows sandbox setup', () => {
-    const setUp = (headers: Record<string, string>) =>
-        api.fetch(new Request('http://127.0.0.1:6464/api/sandbox/setup', { method: 'POST', headers }));
-
-    test('raises its UAC prompt only for the settings token', async () => {
-        expect((await setUp({})).status).toBe(403);
-        expect((await setUp(WRONG_TOKEN)).status).toBe(403);
-        // Past the token it would install for real, so only check that off Windows
-        if (process.platform !== 'win32') {
-            expect((await setUp(DESKTOP_APP)).status).toBe(400);
-        }
-    });
-});

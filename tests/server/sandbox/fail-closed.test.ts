@@ -65,8 +65,7 @@ describe('Sandbox fails closed', () => {
         expect(result.compiled).toContain('cancelled');
     });
 
-    test('a command the running sandbox cannot wrap asks for confirmation', async () => {
-        if (!isSandboxSupported()) return;
+    test.skipIf(!isSandboxSupported())('a command the running sandbox cannot wrap asks for confirmation', async () => {
         SandboxManager.initialize = async () => {};
         // Windows wraps to an argv, macOS and Linux to a shell string
         SandboxManager.wrapWithSandbox = async () => {
