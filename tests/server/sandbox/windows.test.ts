@@ -6,7 +6,7 @@
  * The sandbox cannot start commands from session 0, which is where SSM, services and
  * scheduled tasks without /it run.
  *
- *   1. One-time setup, one UAC prompt:
+ *   1. One-time setup, one UAC prompt: Settings > Sandbox > Set up in Pipali, or
  *      bunx @anthropic-ai/sandbox-runtime windows-install --allow-loopback
  *      Run it again on a machine set up by an earlier sandbox-runtime release.
  *   2. $env:SANDBOX_INTEGRATION_TESTS = 'true'
@@ -17,8 +17,10 @@ import { afterAll, beforeAll, describe, expect, setDefaultTimeout, test } from '
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { VENDORED_SRT_WIN_EXE, checkWindowsSandboxStatusAsync, resolveSrtWin } from '@anthropic-ai/sandbox-runtime';
 import { getDefaultConfig } from '../../../src/server/sandbox/config';
 import {
+    getSandboxStartError,
     initializeSandboxWithConfig,
     isSandboxActive,
     shutdownSandbox,
@@ -46,8 +48,33 @@ const insideFile = path.join(SANDBOX_TEMP_DIR, `sandbox-test-inside-${stamp}.txt
 const pidFile = path.join(SANDBOX_TEMP_DIR, `sandbox-test-pid-${stamp}.txt`);
 const created: string[] = [];
 
-/** Run a command the way the agent does, counting confirmations asked for. */
+/**
+ * Why the sandbox is not running, with srt-win's own account of its setup. The server log
+ * says the same, but bun test drops it unless NODE_ENV=production.
+ */
+async function whyNotRunning(): Promise<string> {
+    const reason = getSandboxStartError() ?? 'The sandbox account is missing: run the one-time setup.';
+    try {
+        const { user, wfp } = await checkWindowsSandboxStatusAsync({
+            srtWin: resolveSrtWin({ path: VENDORED_SRT_WIN_EXE }),
+        });
+        return `${reason} (srt-win status: account provisioned=${user.provisioned}, ` +
+            `credential readable=${user.credPresent}, setup version=${user.markerVersion} ` +
+            `of ${user.setupVersion}, profile grant=${user.profileGrant?.state ?? 'none'}, ` +
+            `network filters=${wfp.state}, loopback open=${wfp.allowLoopback})`;
+    } catch (error) {
+        return `${reason} (srt-win status failed: ${(error as Error).message})`;
+    }
+}
+
+/**
+ * Run a command the way the agent does, counting confirmations asked for. Refuses while the
+ * sandbox is down, where the command would only go to the user and be declined.
+ */
 async function run(command: string, timeout?: number) {
+    if (!isSandboxActive()) {
+        throw new Error(`The sandbox is not running: ${await whyNotRunning()}`);
+    }
     let asked = 0;
     const confirmationContext: ConfirmationContext = {
         preferences: { skipConfirmationFor: new Set() },
@@ -90,7 +117,10 @@ describeHere('Windows sandbox', () => {
             ...getDefaultConfig(),
             deniedReadPaths: [...getDefaultConfig().deniedReadPaths, protectedDir, lateProtectedDir, protectedFile],
         });
-        console.log(`Sandbox started in ${Math.round(performance.now() - started)} ms`);
+        const ms = Math.round(performance.now() - started);
+        console.log(isSandboxActive()
+            ? `Sandbox started in ${ms} ms`
+            : `Sandbox did not start (${ms} ms): ${await whyNotRunning()}`);
     });
 
     afterAll(async () => {
@@ -103,12 +133,9 @@ describeHere('Windows sandbox', () => {
         }
     });
 
-    test('starts', () => {
+    test('starts', async () => {
         if (!isSandboxActive()) {
-            throw new Error(
-                'The sandbox did not start; the server log says why. Run the one-time setup, and run ' +
-                'from an interactive desktop session.',
-            );
+            throw new Error(`The sandbox did not start: ${await whyNotRunning()}`);
         }
     });
 

@@ -16,9 +16,14 @@ import os from 'os';
 import path from 'path';
 import {
     SandboxManager,
+    getWindowsSandboxUserStatusAsync,
+    installWindowsSandboxAsync,
     parseWindowsBinShell,
+    resolveSrtWin,
+    WindowsSandboxError,
     type FilesystemPathEntry,
     type SandboxRuntimeConfig,
+    type WindowsSandboxErrorCode,
 } from '@anthropic-ai/sandbox-runtime';
 import { createChildLogger } from '../logger';
 
@@ -40,6 +45,9 @@ let currentConfig: SandboxConfig = getDefaultConfig();
 
 // Whether the sandbox runtime finished initializing. Commands only run sandboxed when it did.
 let runtimeReady = false;
+
+// Why the runtime last failed to start, unless that was the missing Windows setup
+let runtimeError: string | null = null;
 
 // Starts and stops of the runtime run one at a time, so overlapping ones cannot leave a
 // stale policy in force or tear down a runtime another just started
@@ -75,21 +83,28 @@ async function startRuntime(): Promise<void> {
             log.warn({ warnings }, 'Sandbox running with degraded dependencies');
         }
         runtimeReady = true;
+        runtimeError = null;
         log.info({
             platform: process.platform,
             allowWrite: runtimeConfig.filesystem.allowWrite,
         }, 'Sandbox initialized');
     } catch (error) {
-        log.error({ err: error }, 'Sandbox failed to start, commands will ask for confirmation');
+        const awaitingSetup = process.platform === 'win32' && await isAwaitingWindowsSetup(error);
+        if (awaitingSetup) {
+            log.info('Windows sandbox awaits its one-time setup, commands will ask for confirmation');
+        } else {
+            log.error({ err: error }, 'Sandbox failed to start, commands will ask for confirmation');
+        }
+        runtimeError = awaitingSetup ? null : error instanceof Error ? error.message : String(error);
         // A failed start can leave part of the runtime up. Clear it so the next start begins clean.
         await SandboxManager.reset().catch(err => log.warn({ err }, 'Could not clear the failed sandbox start'));
     }
 }
 
 /** Run a start or stop of the runtime once those queued before it are done. */
-function queueRuntime(task: () => Promise<void>): Promise<void> {
+function queueRuntime<T>(task: () => Promise<T>): Promise<T> {
     const run = runtimeQueue.then(task);
-    runtimeQueue = run.catch(() => {});
+    runtimeQueue = run.then(() => {}, () => {});
     return run;
 }
 
@@ -221,6 +236,84 @@ export function isSandboxEnabled(): boolean {
  */
 export function isSandboxSupported(): boolean {
     return SandboxManager.isSupportedPlatform();
+}
+
+/**
+ * Whether the user should run the one-time Windows setup, which makes the account
+ * sandboxed commands run as. Setting up again also repairs one that stopped working.
+ */
+export function needsSandboxSetup(): boolean {
+    return process.platform === 'win32' && isSandboxEnabled() && isSandboxSupported() && !isSandboxActive();
+}
+
+/** Why the sandbox last failed to start, if it was not just awaiting setup. */
+export function getSandboxStartError(): string | null {
+    return runtimeError;
+}
+
+// Start failures that running the one-time setup again fixes
+const SETUP_FIXES: ReadonlySet<WindowsSandboxErrorCode> = new Set<WindowsSandboxErrorCode>([
+    'not_provisioned',
+    'reinstall_required',
+    'profile_grant_outdated',
+    'wfp_loopback_mismatch',
+]);
+
+/**
+ * Whether the runtime failed to start for want of the one-time Windows setup: the sandbox
+ * account is missing, was set up by another release or for the other loopback mode, or its
+ * read grant on the user's profile is out of date.
+ */
+async function isAwaitingWindowsSetup(error: unknown): Promise<boolean> {
+    if (error instanceof WindowsSandboxError) {
+        return SETUP_FIXES.has(error.code);
+    }
+    // A missing account fails the dependency check first, with a plain Error
+    try {
+        const { windows } = buildRuntimeConfig(currentConfig, 'win32');
+        const user = await getWindowsSandboxUserStatusAsync({ srtWin: resolveSrtWin(windows?.srtWin) });
+        return !user.provisioned || !user.credPresent;
+    } catch {
+        return false;
+    }
+}
+
+// The Windows setup in flight, which a second request joins
+let windowsSetup: Promise<{ cancelled: boolean }> | undefined;
+
+/**
+ * Run the one-time Windows setup, then start the sandbox on it. Windows asks the user for
+ * administrator permission; dismissing that resolves as cancelled. Given it, the setup
+ * makes the user's profile readable to the sandbox account, which can take minutes on a
+ * large profile.
+ */
+export function setUpWindowsSandbox(): Promise<{ cancelled: boolean }> {
+    windowsSetup ??= queueRuntime(async (): Promise<{ cancelled: boolean }> => {
+        // The profile grant is not made while a session of ours runs
+        runtimeReady = false;
+        await SandboxManager.reset();
+
+        const { windows } = buildRuntimeConfig(currentConfig, 'win32');
+        const result = await installWindowsSandboxAsync({
+            srtWin: resolveSrtWin(windows?.srtWin),
+            // Loopback is open or closed for the whole install, and sessions must ask for that mode
+            allowLoopback: currentConfig.allowLocalBinding,
+            force: true,
+        });
+        if (result.cancelled) {
+            return { cancelled: true };
+        }
+        const grant = result.profileGrant;
+        log.info({ profileGrant: grant?.applied ? 'applied' : grant?.reason }, 'Windows sandbox set up');
+
+        if (currentConfig.enabled) {
+            await startRuntime();
+        }
+        return { cancelled: false };
+    }).finally(() => {
+        windowsSetup = undefined;
+    });
+    return windowsSetup;
 }
 
 /**

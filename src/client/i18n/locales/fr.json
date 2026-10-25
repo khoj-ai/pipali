@@ -368,6 +368,12 @@
         "protectedReadPlaceholder": "ex. Documents/mots-de-passe.docx",
         "failedToLoadSandbox": "Échec du chargement des paramètres du bac à sable",
         "failedToToggleSandbox": "Échec de l'activation/désactivation du bac à sable",
+        "sandboxSetupNeeded": "Windows a besoin d'une configuration unique pour exécuter les commandes dans un bac à sable. D'ici là, Pipali demande votre accord avant chacune.",
+        "sandboxSetupHint": "Windows demandera l'autorisation d'administrateur pour créer le compte du bac à sable.",
+        "sandboxSetUp": "Configurer le bac à sable",
+        "sandboxSettingUp": "En attente de Windows...",
+        "sandboxSetupCancelled": "Configuration annulée. Pipali continuera de demander avant d'exécuter des commandes.",
+        "failedToSetUpSandbox": "Échec de la configuration du bac à sable",
         "sandboxChangedInDesktopApp": "Les autorisations du bac à sable ne peuvent être modifiées que dans l'application de bureau Pipali.",
         "failedToSavePermissions": "Échec de l'enregistrement des permissions de fichiers"
     },

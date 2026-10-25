@@ -37,8 +37,12 @@ import {
     getSandboxConfig,
     getDefaultPaths,
     updateSandboxConfig,
+    isSandboxActive,
     isSandboxEnabled,
     isSandboxSupported,
+    needsSandboxSetup,
+    getSandboxStartError,
+    setUpWindowsSandbox,
 } from '../sandbox';
 import { confirmSandboxChange } from '../sandbox/permission-change';
 import { SETTINGS_TOKEN_HEADER } from '../../shared';
@@ -940,13 +944,34 @@ api.delete('/skills/:name', async (c) => {
 
 // Sandbox settings endpoints
 
-// Get sandbox status (enabled, supported, platform)
+// Get sandbox status (enabled, supported, running, platform, setup state)
 api.get('/sandbox/status', async (c) => {
     return c.json({
         enabled: isSandboxEnabled(),
         supported: isSandboxSupported(),
+        active: isSandboxActive(),
         platform: process.platform,
+        setupRequired: needsSandboxSetup(),
+        error: getSandboxStartError(),
     });
+});
+
+// Run the one-time Windows sandbox setup, which raises a UAC prompt. Only the desktop app's
+// settings page holds the settings token, so the prompt follows a click there.
+api.post('/sandbox/setup', async (c) => {
+    if (!hasSettingsToken(c.req.raw)) {
+        return c.json({ error: 'The sandbox is set up from Settings' }, 403);
+    }
+    if (process.platform !== 'win32') {
+        return c.json({ error: 'Only Windows needs the sandbox set up' }, 400);
+    }
+    try {
+        const { cancelled } = await setUpWindowsSandbox();
+        return c.json({ cancelled, active: isSandboxActive(), error: getSandboxStartError() });
+    } catch (err) {
+        log.error({ err }, 'Windows sandbox setup failed');
+        return c.json({ error: err instanceof Error ? err.message : 'Sandbox setup failed' }, 500);
+    }
 });
 
 // Get sandbox settings (includes default paths so the UI can filter them out)

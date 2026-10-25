@@ -37,7 +37,12 @@ interface DefaultPaths {
 interface SandboxStatus {
     enabled: boolean;
     supported: boolean;
+    active: boolean;
     platform: string;
+    /** Windows needs its one-time setup before commands can run sandboxed */
+    setupRequired: boolean;
+    /** Why the sandbox last failed to start, beyond awaiting setup */
+    error: string | null;
 }
 
 /** Filter out system-managed default paths for display */
@@ -74,6 +79,8 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
     const [sandboxConfig, setSandboxConfig] = useState<SandboxConfig | null>(null);
     const [defaultPaths, setDefaultPaths] = useState<DefaultPaths | null>(null);
     const [sandboxError, setSandboxError] = useState<string | null>(null);
+    const [settingUpSandbox, setSettingUpSandbox] = useState(false);
+    const [sandboxSetupError, setSandboxSetupError] = useState<string | null>(null);
     // Only the desktop app holds the settings token the server asks for to change the sandbox
     const canChangeSandbox = isTauri();
 
@@ -187,6 +194,28 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
         } catch (e) {
             console.error('Failed to toggle sandbox', e);
             setSandboxError(e instanceof Error ? e.message : t('settings.failedToToggleSandbox'));
+        }
+    };
+
+    /** Run the one-time Windows sandbox setup, which raises a UAC prompt. */
+    const handleSetUpSandbox = async () => {
+        setSettingUpSandbox(true);
+        setSandboxSetupError(null);
+        try {
+            const res = await apiFetch('/api/sandbox/setup', {
+                method: 'POST',
+                headers: await getSandboxSettingsHeaders(),
+            });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || t('settings.failedToSetUpSandbox'));
+            if (data.cancelled) setSandboxSetupError(t('settings.sandboxSetupCancelled'));
+            const statusRes = await apiFetch('/api/sandbox/status');
+            if (statusRes.ok) setSandboxStatus(await statusRes.json());
+        } catch (e) {
+            console.error('Failed to set up sandbox', e);
+            setSandboxSetupError(e instanceof Error ? e.message : t('settings.failedToSetUpSandbox'));
+        } finally {
+            setSettingUpSandbox(false);
         }
     };
 
@@ -450,6 +479,41 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                                         <AlertCircle size={14} />
                                         <span>{t('settings.sandboxChangedInDesktopApp')}</span>
                                     </p>
+                                </div>
+                            )}
+                            {canChangeSandbox && sandboxStatus.setupRequired && (
+                                <div className="settings-section-body">
+                                    <p className="settings-notice">
+                                        <AlertCircle size={14} />
+                                        <span>{t('settings.sandboxSetupNeeded')}</span>
+                                    </p>
+                                    {(sandboxSetupError ?? sandboxStatus.error) && (
+                                        <div className="settings-error">
+                                            <AlertCircle size={14} />
+                                            <span>{sandboxSetupError ?? sandboxStatus.error}</span>
+                                        </div>
+                                    )}
+                                    <p className="settings-field-hint">{t('settings.sandboxSetupHint')}</p>
+                                    <div className="settings-actions">
+                                        <button
+                                            id="sandbox-setup"
+                                            onClick={handleSetUpSandbox}
+                                            disabled={settingUpSandbox}
+                                            className="settings-save-btn"
+                                        >
+                                            {settingUpSandbox ? (
+                                                <>
+                                                    <Loader2 size={16} className="spinning" />
+                                                    <span>{t('settings.sandboxSettingUp')}</span>
+                                                </>
+                                            ) : (
+                                                <>
+                                                    <Shield size={16} />
+                                                    <span>{t('settings.sandboxSetUp')}</span>
+                                                </>
+                                            )}
+                                        </button>
+                                    </div>
                                 </div>
                             )}
                         </div>}
