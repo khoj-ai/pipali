@@ -12,50 +12,128 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut};
 use tauri_plugin_shell::{process::CommandChild, ShellExt};
 
 /// Check for app updates and prompt user to install
+/// Where users download Pipali when the app cannot update itself
 #[cfg(desktop)]
-async fn check_for_updates(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+const DOWNLOAD_URL: &str = "https://pipali.ai/download";
+
+#[cfg(desktop)]
+async fn check_for_updates(app: &AppHandle) {
     use tauri_plugin_dialog::{DialogExt, MessageDialogButtons};
     use tauri_plugin_updater::UpdaterExt;
 
     if cfg!(debug_assertions) {
         log::info!("[Updater] Skipping update check in debug build");
-        return Ok(());
+        return;
     }
 
-    let Some(updater) = app.updater_builder().build().ok() else {
-        return Ok(());
+    let update = match app.updater_builder().build() {
+        Ok(updater) => updater.check().await,
+        Err(e) => Err(e),
+    };
+    let update = match update {
+        Ok(Some(update)) => update,
+        Ok(None) => {
+            log::info!("[Updater] No updates available");
+            return;
+        }
+        Err(e) => {
+            log::warn!("[Updater] Failed to check for updates: {}", e);
+            report_update_failure(app, "check", None, &e.to_string());
+            return;
+        }
     };
 
-    let update = updater.check().await?;
+    let version = update.version.clone();
+    let body = update.body.clone().unwrap_or_default();
 
-    if let Some(update) = update {
-        let version = update.version.clone();
-        let body = update.body.clone().unwrap_or_default();
+    let should_update = app
+        .dialog()
+        .message(format!(
+            "Update to {} is available!\n\nRelease notes:\n{}",
+            version, body
+        ))
+        .title("New Version Available")
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Update".to_string(),
+            "Later".to_string(),
+        ))
+        .blocking_show();
+    if !should_update {
+        return;
+    }
 
-        let should_update = app
-            .dialog()
-            .message(format!(
-                "Update to {} is available!\n\nRelease notes:\n{}",
-                version, body
-            ))
-            .title("New Version Available")
-            .buttons(MessageDialogButtons::OkCancelCustom(
-                "Update".to_string(),
-                "Later".to_string(),
-            ))
-            .blocking_show();
-
-        if should_update {
-            log::info!("[Updater] Downloading and installing update...");
-            update.download_and_install(|_, _| {}, || {}).await?;
+    log::info!("[Updater] Downloading and installing update...");
+    // Downloading also checks the update's signature, so a release signed wrongly fails here
+    let installed = match update.download(|_, _| {}, || {}).await {
+        Ok(bytes) => update.install(bytes).map_err(|e| ("install", e)),
+        Err(e) => Err(("download", e)),
+    };
+    match installed {
+        Ok(()) => {
             log::info!("[Updater] Update installed, restarting...");
             app.restart();
         }
-    } else {
-        log::info!("[Updater] No updates available");
+        Err((stage, e)) => {
+            log::error!("[Updater] Update to {} failed at {}: {}", version, stage, e);
+            report_update_failure(app, stage, Some(&version), &e.to_string());
+            offer_manual_update(app, &version);
+        }
     }
+}
 
-    Ok(())
+/// Tell the user the update did not install, and offer the download that will.
+#[cfg(desktop)]
+fn offer_manual_update(app: &AppHandle, version: &str) {
+    use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+    use tauri_plugin_opener::OpenerExt;
+
+    let download = app
+        .dialog()
+        .message(format!(
+            "Pipali couldn't install version {}.\n\nDownload it from pipali.ai and install it to update.",
+            version
+        ))
+        .title("Update Failed")
+        .kind(MessageDialogKind::Error)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Download".to_string(),
+            "Close".to_string(),
+        ))
+        .blocking_show();
+    if download {
+        if let Err(e) = app.opener().open_url(DOWNLOAD_URL, None::<&str>) {
+            log::warn!("[Updater] Failed to open {}: {}", DOWNLOAD_URL, e);
+        }
+    }
+}
+
+/// Report an update failure to Pipali's server.
+/// Waits for the server, which may still be starting when the startup check fails.
+#[cfg(desktop)]
+fn report_update_failure(app: &AppHandle, stage: &str, target_version: Option<&str>, error: &str) {
+    let state: State<SidecarState> = app.state();
+    let (host, port) = (state.host.clone(), state.port);
+    let body = serde_json::json!({
+        "stage": stage,
+        "currentVersion": app.package_info().version.to_string(),
+        "targetVersion": target_version,
+        "error": error,
+    })
+    .to_string();
+
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Err(e) = wait_for_sidecar_ready(&host, port) {
+            log::warn!("[Updater] Could not report the update failure: {}", e);
+            return;
+        }
+        let url = format!("http://{}:{}/api/telemetry/app-update-failed", host, port);
+        if let Err(e) = ureq::post(&url)
+            .set("Content-Type", "application/json")
+            .send_string(&body)
+        {
+            log::warn!("[Updater] Could not report the update failure: {}", e);
+        }
+    });
 }
 
 /// Show the app in the dock and Cmd+Tab switcher (macOS)
@@ -462,9 +540,7 @@ pub fn run() {
 
                 // Check for updates on startup (non-blocking)
                 tauri::async_runtime::spawn(async move {
-                    if let Err(e) = check_for_updates(&handle).await {
-                        log::warn!("[Updater] Failed to check for updates: {}", e);
-                    }
+                    check_for_updates(&handle).await;
                 });
             }
 

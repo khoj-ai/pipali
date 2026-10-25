@@ -1023,6 +1023,24 @@ api.post('/telemetry/client-error', zValidator('json', clientErrorSchema), async
     return c.json({ received: true });
 });
 
+const appUpdateFailureSchema = z.object({
+    stage: z.enum(['check', 'download', 'install']),
+    currentVersion: z.string().max(50),
+    targetVersion: z.string().max(50).nullish(),
+    error: z.string(),
+});
+api.post('/telemetry/app-update-failed', zValidator('json', appUpdateFailureSchema), async (c) => {
+    const { stage, currentVersion, targetVersion, error } = c.req.valid('json');
+    const context = { component: 'updater', stage, currentVersion, targetVersion, err: { message: error.slice(0, 1000) } };
+    // A check fails whenever the user is offline; a download or install they asked for should not fail
+    if (stage === 'check') {
+        log.warn(context, `Desktop app could not check for updates: ${error.slice(0, 500)}`);
+    } else {
+        log.error(context, `Desktop app update to ${targetVersion} failed at ${stage}: ${error.slice(0, 500)}`);
+    }
+    return c.json({ received: true });
+});
+
 // ============================================
 // Voice (speech-to-text / text-to-speech)
 // ============================================
