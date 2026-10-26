@@ -8,8 +8,7 @@ import {
     isSandboxActive,
     setUpSandboxOnFirstNeed,
     prepareSandboxedCommand,
-    annotateStderrWithSandboxFailures,
-    SANDBOX_TEMP_DIR,
+    describeSandboxRefusals,
     type SandboxedCommand,
 } from '../../sandbox';
 import { createChildLogger } from '../../logger';
@@ -18,15 +17,11 @@ import {
     getBackgroundProcess,
     startBackgroundProcess,
     stopBackgroundProcess,
+    type StartBackgroundProcessOptions,
 } from '../../events/background-processes';
 import type { User } from '../../db/schema';
 
 const log = createChildLogger({ component: 'shell' });
-
-/** How stderr reads when the OS refuses a file operation. */
-const ACCESS_DENIED_MARKERS = process.platform === 'win32'
-    ? ['Access is denied', 'Access to the path', 'EPERM', 'EACCES', 'Permission denied']
-    : ['Operation not permitted', 'EPERM', 'Permission denied'];
 
 /**
  * Operation type indicating whether command modifies state
@@ -199,7 +194,7 @@ export async function shellCommand(
         log.debug(`Sandbox mode requested but unavailable, falling back to direct mode (requires confirmation)`);
     }
 
-    // Files this run's sandbox violations, so a rerun is not told of an earlier run's
+    // Files this run's sandbox refusals, so a rerun is not told of an earlier run's
     const commandId = crypto.randomUUID();
 
     // Wrap before deciding whether to ask: a command the sandbox cannot take goes to the user instead
@@ -269,7 +264,10 @@ export async function shellCommand(
         const env = await buildBundledRuntimeEnv(baseEnv);
 
         if (args.run_in_background) {
-            return startInBackground({ command, workingDir, shellCmd, env, query }, options);
+            const describeExit = sandboxed
+                ? (exitCode: number, errors: string) => describeSandboxRefusals(commandId, { exitCode, errors })
+                : undefined;
+            return startInBackground({ command, workingDir, shellCmd, env, query, describeExit }, options);
         }
 
         const proc = Bun.spawn({
@@ -295,15 +293,6 @@ export async function shellCommand(
                 .trim();
         }
 
-        // A refused file operation reads the same with or without the runtime's annotation
-        const isSandboxViolation = useSandbox && exitCode !== 0 &&
-            ACCESS_DENIED_MARKERS.some(marker => stderr.includes(marker));
-
-        // Add what the sandbox runtime recorded refusing, such as a domain off the allowlist
-        if (useSandbox && stderr) {
-            stderr = annotateStderrWithSandboxFailures(commandId, stderr);
-        }
-
         // Build output message
         let output = '';
 
@@ -325,15 +314,13 @@ export async function shellCommand(
             output += `\n\n[Exit code: ${exitCode}]`;
         }
 
-        // Add sandbox violation notice if detected
-        if (isSandboxViolation) {
-            output += `\n\n[Sandbox violation: The command attempted an operation outside the allowed sandbox paths. ` +
-                `Write operations are only allowed in ${SANDBOX_TEMP_DIR} and ~/.pipali. ` +
-                `Use execution_mode: "direct" if you need full filesystem access (requires user confirmation).]`;
-            log.error(`Sandbox violation detected for command: ${command}`);
+        const refusals = sandboxed ? await describeSandboxRefusals(commandId, { exitCode, errors: stderr }) : '';
+        if (refusals) {
+            output += `\n\n${refusals}`;
+            log.info({ command }, 'The sandbox refused part of a command');
         }
 
-        log.debug(`Command completed with exit code ${exitCode}${isSandboxViolation ? ' (sandbox violation)' : ''}`);
+        log.debug(`Command completed with exit code ${exitCode}${refusals ? ' (refused by the sandbox)' : ''}`);
 
         return {
             query,
@@ -371,10 +358,17 @@ export async function shellCommand(
  * reads with tail/grep, and the conversation is told when the command exits.
  */
 function startInBackground(
-    prepared: { command: string; workingDir: string; shellCmd: string[]; env: Record<string, string | undefined>; query: string },
+    prepared: {
+        command: string;
+        workingDir: string;
+        shellCmd: string[];
+        env: Record<string, string | undefined>;
+        query: string;
+        describeExit?: StartBackgroundProcessOptions['describeExit'];
+    },
     options?: ShellCommandOptions,
 ): ShellCommandResult {
-    const { command, workingDir, shellCmd, env, query } = prepared;
+    const { command, workingDir, shellCmd, env, query, describeExit } = prepared;
     const base = { query, file: workingDir, uri: workingDir };
 
     if (!options?.conversationId || !options?.user) {
@@ -389,6 +383,7 @@ function startInBackground(
             command,
             conversationId: options.conversationId,
             user: options.user,
+            describeExit,
         });
 
         return {

@@ -14,6 +14,7 @@ import {
     type SandboxConfig,
 } from '../../../src/server/sandbox/config';
 import {
+    describeSandboxRefusals,
     getSandboxEnvOverrides,
     initializeSandboxWithConfig,
     isPathDeniedForRead,
@@ -172,6 +173,19 @@ describe('isPathWithinAllowedWrite', () => {
         } finally {
             await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false });
         }
+    });
+});
+
+describe('describeSandboxRefusals', () => {
+    // Windows' ACLs and Linux's read-only binds refuse without a record, leaving the error
+    test.each([
+        ['win32', 1, "Set-Content : Access to the path 'C:\\Users\\alice\\out.txt' is denied.", true],
+        ['linux', 1, 'bash: /home/alice/out.txt: Read-only file system', true],
+        ['linux', 1, 'cat: /tmp/locked.txt: Permission denied', false],
+        ['darwin', 0, 'mkdir: /Users/alice/out: Operation not permitted', false],
+    ] as const)('on %s, exit %d with %p, points at the sandbox: %p', async (platform, exitCode, errors, told) => {
+        const note = await describeSandboxRefusals(crypto.randomUUID(), { exitCode, errors }, platform);
+        expect(note.startsWith('[sandbox_refusal]')).toBe(told);
     });
 });
 

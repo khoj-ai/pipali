@@ -154,7 +154,7 @@ describeHere('Windows sandbox', () => {
     test('is refused writes elsewhere, and says so', async () => {
         const { output } = await run(`Set-Content -LiteralPath '${outsideFile}' -Value 'escaped'`);
         expect(fs.existsSync(outsideFile)).toBe(false);
-        expect(output).toContain('Sandbox violation');
+        expect(output).toContain('Sandboxed commands write only to');
     });
 
     test("reads the user's files", async () => {
@@ -218,7 +218,7 @@ describeHere('Windows sandbox', () => {
         const { output } = await run(`bun -e "await fetch('https://example.com')"`);
         expect(output).not.toMatch(/status \d+/);
         expect(output).toContain('example.com');
-        expect(output).toContain('<sandbox_violations>');
+        expect(output).toContain('[sandbox_refusal]');
     });
 
     test('leaves nothing running once a command times out', async () => {

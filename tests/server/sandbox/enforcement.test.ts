@@ -31,6 +31,7 @@ const protectedDir = path.join(fixtures, 'protected');
 const readableDir = path.join(fixtures, 'readable');
 const deniedDir = path.join(fixtures, 'denied');
 const insideFile = path.join(fixtures, 'inside.txt');
+const unrunnableScript = path.join(readableDir, 'unrunnable.sh');
 const deniedFile = path.join(deniedDir, 'escaped.txt');
 // Only the sandbox failing would create this
 const outsideFile = path.join(os.homedir(), `pipali-sandbox-test-outside-${stamp}.txt`);
@@ -52,6 +53,11 @@ async function run(command: string) {
         { confirmationContext },
     );
     return { output: String(result.compiled), asked };
+}
+
+/** How macOS names a path in its refusals: resolved, so /tmp reads /private/tmp. */
+function resolved(file: string): string {
+    return path.join(fs.realpathSync(path.dirname(file)), path.basename(file));
 }
 
 function writeFixture(file: string, content: string) {
@@ -97,7 +103,9 @@ describeHere('macOS and Linux sandbox', () => {
         const { output, asked } = await run(`echo escaped > '${file}'`);
         expect(asked).toBe(0);
         expect(fs.existsSync(file)).toBe(false);
-        expect(output).toContain('[Sandbox violation');
+        expect(output).toContain('Sandboxed commands write only to');
+        // Linux refuses with a read-only bind, which leaves no record to name the path from
+        if (process.platform === 'darwin') expect(output).toContain(`- bash: file-write-create ${resolved(file)}`);
     });
 
     test("reads the user's files, but not a protected path", async () => {
@@ -108,6 +116,24 @@ describeHere('macOS and Linux sandbox', () => {
         const secret = await run(`cat '${path.join(protectedDir, 'secret.txt')}'`);
         expect(secret.asked).toBe(0);
         expect(secret.output).not.toContain('protected-secret-value');
+    });
+
+    // Linux hides a protected path behind an empty one, so its reads fail as missing files
+    test.if(process.platform === 'darwin')('names a refused read the command kept quiet about', async () => {
+        const secret = path.join(protectedDir, 'secret.txt');
+        const { output } = await run(`cat '${secret}' 2>/dev/null || exit 3`);
+        expect(output).toContain('[sandbox_refusal]');
+        expect(output).toContain(`- cat: file-read-data ${resolved(secret)}`);
+        // With no refusal error to go by, the read may as well have been one a tool probes for
+        expect(output).not.toContain('Sandboxed commands write only to');
+    });
+
+    test('does not point at the sandbox for a failure it did not cause', async () => {
+        // Not executable, which refuses root too
+        writeFixture(unrunnableScript, 'echo ran');
+        const { output } = await run(`'${unrunnableScript}'`);
+        expect(output).toContain('Permission denied');
+        expect(output).not.toContain('[sandbox_refusal]');
     });
 
     test('reaches an allowed domain with curl', async () => {
@@ -124,14 +150,21 @@ describeHere('macOS and Linux sandbox', () => {
         const sharedPrefix = `: ${'x'.repeat(100)};`;
 
         const refused = await run(`${sharedPrefix} curl -sS --max-time 10 https://example.com`);
-        expect(refused.output).toContain('<sandbox_violations>');
+        expect(refused.output).toContain('[sandbox_refusal]');
         expect(refused.output).toContain('example.com');
-        // A refused domain is not a refused write
-        expect(refused.output).not.toContain('[Sandbox violation');
+        expect(refused.output).toContain('Sandboxed commands write only to');
 
         const later = await run(`${sharedPrefix} echo later >&2`);
         expect(later.output).toContain('later');
-        expect(later.output).not.toContain('<sandbox_violations>');
+        expect(later.output).not.toContain('[sandbox_refusal]');
+    });
+
+    test('reports a refused connection the command exited 0 on', async () => {
+        // The refusal reaches curl as an HTTP 403, which it exits 0 on without -f
+        const { output } = await run(`curl -s -o /dev/null -w '%{http_code}' --max-time 10 http://example.com`);
+        expect(output).toMatch(/^403\b/);
+        expect(output).not.toContain('[Exit code');
+        expect(output).toContain('- network-outbound example.com:80');
     });
 
     test("passes a Python heredoc's != through as written", async () => {

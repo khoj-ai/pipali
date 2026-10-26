@@ -77,7 +77,9 @@ async function startRuntime(): Promise<void> {
         const runtimeConfig = process.platform === 'win32'
             ? prepareWindowsSession(currentConfig)
             : buildRuntimeConfig(currentConfig);
-        await SandboxManager.initialize(runtimeConfig);
+        // macOS's log monitor records each refusal its sandbox makes. Linux's needs the seccomp
+        // helper, which the open unix sockets leave out, so it would only add a way to fail.
+        await SandboxManager.initialize(runtimeConfig, undefined, process.platform === 'darwin');
 
         const { warnings } = await SandboxManager.checkDependenciesAsync();
         if (warnings.length > 0) {
@@ -390,7 +392,7 @@ export function isSandboxActive(): boolean {
  * Throws rather than hand back a command that would run outside the sandbox.
  *
  * @param command - The command to wrap
- * @param commandId - Files the run's violations for annotateStderrWithSandboxFailures
+ * @param commandId - Files the run's refusals for describeSandboxRefusals
  * @returns The sandboxed command string
  */
 export async function wrapCommandWithSandbox(command: string, commandId?: string): Promise<string> {
@@ -683,24 +685,79 @@ export async function updateSandboxConfig(config: Partial<SandboxConfig>): Promi
     await reloadSandboxConfig();
 }
 
-/**
- * Annotate stderr with the violations the sandbox runtime recorded for a run.
- *
- * @param commandId - The id the run's command was wrapped with
- * @param stderr - The stderr output from the command
- * @returns The annotated stderr with sandbox failure information
- */
-export function annotateStderrWithSandboxFailures(commandId: string, stderr: string): string {
-    if (!isSandboxActive()) {
-        return stderr;
-    }
+// How an operation the OS refused reads in a command's output. That is all Windows' ACLs
+// and Linux's read-only binds leave; macOS also records each refusal, as the proxy does
+// each refused connection.
+const REFUSAL_ERRORS: Partial<Record<NodeJS.Platform, string[]>> = {
+    darwin: ['Operation not permitted', 'EPERM'],
+    linux: ['Read-only file system', 'EROFS', 'Operation not permitted', 'EPERM'],
+    win32: ['Access is denied', 'Access to the path', 'UnauthorizedAccessException', 'PermissionError', 'Permission denied', 'EPERM', 'EACCES'],
+};
 
-    try {
-        return SandboxManager.annotateStderrWithSandboxFailures(commandId, stderr);
-    } catch (error) {
-        log.error({ err: error }, 'Failed to annotate stderr with sandbox failures');
-        return stderr;
+// macOS records refusals from its system log, which ran up to 11ms behind the command
+// when measured
+const REFUSAL_LOG_DELAY_MS = 50;
+
+// A command walking a protected folder is refused once per file in it
+const MAX_REFUSALS_SHOWN = 20;
+
+/**
+ * A recorded refusal without what its section already says: "bash(4095) deny(1)
+ * file-write-create /x" reads "bash: file-write-create /x", and the proxy's
+ * "deny network-outbound host:443 (…)" reads "network-outbound host:443 (…)".
+ */
+function readableRefusal(line: string): string {
+    return line.replace(/^(\S+)\(\d+\) deny\(\d+\) /, '$1: ').replace(/^deny /, '');
+}
+
+/**
+ * What the sandbox refused while a command ran, to end its output with.
+ *
+ * - The refusals the runtime recorded under the id the command was wrapped with, when it
+ *   failed. A refused connection always, since an HTTP client can report one and exit 0.
+ * - The sandbox's limits, when the command failed with a refusal error or a connection was
+ *   refused. A refused read the command shrugged off, such as an .env a tool probes for,
+ *   is listed without them.
+ *
+ * @param errors - What the command printed that a refusal error would be in
+ */
+export async function describeSandboxRefusals(
+    commandId: string,
+    { exitCode, errors }: { exitCode: number; errors: string },
+    platform: NodeJS.Platform = process.platform,
+): Promise<string> {
+    const failed = exitCode !== 0;
+    if (failed && platform === 'darwin') {
+        await Bun.sleep(REFUSAL_LOG_DELAY_MS);
     }
+    let recorded: string[] = [];
+    try {
+        recorded = SandboxManager.getSandboxViolationStore().getViolationsForCommand(commandId).map(v => readableRefusal(v.line));
+    } catch (error) {
+        log.warn({ err: error }, 'Could not read what the sandbox refused');
+    }
+    const isConnection = (line: string) => line.includes('network-outbound');
+    const refusals = [...new Set(recorded)].filter(line => failed || isConnection(line));
+    const refusalError = failed && (REFUSAL_ERRORS[platform] ?? []).some(error => errors.includes(error));
+
+    const lines: string[] = [];
+    if (refusals.length > 0) {
+        const unshown = refusals.length - MAX_REFUSALS_SHOWN;
+        lines.push(
+            'Refused:',
+            ...refusals.slice(0, MAX_REFUSALS_SHOWN).map(refusal => `- ${refusal}`),
+            ...(unshown > 0 ? [`- and ${unshown} more`] : []),
+        );
+    }
+    if (refusalError || refusals.some(isConnection)) {
+        lines.push(
+            ...(lines.length > 0 ? [''] : []),
+            `Sandboxed commands write only to ${currentConfig.allowedWritePaths.join(', ')}, ` +
+            'read no protected path such as ~/.ssh, and reach only the domains the sandbox settings allow.',
+            'execution_mode "direct" runs a command outside the sandbox after prompting the user to approve it.',
+        );
+    }
+    return lines.length > 0 ? ['[sandbox_refusal]', ...lines].join('\n') : '';
 }
 
 /**
