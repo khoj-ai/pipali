@@ -516,6 +516,21 @@ export function SettingsPage({ onUserContextSaved }: SettingsPageProps) {
                                     </div>
                                 </div>
                             )}
+                            {sandboxStatus.enabled && !sandboxStatus.active && !sandboxStatus.setupRequired && sandboxStatus.error && (
+                                <div className="settings-section-body">
+                                    <p className="settings-notice">
+                                        <AlertCircle size={14} />
+                                        <span>{t('settings.sandboxNotRunning')}</span>
+                                    </p>
+                                    <div className="settings-error">
+                                        <AlertCircle size={14} />
+                                        <span>{sandboxStatus.error}</span>
+                                    </div>
+                                    {sandboxStatus.platform === 'linux' && (
+                                        <p className="settings-field-hint">{t('settings.sandboxLinuxDependenciesHint')}</p>
+                                    )}
+                                </div>
+                            )}
                         </div>}
 
                         {/* File permissions */}

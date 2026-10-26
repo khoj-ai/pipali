@@ -359,6 +359,8 @@
         "protectedReadHint": "访问这些文件或文件夹始终需要确认。",
         "failedToLoadSandbox": "加载沙盒设置失败",
         "failedToToggleSandbox": "切换沙盒失败",
+        "sandboxNotRunning": "沙盒无法启动，因此 Pipali 会在运行每条命令前征求你的确认。",
+        "sandboxLinuxDependenciesHint": "请用包管理器安装 bubblewrap、socat 和 ripgrep，然后重启 Pipali。",
         "sandboxSetupNeeded": "Windows 需要完成一次性设置才能在沙盒中运行命令。在此之前，Pipali 会在运行每条命令前征求你的确认。",
         "sandboxSetupHint": "Windows 会请求管理员权限，以创建沙盒账户。",
         "sandboxSetUp": "设置沙盒",

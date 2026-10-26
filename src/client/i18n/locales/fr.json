@@ -368,6 +368,8 @@
         "protectedReadPlaceholder": "ex. Documents/mots-de-passe.docx",
         "failedToLoadSandbox": "Échec du chargement des paramètres du bac à sable",
         "failedToToggleSandbox": "Échec de l'activation/désactivation du bac à sable",
+        "sandboxNotRunning": "Le bac à sable n'a pas pu démarrer, donc Pipali demande ton accord avant chaque commande.",
+        "sandboxLinuxDependenciesHint": "Installe bubblewrap, socat et ripgrep avec ton gestionnaire de paquets, puis redémarre Pipali.",
         "sandboxSetupNeeded": "Windows a besoin d'une configuration unique pour exécuter les commandes dans un bac à sable. D'ici là, Pipali demande votre accord avant chacune.",
         "sandboxSetupHint": "Windows demandera l'autorisation d'administrateur pour créer le compte du bac à sable.",
         "sandboxSetUp": "Configurer le bac à sable",

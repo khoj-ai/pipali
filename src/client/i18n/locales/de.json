@@ -359,6 +359,8 @@
         "protectedReadHint": "Für diese Dateien oder Ordner immer deine Bestätigung verlangen.",
         "failedToLoadSandbox": "Sandbox-Einstellungen konnten nicht geladen werden",
         "failedToToggleSandbox": "Sandbox konnte nicht umgeschaltet werden",
+        "sandboxNotRunning": "Die Sandbox konnte nicht starten, daher fragt Pipali vor jedem Befehl nach.",
+        "sandboxLinuxDependenciesHint": "Installiere bubblewrap, socat und ripgrep mit deinem Paketmanager und starte Pipali danach neu.",
         "sandboxSetupNeeded": "Windows braucht eine einmalige Einrichtung, bevor Befehle in der Sandbox laufen können. Bis dahin fragt Pipali vor jedem Befehl nach.",
         "sandboxSetupHint": "Windows fragt nach Administratorrechten, um das Sandbox-Konto anzulegen.",
         "sandboxSetUp": "Sandbox einrichten",

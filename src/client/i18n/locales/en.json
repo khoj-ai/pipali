@@ -359,6 +359,8 @@
         "protectedReadHint": "Always require your confirmation to view these files or folders.",
         "failedToLoadSandbox": "Failed to load sandbox settings",
         "failedToToggleSandbox": "Failed to toggle sandbox",
+        "sandboxNotRunning": "The sandbox could not start, so Pipali asks before running each command.",
+        "sandboxLinuxDependenciesHint": "Install bubblewrap, socat and ripgrep with your package manager, then restart Pipali.",
         "sandboxSetupNeeded": "Windows needs a one-time setup before it can sandbox commands. Until then, Pipali asks before running each one.",
         "sandboxSetupHint": "Windows will ask for administrator permission to create the sandboxed account.",
         "sandboxSetUp": "Set up sandbox",
