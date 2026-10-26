@@ -5,6 +5,7 @@
 
 import path from 'path';
 import os from 'os';
+import { isCaseInsensitiveFS } from '../utils';
 
 /**
  * Patterns that match sensitive file paths requiring user confirmation.
@@ -15,7 +16,7 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
     /^\/etc\//,
     /^\/var\/log\//,
     /^\/private\/etc\//,  // macOS
-    /^\/private\/var\//,  // macOS
+    /^\/private\/var\/log\//,  // macOS (not /private/var, which holds every user's temp folder)
 
     // SSH and security keys
     /[\/\\]\.ssh[\/\\]/,
@@ -64,18 +65,22 @@ const SENSITIVE_PATH_PATTERNS: RegExp[] = [
  * @returns true if the path matches sensitive patterns
  */
 export function isSensitivePath(filePath: string): boolean {
-    // Normalize the path for consistent matching
-    const normalizedPath = path.normalize(filePath);
+    const comparable = toComparable(filePath);
+    return SENSITIVE_PATH_PATTERNS.some(pattern => pattern.test(comparable));
+}
 
-    // Expand ~ to home directory for matching
+/**
+ * The path with ~ expanded, lowercased where the filesystem ignores case, so it meets the
+ * lowercase patterns however it is cased.
+ */
+function toComparable(filePath: string): string {
+    const normalizedPath = path.normalize(filePath);
     const expandedPath = normalizedPath.startsWith('~/')
         ? path.join(os.homedir(), normalizedPath.slice(2))
         : normalizedPath === '~'
             ? os.homedir()
             : normalizedPath;
-
-    // Check against all sensitive patterns
-    return SENSITIVE_PATH_PATTERNS.some(pattern => pattern.test(expandedPath));
+    return isCaseInsensitiveFS ? expandedPath.toLowerCase() : expandedPath;
 }
 
 /**
@@ -85,10 +90,7 @@ export function isSensitivePath(filePath: string): boolean {
  * @returns Description of the sensitive path type, or null if not sensitive
  */
 export function getSensitivePathReason(filePath: string): string | null {
-    const normalizedPath = path.normalize(filePath);
-    const expandedPath = normalizedPath.startsWith('~/')
-        ? path.join(os.homedir(), normalizedPath.slice(2))
-        : normalizedPath;
+    const expandedPath = toComparable(filePath);
 
     if (/[\/\\]\.ssh[\/\\]|[\/\\]\.ssh$/.test(expandedPath)) {
         return 'SSH keys and configuration';
@@ -108,7 +110,7 @@ export function getSensitivePathReason(filePath: string): string | null {
     if (/^\/etc\/|^\/private\/etc\//.test(expandedPath)) {
         return 'system configuration files';
     }
-    if (/^\/var\/log\/|^\/private\/var\//.test(expandedPath)) {
+    if (/^\/var\/log\/|^\/private\/var\/log\//.test(expandedPath)) {
         return 'system log files';
     }
     if (/[\/\\]\.npmrc$|[\/\\]\.yarnrc$|[\/\\]\.pypirc$/.test(expandedPath)) {

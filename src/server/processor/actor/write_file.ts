@@ -6,6 +6,7 @@ import {
     requestOperationConfirmation,
 } from '../confirmation';
 import { isPathWithinAllowedWrite } from '../../sandbox';
+import { resolveLinks } from './actor.utils';
 import { isMemoryFile, memoryWriteError, stampProvenance } from '../../memory';
 import { createChildLogger } from '../../logger';
 
@@ -80,14 +81,14 @@ export async function writeFile(
             ? file_path
             : path.resolve(os.homedir(), file_path);
 
-        // Check if the file already exists
-        const file = Bun.file(absolutePath);
-        const exists = await file.exists();
+        // The file the write lands on, links resolved, is the one judged and written
+        const target = await resolveLinks(absolutePath);
+        const exists = await Bun.file(target).exists();
 
         // Validate and stamp before the size accounting below, so what is reported
         // matches what lands on disk
         let contentToWrite = content;
-        if (isMemoryFile(absolutePath)) {
+        if (isMemoryFile(absolutePath) || isMemoryFile(target)) {
             const rejection = memoryWriteError(content);
             if (rejection) {
                 return { query, file: file_path, uri: file_path, compiled: rejection };
@@ -95,12 +96,8 @@ export async function writeFile(
             contentToWrite = stampProvenance(content, options?.conversationId);
         }
 
-        // Create parent directories if they don't exist
-        const parentDir = path.dirname(absolutePath);
-        await fs.mkdir(parentDir, { recursive: true });
-
-        // Check if path is within allowed write directories (skip confirmation if so)
-        const skipConfirmation = isPathWithinAllowedWrite(absolutePath);
+        const skipConfirmation = isPathWithinAllowedWrite(absolutePath) && isPathWithinAllowedWrite(target);
+        const shownPath = target === path.resolve(absolutePath) ? file_path : target;
 
         // Request user confirmation if:
         // 1. Path is NOT within allowed write directories, AND
@@ -112,14 +109,14 @@ export async function writeFile(
 
             const confirmResult = await requestOperationConfirmation(
                 'write_file',
-                file_path,
+                shownPath,
                 options.confirmationContext,
                 {
                     toolName: 'write_file',
                     toolArgs: { file_path, content: `[${lineCount} lines, ${byteSize} bytes]` },
                     additionalMessage: `This will ${action} the file with ${lineCount} lines (${byteSize} bytes).`,
                     diff: {
-                        filePath: file_path,
+                        filePath: shownPath,
                         newText: contentToWrite,
                         isNewFile: !exists,
                     },
@@ -136,8 +133,8 @@ export async function writeFile(
             }
         }
 
-        // Write the file
-        await fs.writeFile(absolutePath, contentToWrite, 'utf-8');
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        await fs.writeFile(target, contentToWrite, 'utf-8');
 
         const action = exists ? 'Updated' : 'Created';
         const lineCount = contentToWrite.split('\n').length;

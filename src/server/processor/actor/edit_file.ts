@@ -15,11 +15,6 @@ const log = createChildLogger({ component: 'edit_file' });
 
 const editQueues = new Map<string, Promise<void>>();
 
-interface ResolvedEditPath {
-    resolvedPath: string;
-    queuePath: string;
-}
-
 function getEditQueueKey(filePath: string): string {
     const normalized = path.normalize(filePath);
     return isCaseInsensitiveFS ? normalized.toLowerCase() : normalized;
@@ -48,7 +43,11 @@ async function runWithFileEditQueue<T>(filePath: string, operation: () => Promis
     }
 }
 
-async function resolveEditPath(absolutePath: string): Promise<ResolvedEditPath | null> {
+/**
+ * The file an edit lands on, links resolved: what is judged, queued and written. Null if
+ * there is none.
+ */
+async function resolveEditPath(absolutePath: string): Promise<string | null> {
     let resolvedPath = absolutePath;
     let exists = await Bun.file(resolvedPath).exists();
 
@@ -60,17 +59,7 @@ async function resolveEditPath(absolutePath: string): Promise<ResolvedEditPath |
         }
     }
 
-    if (!exists) return null;
-
-    let queuePath = resolvedPath;
-    try {
-        queuePath = await fs.realpath(resolvedPath);
-    } catch {
-        // The existence check above is the user-facing validation. If realpath
-        // fails after that, fall back to the resolved path for queueing.
-    }
-
-    return { resolvedPath, queuePath };
+    return exists ? fs.realpath(resolvedPath) : null;
 }
 
 /**
@@ -165,8 +154,8 @@ export async function editFile(
             ? file_path
             : path.resolve(os.homedir(), file_path);
 
-        const resolved = await resolveEditPath(absolutePath);
-        if (!resolved) {
+        const target = await resolveEditPath(absolutePath);
+        if (!target) {
             return {
                 query,
                 file: file_path,
@@ -175,11 +164,12 @@ export async function editFile(
             };
         }
 
-        return await runWithFileEditQueue(resolved.queuePath, () => editResolvedFile(
+        return await runWithFileEditQueue(target, () => editResolvedFile(
             args,
             options,
             query,
-            resolved.resolvedPath,
+            absolutePath,
+            target,
         ));
     } catch (error) {
         const errorMsg = `Error editing file ${file_path}: ${error instanceof Error ? error.message : String(error)}`;
@@ -198,10 +188,11 @@ async function editResolvedFile(
     args: EditFileArgs,
     options: EditFileOptions | undefined,
     query: string,
-    resolvedPath: string,
+    absolutePath: string,
+    target: string,
 ): Promise<EditFileResult> {
     const { file_path, old_string, new_string, replace_all = false } = args;
-    const file = Bun.file(resolvedPath);
+    const file = Bun.file(target);
 
     if (!await file.exists()) {
         return {
@@ -241,7 +232,7 @@ async function editResolvedFile(
     }
 
     let contentToWrite = newContent;
-    if (isMemoryFile(resolvedPath)) {
+    if (isMemoryFile(absolutePath) || isMemoryFile(target)) {
         const rejection = memoryWriteError(newContent);
         if (rejection) {
             return { query, file: file_path, uri: file_path, compiled: rejection };
@@ -249,17 +240,20 @@ async function editResolvedFile(
         contentToWrite = stampProvenance(newContent, options?.conversationId);
     }
 
-    if (!isPathWithinAllowedWrite(resolvedPath) && options?.confirmationContext) {
+    // Only an edit that lands in the write folders, by name and with links resolved, skips asking
+    const allowed = isPathWithinAllowedWrite(absolutePath) && isPathWithinAllowedWrite(target);
+    if (!allowed && options?.confirmationContext) {
+        const shownPath = target === path.resolve(absolutePath) ? file_path : target;
         const confirmResult = await requestOperationConfirmation(
             'edit_file',
-            file_path,
+            shownPath,
             options.confirmationContext,
             {
                 toolName: 'edit_file',
                 toolArgs: { file_path, old_string, new_string, replace_all },
                 additionalMessage: `This will replace ${occurrences} occurrence${occurrences > 1 ? 's' : ''} of the specified text.`,
                 diff: {
-                    filePath: file_path,
+                    filePath: shownPath,
                     oldText: old_string,
                     newText: new_string,
                 },
@@ -276,7 +270,7 @@ async function editResolvedFile(
         }
     }
 
-    await fs.writeFile(resolvedPath, contentToWrite, 'utf-8');
+    await fs.writeFile(target, contentToWrite, 'utf-8');
 
     const replacementCount = replace_all ? occurrences : 1;
     const message = `Successfully replaced ${replacementCount} occurrence${replacementCount > 1 ? 's' : ''} in ${file_path}`;

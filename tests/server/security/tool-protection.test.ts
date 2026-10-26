@@ -3,7 +3,12 @@ import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
 import { readFile } from '../../../src/server/processor/actor/read_file';
+import { writeFile } from '../../../src/server/processor/actor/write_file';
+import { editFile } from '../../../src/server/processor/actor/edit_file';
 import { grepFiles } from '../../../src/server/processor/actor/grep_files';
+import { getDefaultConfig } from '../../../src/server/sandbox/config';
+import { initializeSandboxWithConfig } from '../../../src/server/sandbox';
+import { isCaseInsensitiveFS } from '../../../src/server/utils';
 import { readWebpage } from '../../../src/server/processor/actor/read_webpage';
 import {
     type ConfirmationContext,
@@ -230,6 +235,99 @@ describe('Tool Protection - Sensitive Path Confirmation', () => {
             await readFile({ path: sensitiveFile }, { confirmationContext: context });
             expect(capturedRequests.length).toBe(1); // Still 1, not 2
         });
+    });
+});
+
+/**
+ * The file tools judge the file a path leads to as well as the name given, so their prompts
+ * follow the file touched however it is reached.
+ */
+describe('Tool Protection - Links and case', () => {
+    let root: string;
+    let allowed: string;
+    let outside: string;
+    let secret: string;
+
+    async function asDeniedBy(run: (context: ConfirmationContext) => Promise<{ compiled: unknown }>) {
+        const requests: ConfirmationRequest[] = [];
+        const result = await run(createMockConfirmationContext(false, requests));
+        return { requests, output: String(result.compiled) };
+    }
+
+    beforeAll(async () => {
+        root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'pipali-links-')));
+        allowed = path.join(root, 'allowed');
+        outside = path.join(root, 'outside');
+        secret = path.join(root, '.ssh', 'id_rsa');
+        await fs.mkdir(path.dirname(secret));
+        await fs.mkdir(allowed);
+        await fs.mkdir(outside);
+        await fs.writeFile(secret, 'FAKE_SSH_KEY_CONTENT');
+        await fs.writeFile(path.join(outside, 'rc'), 'original');
+        await fs.writeFile(path.join(allowed, 'notes.txt'), 'notes');
+        await fs.symlink(secret, path.join(allowed, 'key'));
+        await fs.symlink(path.dirname(secret), path.join(allowed, 'keys'));
+        await fs.symlink(path.join(outside, 'rc'), path.join(allowed, 'rc'));
+        await fs.symlink(path.join(outside, 'new-rc'), path.join(allowed, 'dangling'));
+        await fs.symlink(outside, path.join(allowed, 'out'));
+        await fs.symlink(path.join(allowed, 'notes.txt'), path.join(allowed, 'notes'));
+        await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [allowed] });
+    });
+
+    afterAll(async () => {
+        await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false });
+        await fs.rm(root, { recursive: true, force: true });
+    });
+
+    test('asks before reading a protected file through a link', async () => {
+        const { requests, output } = await asDeniedBy(context => readFile({ path: path.join(allowed, 'key') }, { confirmationContext: context }));
+        expect(requests.map(r => r.operation)).toEqual(['read_sensitive_file']);
+        expect(requests[0]!.context?.affectedFiles).toEqual([secret]);
+        expect(output).not.toContain('FAKE_SSH_KEY_CONTENT');
+    });
+
+    test.if(isCaseInsensitiveFS)('asks before reading a protected file spelled in another case', async () => {
+        const { requests, output } = await asDeniedBy(context => readFile({ path: path.join(root, '.SSH', 'id_rsa') }, { confirmationContext: context }));
+        expect(requests).toHaveLength(1);
+        expect(output).not.toContain('FAKE_SSH_KEY_CONTENT');
+    });
+
+    test('asks before searching a protected folder through a link', async () => {
+        const { requests, output } = await asDeniedBy(context => grepFiles({ pattern: 'FAKE', path: path.join(allowed, 'keys') }, { confirmationContext: context }));
+        expect(requests.map(r => r.operation)).toEqual(['grep_sensitive_path']);
+        expect(requests[0]!.context?.affectedFiles).toEqual([path.dirname(secret)]);
+        expect(output).not.toContain('FAKE_SSH_KEY_CONTENT');
+    });
+
+    test('asks before writing through a link that leads out of the write folders, naming where it lands', async () => {
+        const { requests } = await asDeniedBy(context => writeFile({ file_path: path.join(allowed, 'rc'), content: 'replaced' }, { confirmationContext: context }));
+        expect(requests[0]!.context?.affectedFiles).toEqual([path.join(outside, 'rc')]);
+        expect(await fs.readFile(path.join(outside, 'rc'), 'utf8')).toBe('original');
+    });
+
+    test('asks before creating a file through a dangling link, or folders through a linked one', async () => {
+        const dangling = await asDeniedBy(context => writeFile({ file_path: path.join(allowed, 'dangling'), content: 'created' }, { confirmationContext: context }));
+        expect(dangling.requests).toHaveLength(1);
+        expect(await Bun.file(path.join(outside, 'new-rc')).exists()).toBe(false);
+
+        const nested = await asDeniedBy(context => writeFile({ file_path: path.join(allowed, 'out', 'made', 'rc'), content: 'created' }, { confirmationContext: context }));
+        expect(nested.requests).toHaveLength(1);
+        expect(await Bun.file(path.join(outside, 'made')).exists()).toBe(false);
+        expect(await fs.readdir(outside)).toEqual(['rc']);
+    });
+
+    test('asks before editing through a link that leads out of the write folders', async () => {
+        const { requests } = await asDeniedBy(context => editFile({ file_path: path.join(allowed, 'rc'), old_string: 'original', new_string: 'replaced' }, { confirmationContext: context }));
+        expect(requests[0]!.context?.affectedFiles).toEqual([path.join(outside, 'rc')]);
+        expect(await fs.readFile(path.join(outside, 'rc'), 'utf8')).toBe('original');
+    });
+
+    test('writes through a link that stays in the write folders without asking', async () => {
+        const { requests, output } = await asDeniedBy(context => writeFile({ file_path: path.join(allowed, 'notes'), content: 'updated' }, { confirmationContext: context }));
+        expect(requests).toHaveLength(0);
+        expect(output).toContain('Updated');
+        expect(await fs.readFile(path.join(allowed, 'notes.txt'), 'utf8')).toBe('updated');
+        expect((await fs.lstat(path.join(allowed, 'notes'))).isSymbolicLink()).toBe(true);
     });
 });
 

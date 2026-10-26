@@ -565,10 +565,29 @@ function hostPathStyle(): PathStyle {
  * so C:\Users\me\.SSH falls under ~/.ssh.
  */
 function toMatchForm(p: string, style: PathStyle): string {
-    const homeRelative = style.path.sep === '\\' ? /^~([\\/]|$)/ : /^~(\/|$)/;
-    const expanded = homeRelative.test(p) ? style.home + p.slice(1) : p;
-    const slashed = style.path.normalize(expanded).split(style.path.sep).join('/');
+    const slashed = style.path.normalize(expandHome(p, style)).split(style.path.sep).join('/');
     return style.caseInsensitive ? slashed.toLowerCase() : slashed;
+}
+
+function expandHome(p: string, style: PathStyle): string {
+    const homeRelative = style.path.sep === '\\' ? /^~([\\/]|$)/ : /^~(\/|$)/;
+    return homeRelative.test(p) ? style.home + p.slice(1) : p;
+}
+
+/**
+ * Whether a path in match form falls under a rule, as written or where the rule leads once
+ * links resolve. File tools also judge the file a path resolves to, and that path is
+ * spelled the resolved way: /tmp is /private/tmp on macOS, and Windows' temp folder can be
+ * spelled short.
+ */
+function isWithinRule(matchPath: string, rule: string, style: PathStyle): boolean {
+    if (isPathWithinDirectory(matchPath, toMatchForm(rule, style))) return true;
+    if (style.path !== path || style.home !== os.homedir()) return false;
+    try {
+        return isPathWithinDirectory(matchPath, toMatchForm(fs.realpathSync(expandHome(rule, style)), style));
+    } catch {
+        return false;
+    }
 }
 
 /**
@@ -592,14 +611,14 @@ export function isPathWithinAllowedWrite(absolutePath: string, style: PathStyle 
 
     // Check if path is in denied write paths (these always require confirmation)
     for (const deniedPath of currentConfig.deniedWritePaths) {
-        if (isPathWithinDirectory(matchPath, toMatchForm(deniedPath, style))) {
+        if (isWithinRule(matchPath, deniedPath, style)) {
             return false;
         }
     }
 
     // Check if path is within allowed write paths
     for (const allowedPath of currentConfig.allowedWritePaths) {
-        if (isPathWithinDirectory(matchPath, toMatchForm(allowedPath, style))) {
+        if (isWithinRule(matchPath, allowedPath, style)) {
             return true;
         }
     }
@@ -619,7 +638,7 @@ export function isPathDeniedForRead(absolutePath: string, style: PathStyle = hos
 
     // Carve-outs take precedence over the deny list, matching the sandbox profile
     for (const allowedPath of DEFAULT_ALLOWED_READ_PATHS) {
-        if (isPathWithinDirectory(matchPath, toMatchForm(allowedPath, style))) {
+        if (isWithinRule(matchPath, allowedPath, style)) {
             return false;
         }
     }
@@ -640,7 +659,7 @@ export function isPathDeniedForRead(absolutePath: string, style: PathStyle = hos
 
         // Handle ~ and absolute paths, drive-letter ones included
         if (style.path.isAbsolute(deniedPath) || deniedPath.startsWith('~')) {
-            if (isPathWithinDirectory(matchPath, toMatchForm(deniedPath, style))) {
+            if (isWithinRule(matchPath, deniedPath, style)) {
                 return true;
             }
             continue;
