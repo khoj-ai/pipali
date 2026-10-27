@@ -161,6 +161,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             carryOverQueue = [];
         }
         bus.activeRun = runHandle;
+        // A hard stop ends the run on the spot (see stopConversationRun) and the next one
+        // may start while this one unwinds. From then on the bus and the conversation's
+        // active state belong to that run, so this one finishes quietly.
+        const ownsBus = () => bus.activeRun === runHandle;
 
         const { runId: runIdAuthoritative, suggestedRunId: suggestedRunIdOverride } =
             ensureUniqueRunId(runHandle);
@@ -228,6 +232,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 // conversation once it settles (see parent-inbox).
                 drainInjectedSteps: () => runHandle.injectedSteps.splice(0),
                 onStreamEvent: (event) => {
+                    if (!ownsBus()) return;
                     if (event.kind === 'tool_call') {
                         bus.publish({
                             type: 'tool_call_progress',
@@ -249,6 +254,12 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             let iteratorResult = await runner.next();
             while (!iteratorResult.done) {
                 const iteration = iteratorResult.value;
+
+                // Still drained, so the stopped run settles its history as before
+                if (!ownsBus()) {
+                    iteratorResult = await runner.next();
+                    continue;
+                }
 
                 if (iteration.isToolCallStart) {
                     if (iteration.compactionSummary) {
@@ -336,6 +347,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 continue;
             }
 
+            if (!ownsBus()) return;
+
             const result = iteratorResult!.value;
             if (result) {
                 // A sleeping phone drops its socket, so an empty bus is the signal that
@@ -379,6 +392,9 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             void maybeDream(user);
             return;
         } catch (error) {
+            // The stop that ended this run has already reported it
+            if (!ownsBus()) return;
+
             if (error instanceof PlatformBillingError) {
                 bus.publish({
                     type: 'billing_error',

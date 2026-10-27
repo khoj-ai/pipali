@@ -5,6 +5,7 @@ import { User } from '../db/schema';
 import { getDefaultUser } from '../utils';
 import { getOrCreateBus, getBus } from '../events/conversation-event-bus';
 import { executeRun } from '../events/run-executor';
+import { queueMessageOnActiveRun } from '../events/conversation-runs';
 import type { ClientMessage } from './ws/message-types';
 import {
     MessageCommandHandler,
@@ -24,7 +25,6 @@ export type WebSocketData = {};
 type ConnectionContext = {
     /** Legacy sessions map — used by message/fork commands during transition */
     sessions: Map<string, Session>;
-    executors: Map<string, Promise<void>>;
     /**
      * Subscriptions for this WS connection.
      * Allow multiple subscriptions so the client can track background tasks
@@ -41,7 +41,6 @@ function getConnectionContext(ws: ServerWebSocket<WebSocketData>): ConnectionCon
     if (existing) return existing;
     const ctx: ConnectionContext = {
         sessions: new Map(),
-        executors: new Map(),
         subscriptions: new Map(),
     };
     activeConnections.set(ws, ctx);
@@ -129,9 +128,18 @@ async function handleClientMessage(
 
     const session = connCtx.sessions.get(conversationId);
     if (!session) return;
+    connCtx.sessions.delete(conversationId);
 
-    // Don't start a new executor if one is already running for this conversation
-    if (connCtx.executors.has(conversationId)) return;
+    const runState = session.runState;
+    if (runState.status !== 'running') return;
+
+    // A run may have started while the command was resolving the conversation
+    if (queueMessageOnActiveRun(conversationId, {
+        runId: runState.runId,
+        clientMessageId: runState.clientMessageId,
+        message: session.userMessage ?? '',
+        chatModelId: session.chatModelId,
+    })) return;
 
     // Get or create bus and subscribe this WS
     const bus = getOrCreateBus(conversationId);
@@ -148,10 +156,7 @@ async function handleClientMessage(
     }
 
     // Fire-and-forget the run executor
-    const runState = session.runState;
-    if (runState.status !== 'running') return;
-
-    const executor = executeRun({
+    void executeRun({
         bus,
         conversationId,
         user: session.user,
@@ -160,12 +165,9 @@ async function handleClientMessage(
         clientMessageId: runState.clientMessageId,
         confirmationPreferences: session.confirmationPreferences,
         chatModelId: session.chatModelId,
-    }).finally(() => {
-        connCtx.executors.delete(conversationId);
-        connCtx.sessions.delete(conversationId);
+    }).catch(error => {
+        log.error({ err: error, conversationId }, 'Run failed');
     });
-
-    connCtx.executors.set(conversationId, executor);
 }
 
 /**

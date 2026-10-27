@@ -479,12 +479,15 @@ export async function stopTask(
     }
 
     const conversationId = args.conversation_id;
+    // Marked first: stopping publishes the run_stopped that clears this.
+    stoppedOnPurpose.add(conversationId);
     const stopped = stopConversationRun(conversationId);
     if (stopped) {
-        stoppedOnPurpose.add(conversationId);
-        // The run_stopped that clears this normally lands within milliseconds. Expire it
-        // anyway: a stale entry would swallow the next real failure this task reports.
+        // A task nobody watches never clears it, and a stale entry would swallow the next
+        // real failure this task reports.
         setTimeout(() => stoppedOnPurpose.delete(conversationId), STOP_MARK_TTL_MS).unref?.();
+    } else {
+        stoppedOnPurpose.delete(conversationId);
     }
     return {
         compiled: stopped
