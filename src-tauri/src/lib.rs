@@ -26,7 +26,18 @@ async fn check_for_updates(app: &AppHandle) {
         return;
     }
 
-    let update = match app.updater_builder().build() {
+    // Installing on Windows exits the app directly, skipping the RunEvent::Exit that stops the
+    // server. This replaces the plugin's own hook, so it also does that hook's cleanup.
+    let on_before_exit = {
+        let app = app.clone();
+        move || {
+            if let Err(e) = stop_sidecar(&app) {
+                log::error!("[Updater] Failed to stop sidecar before installing: {}", e);
+            }
+            app.cleanup_before_exit();
+        }
+    };
+    let update = match app.updater_builder().on_before_exit(on_before_exit).build() {
         Ok(updater) => updater.check().await,
         Err(e) => Err(e),
     };
