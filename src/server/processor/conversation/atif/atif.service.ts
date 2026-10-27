@@ -425,9 +425,9 @@ export class ATIFConversationService {
   }
 
   /**
-   * Deletes a user message and the following assistant message (all agent steps until
-   * the next user message) from a conversation. Also removes any intermediate user
-   * messages between the deleted user message and the following assistant message's end.
+   * Deletes a user message and the following assistant message (agent steps through the
+   * run's answer) from a conversation. Also removes any intermediate user messages
+   * between the deleted user message and the following assistant message's end.
    * Returns the number of steps deleted.
    */
   async deleteTurn(conversationId: string, stepId: number): Promise<number> {
@@ -450,8 +450,8 @@ export class ATIFConversationService {
 
   /**
    * Deletes an agent message and all associated steps (reasoning, tool calls, etc.)
-   * from a conversation. Removes all consecutive agent steps from the given step_id
-   * until the next user message or end of conversation.
+   * from a conversation. Removes the agent steps around the given step_id, from the
+   * user message or answer before them through their own answer.
    * Returns the number of steps deleted.
    */
   async deleteAgentMessage(conversationId: string, stepId: number): Promise<number> {

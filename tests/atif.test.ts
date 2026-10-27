@@ -552,8 +552,8 @@ describe('ATIF Agent Message Removal', () => {
       trajectory,
       'agent',
       'Tool call step',
-      undefined,
-      undefined,
+      [{ function_name: 'search', arguments: { query: 'test' }, tool_call_id: 'call-1' }],
+      { results: [{ source_call_id: 'call-1', content: 'result' }] },
       { prompt_tokens: 50, completion_tokens: 25, cost_usd: 0.005 }
     );
     addStepToTrajectory(
@@ -622,7 +622,7 @@ describe('ATIF Agent Message Removal', () => {
     const trajectory = createEmptyATIFTrajectory('session-123', 'test-agent', '1.0.0', 'gpt-4');
 
     addStepToTrajectory(trajectory, 'user', 'Question');
-    addStepToTrajectory(trajectory, 'agent', 'Working');
+    addStepToTrajectory(trajectory, 'agent', 'Working', [{ function_name: 'search', arguments: {}, tool_call_id: 'call-1' }]);
     addStepToTrajectory(trajectory, 'system', 'Updated constraint');
     addStepToTrajectory(trajectory, 'agent', 'Answer');
 
@@ -630,6 +630,48 @@ describe('ATIF Agent Message Removal', () => {
 
     expect(removedCount).toBe(3);
     expect(trajectory.steps.map(step => step.step_id)).toEqual([1]);
+  });
+
+  test('should keep each answer of a turn woken by background work to itself', () => {
+    const trajectory = createEmptyATIFTrajectory('session-123', 'test-agent', '1.0.0', 'gpt-4');
+
+    addStepToTrajectory(trajectory, 'user', 'Bump the dependencies');
+    addStepToTrajectory(trajectory, 'agent', '', [{ function_name: 'shell_command', arguments: {}, tool_call_id: 'call-1' }]);
+    addStepToTrajectory(trajectory, 'agent', 'Started it, I will report back');
+    // No user message: the command reporting back woke the conversation
+    addStepToTrajectory(trajectory, 'system', '[Background command finished]').extra = { kind: 'background_command_update' };
+    addStepToTrajectory(trajectory, 'agent', '', [{ function_name: 'view_file', arguments: {}, tool_call_id: 'call-2' }]);
+    addStepToTrajectory(trajectory, 'agent', 'It finished cleanly');
+
+    // Deleting the woken answer takes the report and steps that led to it, not the answer before
+    const woken = structuredClone(trajectory);
+    expect(removeAgentMessageFromTrajectory(woken, 6)).toBe(3);
+    expect(woken.steps.map(step => step.step_id)).toEqual([1, 2, 3]);
+
+    // Deleting the first answer leaves the woken turn
+    const first = structuredClone(trajectory);
+    expect(removeAgentMessageFromTrajectory(first, 2)).toBe(2);
+    expect(first.steps.map(step => step.step_id)).toEqual([1, 4, 5, 6]);
+  });
+
+  test('should remove a response whole when its context was compacted along the way', () => {
+    const trajectory = createEmptyATIFTrajectory('session-123', 'test-agent', '1.0.0', 'gpt-4');
+
+    addStepToTrajectory(trajectory, 'user', 'Question');
+    addStepToTrajectory(trajectory, 'agent', '', [{ function_name: 'search', arguments: {}, tool_call_id: 'call-1' }]);
+    // Recorded as a user step, but it is the run compacting its own context
+    addStepToTrajectory(trajectory, 'user', 'Summary so far').extra = { is_compaction: true };
+    addStepToTrajectory(trajectory, 'agent', '', [{ function_name: 'search', arguments: {}, tool_call_id: 'call-2' }]);
+    addStepToTrajectory(trajectory, 'agent', 'Answer');
+    addStepToTrajectory(trajectory, 'user', 'Follow-up');
+
+    const response = structuredClone(trajectory);
+    expect(removeAgentMessageFromTrajectory(response, 5)).toBe(4);
+    expect(response.steps.map(step => step.step_id)).toEqual([1, 6]);
+
+    const turn = structuredClone(trajectory);
+    expect(removeTurnFromTrajectory(turn, 1)).toBe(5);
+    expect(turn.steps.map(step => step.step_id)).toEqual([6]);
   });
 
   test('should remove a system step immediately preceding the agent response', () => {
@@ -836,6 +878,20 @@ describe('ATIF User Message Removal', () => {
 
     expect(removedCount).toBe(3);
     expect(trajectory.steps.map(step => step.step_id)).toEqual([4]);
+  });
+
+  test('should stop at the answer, leaving a turn background work woke after it', () => {
+    const trajectory = createEmptyATIFTrajectory('session-123', 'test-agent', '1.0.0', 'gpt-4');
+
+    addStepToTrajectory(trajectory, 'user', 'Bump the dependencies');
+    addStepToTrajectory(trajectory, 'agent', 'Started it, I will report back');
+    addStepToTrajectory(trajectory, 'system', '[Background command finished]').extra = { kind: 'background_command_update' };
+    addStepToTrajectory(trajectory, 'agent', 'It finished cleanly');
+
+    const removedCount = removeTurnFromTrajectory(trajectory, 1);
+
+    expect(removedCount).toBe(2);
+    expect(trajectory.steps.map(step => step.step_id)).toEqual([3, 4]);
   });
 });
 

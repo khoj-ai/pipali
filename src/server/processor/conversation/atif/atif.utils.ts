@@ -12,6 +12,7 @@ import type {
   ATIFFinalMetrics,
   ATIFStepSource,
 } from './atif.types';
+import { isAgentAnswer } from '../../../../shared';
 
 /**
  * Sanitize a value for PostgreSQL JSONB storage.
@@ -234,10 +235,15 @@ export function removeStepFromTrajectory(
   return true;
 }
 
+/** Compaction is recorded as a user step in the middle of a response, so it ends no turn */
+function isUserMessage(step: ATIFStep | undefined): boolean {
+  return step?.source === 'user' && step.extra?.is_compaction !== true;
+}
+
 /**
- * Removes a user message and the following assistant message (all agent steps until the
- * next user message) from the trajectory. Also removes inline system steps and any
- * intermediate user messages within the deleted turn.
+ * Removes a user message and the following assistant message (agent steps through the
+ * run's answer, or until the next user message if it has none) from the trajectory. Also
+ * removes inline system steps and any intermediate user messages within the deleted turn.
  * Returns the number of steps removed.
  */
 export function removeTurnFromTrajectory(
@@ -255,8 +261,8 @@ export function removeTurnFromTrajectory(
     return 0;
   }
 
-  // Find the end of the following assistant message (all steps until next user message
-  // that follows an agent step, or end of trajectory)
+  // Find the end of the following assistant message (through its answer, else until the
+  // next user message that follows an agent step, or end of trajectory)
   let endIndex = startIndex;
   let foundAgentStep = false;
   for (let i = startIndex + 1; i < trajectory.steps.length; i++) {
@@ -264,14 +270,16 @@ export function removeTurnFromTrajectory(
     if (step?.source === 'agent') {
       foundAgentStep = true;
       endIndex = i;
-    } else if (step?.source === 'user') {
+      if (isAgentAnswer(step)) break;
+    } else if (isUserMessage(step)) {
       if (foundAgentStep) {
         // Stop at user message after we've seen agent steps
         break;
       }
       // Include intermediate user messages before any agent response
       endIndex = i;
-    } else if (step?.source === 'system') {
+    } else {
+      // Inline system and compaction steps
       endIndex = i;
     }
   }
@@ -288,8 +296,8 @@ export function removeTurnFromTrajectory(
 /**
  * Removes an agent message and all associated steps (reasoning, tool calls, tool results,
  * and inline system steps) from the trajectory. Deletes the response starting from the
- * step that contains the given step_id, going backwards to the previous user message
- * and forwards until the next user message.
+ * step that contains the given step_id, going backwards to the user message or answer
+ * it follows and forwards through its own answer, or until the next user message.
  * Returns the number of steps removed.
  */
 export function removeAgentMessageFromTrajectory(
@@ -303,26 +311,22 @@ export function removeAgentMessageFromTrajectory(
   }
 
   // Find the range of agent steps to delete
-  // Go backwards to find where agent steps start (after last user message)
+  // Go backwards to find where agent steps start (after the last user message or answer)
   let firstAgentIndex = startIndex;
   for (let i = startIndex - 1; i >= 0; i--) {
-    if (trajectory.steps[i]?.source === 'user') {
-      break; // Stop at user message
+    if (isUserMessage(trajectory.steps[i]) || isAgentAnswer(trajectory.steps[i])) {
+      break; // Stop at user message or the previous response's answer
     }
-    if (trajectory.steps[i]?.source === 'agent' || trajectory.steps[i]?.source === 'system') {
-      firstAgentIndex = i;
-    }
+    firstAgentIndex = i;
   }
 
-  // Now find the end - all agent steps until next user message or end
+  // Now find the end - through this response's answer, else until next user message or end
   let lastAgentIndex = startIndex;
   for (let i = startIndex + 1; i < trajectory.steps.length; i++) {
-    if (trajectory.steps[i]?.source === 'user') {
-      break; // Stop at next user message
+    if (isUserMessage(trajectory.steps[i]) || isAgentAnswer(trajectory.steps[lastAgentIndex])) {
+      break; // Stop after the answer or at next user message
     }
-    if (trajectory.steps[i]?.source === 'agent' || trajectory.steps[i]?.source === 'system') {
-      lastAgentIndex = i;
-    }
+    lastAgentIndex = i;
   }
 
   const removeCount = lastAgentIndex - firstAgentIndex + 1;

@@ -19,3 +19,13 @@ export function formatConversationHeader(conversationId: string): string {
 
 export const CONVERSATION_HEADER =
     /^Conversation: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/im;
+
+/**
+ * A run records one agent step without tool calls, its answer, last. That ends a reply
+ * even with no user message after it, as when background work reporting in wakes the
+ * conversation. The chat groups steps into replies by it, and deleting one removes the
+ * same steps.
+ */
+export function isAgentAnswer(step: { source: string; tool_calls?: unknown[] } | undefined): boolean {
+    return step?.source === 'agent' && !step.tool_calls?.length;
+}
