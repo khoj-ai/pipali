@@ -67,6 +67,8 @@ export interface StartBackgroundProcessOptions {
     command: string;
     conversationId: string;
     user: typeof User.$inferSelect;
+    /** Adds to the exit report, given how the command exited and the end of its output. */
+    describeExit?: (exitCode: number, output: string) => Promise<string>;
 }
 
 /** Records outlive the commands they describe, so drop the oldest finished ones. */
@@ -153,7 +155,7 @@ export function startBackgroundProcess(options: StartBackgroundProcessOptions): 
             stopRequested: false,
         };
         processes.set(proc.pid, record);
-        reportOnExit(proc, record, options.user);
+        reportOnExit(proc, record, options.user, options.describeExit);
 
         log.info({ pid: record.pid, logPath, command: options.command }, 'Started background command');
         return record;
@@ -167,6 +169,7 @@ function reportOnExit(
     proc: Bun.Subprocess,
     record: BackgroundProcess,
     user: typeof User.$inferSelect,
+    describeExit?: StartBackgroundProcessOptions['describeExit'],
 ): void {
     void proc.exited.then(async (exitCode) => {
         record.running = false;
@@ -177,6 +180,11 @@ function reportOnExit(
         if (record.stopRequested) return;
 
         try {
+            const tail = readLogTail(record.logPath);
+            const note = await describeExit?.(exitCode, tail).catch((error) => {
+                log.warn({ err: error, pid: record.pid }, 'Could not add to the background command report');
+                return '';
+            });
             await deliverToParent({
                 parentConversationId: record.conversationId,
                 user,
@@ -187,7 +195,8 @@ function reportOnExit(
                         : `[Background command exited with code ${exitCode}] pid ${record.pid}`,
                     `Log: ${record.logPath}`,
                     '',
-                    readLogTail(record.logPath) || '(no output)',
+                    tail || '(no output)',
+                    ...(note ? ['', note] : []),
                 ].join('\n'),
             });
         } catch (error) {

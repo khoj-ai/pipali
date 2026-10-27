@@ -45,7 +45,7 @@
     "typescript": "^5.8.3"
   },
   "dependencies": {
-    "@anthropic-ai/sandbox-runtime": "^0.0.49",
+    "@anthropic-ai/sandbox-runtime": "^0.0.81",
     "@electric-sql/pglite": "^0.3.14",
     "@hono/swagger-ui": "^0.5.2",
     "@hono/zod-openapi": "^1.1.5",

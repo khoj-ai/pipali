@@ -6,9 +6,10 @@ import {
 } from '../confirmation';
 import {
     isSandboxActive,
-    wrapCommandWithSandbox,
-    annotateStderrWithSandboxFailures,
-    getSandboxEnvOverrides,
+    setUpSandboxOnFirstNeed,
+    prepareSandboxedCommand,
+    describeSandboxRefusals,
+    type SandboxedCommand,
 } from '../../sandbox';
 import { createChildLogger } from '../../logger';
 import { buildBundledRuntimeEnv } from '../../bundled-runtimes';
@@ -16,6 +17,7 @@ import {
     getBackgroundProcess,
     startBackgroundProcess,
     stopBackgroundProcess,
+    type StartBackgroundProcessOptions,
 } from '../../events/background-processes';
 import type { User } from '../../db/schema';
 
@@ -31,7 +33,7 @@ export type ShellOperationType = 'read-only' | 'write-only' | 'read-write';
 
 /**
  * Execution mode for shell commands
- * - sandbox: Run in OS-enforced sandbox (macOS/Linux only), skips user confirmation
+ * - sandbox: Run in OS-enforced sandbox, skips user confirmation
  * - direct: Run directly without sandbox, requires user confirmation
  */
 export type ShellExecutionMode = 'sandbox' | 'direct';
@@ -167,6 +169,11 @@ export async function shellCommand(
         MAX_TIMEOUT_MS
     );
 
+    // On Windows the first command that would run sandboxed sets the sandbox up, prompting once
+    if (args.execution_mode !== 'direct') {
+        await setUpSandboxOnFirstNeed();
+    }
+
     // Check if sandbox is available (enabled AND supported platform)
     const sandboxAvailable = isSandboxActive();
     const isWindows = process.platform === 'win32';
@@ -176,7 +183,7 @@ export async function shellCommand(
     // - If explicitly set to 'sandbox' but sandbox not available, fall back to direct
     // - Default to sandbox if available, otherwise direct
     const requestedMode = args.execution_mode;
-    const useSandbox = requestedMode === 'sandbox'
+    let useSandbox = requestedMode === 'sandbox'
         ? sandboxAvailable  // Requested sandbox, use if available
         : requestedMode === 'direct'
             ? false  // Explicitly requested direct mode
@@ -185,6 +192,20 @@ export async function shellCommand(
     // Log if sandbox was requested but unavailable
     if (requestedMode === 'sandbox' && !sandboxAvailable) {
         log.debug(`Sandbox mode requested but unavailable, falling back to direct mode (requires confirmation)`);
+    }
+
+    // Files this run's sandbox refusals, so a rerun is not told of an earlier run's
+    const commandId = crypto.randomUUID();
+
+    // Wrap before deciding whether to ask: a command the sandbox cannot take goes to the user instead
+    let sandboxed: SandboxedCommand | undefined;
+    if (useSandbox) {
+        try {
+            sandboxed = await prepareSandboxedCommand(command, commandId, workingDir);
+        } catch (error) {
+            log.warn({ err: error }, 'Could not sandbox the command, asking to run it directly instead');
+            useSandbox = false;
+        }
     }
 
     // Request user confirmation if using direct mode (not sandboxed)
@@ -224,32 +245,29 @@ export async function shellCommand(
     try {
         // Determine shell command based on platform and sandbox mode
         let shellCmd: string[];
+        let baseEnv: Record<string, string | undefined>;
 
-        if (isWindows) {
-            // Windows: no sandbox support, use PowerShell directly
-            shellCmd = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command];
-            log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
-        } else if (useSandbox) {
-            // Unix with sandbox: wrap the command
-            const sandboxedCommand = await wrapCommandWithSandbox(command);
-            shellCmd = ['/bin/bash', '-c', sandboxedCommand];
+        if (sandboxed) {
+            shellCmd = sandboxed.cmd;
+            baseEnv = sandboxed.env;
             log.debug(`Executing (sandboxed): ${command} in ${workingDir}`);
+        } else if (isWindows) {
+            shellCmd = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command];
+            baseEnv = process.env;
+            log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
         } else {
-            // Unix without sandbox
             shellCmd = ['/bin/bash', '-c', command];
+            baseEnv = process.env;
             log.debug(`Executing (no sandbox): ${command} in ${workingDir}`);
         }
 
-        // For sandboxed commands, set environment variables to redirect tool caches
-        // to sandbox-allowed directories. This prevents tools like uv, pip, npm from
-        // trying to write to ~/.cache which isn't in the sandbox allowlist.
-        const baseEnv = useSandbox
-            ? { ...process.env, ...getSandboxEnvOverrides() }
-            : process.env;
         const env = await buildBundledRuntimeEnv(baseEnv);
 
         if (args.run_in_background) {
-            return startInBackground({ command, workingDir, shellCmd, env, query }, options);
+            const describeExit = sandboxed
+                ? (exitCode: number, errors: string) => describeSandboxRefusals(commandId, { exitCode, errors })
+                : undefined;
+            return startInBackground({ command, workingDir, shellCmd, env, query, describeExit }, options);
         }
 
         const proc = Bun.spawn({
@@ -275,25 +293,6 @@ export async function shellCommand(
                 .trim();
         }
 
-        const originalStderr = stderr;
-
-        // Annotate stderr with sandbox violation information if running in sandbox mode
-        // This uses sandbox-runtime's built-in violation detection (reads macOS sandbox logs)
-        if (useSandbox && stderr) {
-            stderr = annotateStderrWithSandboxFailures(command, stderr);
-        }
-
-        // Detect sandbox violations:
-        // 1. Check if annotateStderrWithSandboxFailures added violation info (most reliable on macOS)
-        // 2. Fall back to pattern matching for common sandbox error messages
-        const annotationAdded = stderr !== originalStderr;
-        const hasViolationPatterns = exitCode !== 0 && (
-            originalStderr.includes('Operation not permitted') ||
-            originalStderr.includes('EPERM') ||
-            originalStderr.includes('Permission denied')
-        );
-        const isSandboxViolation = useSandbox && (annotationAdded || hasViolationPatterns);
-
         // Build output message
         let output = '';
 
@@ -315,15 +314,13 @@ export async function shellCommand(
             output += `\n\n[Exit code: ${exitCode}]`;
         }
 
-        // Add sandbox violation notice if detected
-        if (isSandboxViolation) {
-            output += `\n\n[Sandbox violation: The command attempted an operation outside the allowed sandbox paths. ` +
-                `Write operations are only allowed in /tmp/pipali and ~/.pipali. ` +
-                `Use execution_mode: "direct" if you need full filesystem access (requires user confirmation).]`;
-            log.error(`Sandbox violation detected for command: ${command}`);
+        const refusals = sandboxed ? await describeSandboxRefusals(commandId, { exitCode, errors: stderr }) : '';
+        if (refusals) {
+            output += `\n\n${refusals}`;
+            log.info({ command }, 'The sandbox refused part of a command');
         }
 
-        log.debug(`Command completed with exit code ${exitCode}${isSandboxViolation ? ' (sandbox violation)' : ''}`);
+        log.debug(`Command completed with exit code ${exitCode}${refusals ? ' (refused by the sandbox)' : ''}`);
 
         return {
             query,
@@ -361,10 +358,17 @@ export async function shellCommand(
  * reads with tail/grep, and the conversation is told when the command exits.
  */
 function startInBackground(
-    prepared: { command: string; workingDir: string; shellCmd: string[]; env: Record<string, string | undefined>; query: string },
+    prepared: {
+        command: string;
+        workingDir: string;
+        shellCmd: string[];
+        env: Record<string, string | undefined>;
+        query: string;
+        describeExit?: StartBackgroundProcessOptions['describeExit'];
+    },
     options?: ShellCommandOptions,
 ): ShellCommandResult {
-    const { command, workingDir, shellCmd, env, query } = prepared;
+    const { command, workingDir, shellCmd, env, query, describeExit } = prepared;
     const base = { query, file: workingDir, uri: workingDir };
 
     if (!options?.conversationId || !options?.user) {
@@ -379,6 +383,7 @@ function startInBackground(
             command,
             conversationId: options.conversationId,
             user: options.user,
+            describeExit,
         });
 
         return {

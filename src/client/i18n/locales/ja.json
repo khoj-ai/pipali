@@ -233,7 +233,8 @@
             "mcp_tool_call": "ツール呼び出しの確認",
             "read_sensitive_file": "機密ファイルへのアクセス確認",
             "grep_sensitive_path": "機密パス検索の確認",
-            "fetch_internal_url": "内部ネットワークアクセスの確認"
+            "fetch_internal_url": "内部ネットワークアクセスの確認",
+            "change_sandbox_settings": "権限変更の確認"
         },
         "options": {
             "yes": "はい",
@@ -358,6 +359,15 @@
         "protectedReadHint": "これらのファイルまたはフォルダを表示する前には必ず確認します。",
         "failedToLoadSandbox": "サンドボックス設定の読み込みに失敗しました",
         "failedToToggleSandbox": "サンドボックスの切り替えに失敗しました",
+        "sandboxNotRunning": "サンドボックスを起動できなかったため、Pipaliは各コマンドの実行前に確認を求めます。",
+        "sandboxLinuxDependenciesHint": "パッケージマネージャーで bubblewrap、socat、ripgrep をインストールしてから、Pipaliを再起動してください。",
+        "sandboxSetupNeeded": "Windowsでコマンドをサンドボックスで実行するには、一度だけ設定が必要です。それまでは、Pipaliは各コマンドの実行前に確認を求めます。",
+        "sandboxSetupHint": "サンドボックス用のアカウントを作成するため、Windowsが管理者権限を求めます。",
+        "sandboxSetUp": "サンドボックスを設定",
+        "sandboxSettingUp": "Windowsを待っています...",
+        "sandboxSetupCancelled": "設定はキャンセルされました。Pipaliは引き続きコマンドの実行前に確認を求めます。",
+        "failedToSetUpSandbox": "サンドボックスの設定に失敗しました",
+        "sandboxChangedInDesktopApp": "サンドボックスの権限は Pipali デスクトップアプリでのみ変更できます。",
         "failedToSavePermissions": "ファイル権限の保存に失敗しました",
         "language": "言語",
         "languageHint": "Pipaliとやり取りするときの希望言語です。",

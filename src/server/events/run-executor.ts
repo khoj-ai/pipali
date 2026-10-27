@@ -206,6 +206,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             requestConfirmation: createConfirmationCallback(bus, conversationId, runHandle, confirmationPersistence),
             preferences: confirmationPreferences,
         };
+        runHandle.confirmationContext = confirmationContext;
 
         let preemptedToQueuedRun = false;
         let shouldStartNextFromQueueAfterComplete = false;

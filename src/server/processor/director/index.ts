@@ -37,6 +37,7 @@ import { type ATIFMetrics, type ATIFObservationResult, type ATIFStep, type ATIFT
 import { addMetrics } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
 import { getMcpToolDefinitions, getMcpServerDescriptions, executeMcpTool, isMcpTool } from '../mcp';
+import { SANDBOX_TEMP_DIR } from '../../sandbox';
 import { PlatformBillingError } from '../../http/billing-errors';
 import { PlatformAuthError } from '../../http/platform-fetch';
 import { createChildLogger } from '../../logger';
@@ -388,9 +389,9 @@ REQUIRED:
                 },
                 execution_mode: {
                     type: 'string',
-                    enum: process.platform === 'win32' ? ['direct'] : ['sandbox', 'direct'],
+                    enum: ['sandbox', 'direct'],
                     description: process.platform === 'win32'
-                        ? 'Only direct mode is available on Windows, this requires user confirmation.'
+                        ? `- Sandbox mode (default): OS-enforced sandbox, no user confirmation needed but with restricted write paths like ${SANDBOX_TEMP_DIR}, ~/.pipali and allowed domains like localhost, github, package registries, ai cloud APIs. Invoke-WebRequest and curl.exe cannot complete HTTPS there; bun, node and python can.\n- Direct mode: No sandbox, requires user confirmation but has full access`
                         : '- Sandbox mode (default): OS-enforced sandbox, no user confirmation needed but with restricted write paths like /tmp/pipali, ~/.pipali and allowed domains like localhost, github, package registries, ai cloud APIs\n- Direct mode: No sandbox, requires user confirmation but has full access',
                 },
                 cwd: {

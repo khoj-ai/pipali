@@ -1,5 +1,6 @@
 import path from 'path';
 import os from 'os';
+import fs from 'fs/promises';
 import { resolveCaseInsensitivePath } from './actor.utils';
 import { extractDocumentText, getLegacyOfficeReplacement, isReadableDocumentFile } from './document_text';
 import { getSensitivePathReason } from '../../security';
@@ -160,13 +161,13 @@ export async function readFile(
             ? expandedPath
             : path.resolve(os.homedir(), expandedPath);
 
-        // Check if path is in denied read paths (configurable, defaults to sensitive paths)
-        // and request confirmation if needed
-        if (isPathDeniedForRead(absolutePath) && options?.confirmationContext) {
-            const reason = getSensitivePathReason(absolutePath) || 'protected file';
+        // The result to return if the user says no to reading a protected path, else null
+        const askToRead = async (protectedPath: string): Promise<FileContentResult | null> => {
+            if (!options?.confirmationContext) return null;
+            const reason = getSensitivePathReason(protectedPath) || 'protected file';
             const confirmResult = await requestOperationConfirmation(
                 'read_sensitive_file',
-                absolutePath,
+                protectedPath,
                 options.confirmationContext,
                 {
                     toolName: 'view_file',
@@ -174,15 +175,20 @@ export async function readFile(
                     additionalMessage: `This path contains ${reason}.\n\nAre you sure you want to read this file?`,
                 }
             );
+            if (confirmResult.approved) return null;
+            return {
+                query,
+                file: filePath,
+                uri: filePath,
+                compiled: `File read cancelled: ${confirmResult.denialReason || 'User denied access to protected file'}`,
+            };
+        };
 
-            if (!confirmResult.approved) {
-                return {
-                    query,
-                    file: filePath,
-                    uri: filePath,
-                    compiled: `File read cancelled: ${confirmResult.denialReason || 'User denied access to protected file'}`,
-                };
-            }
+        // A protected name is asked about before looking, so whether it exists stays private
+        const askedFirst = isPathDeniedForRead(absolutePath);
+        if (askedFirst) {
+            const cancelled = await askToRead(absolutePath);
+            if (cancelled) return cancelled;
         }
 
         // Read the file using Bun.file
@@ -207,6 +213,14 @@ export async function readFile(
                 uri: filePath,
                 compiled: `File '${filePath}' not found`,
             };
+        }
+
+        // The file read is the one judged, so a protected file is asked about however it is reached
+        resolvedPath = await fs.realpath(resolvedPath);
+        file = Bun.file(resolvedPath);
+        if (!askedFirst && isPathDeniedForRead(resolvedPath)) {
+            const cancelled = await askToRead(resolvedPath);
+            if (cancelled) return cancelled;
         }
 
         // Check if file is an image

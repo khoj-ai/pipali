@@ -55,7 +55,8 @@ export type ConfirmableOperation =
     | 'mcp_tool_call'
     | 'read_sensitive_file'
     | 'grep_sensitive_path'
-    | 'fetch_internal_url';
+    | 'fetch_internal_url'
+    | 'change_sandbox_settings';
 
 /**
  * Get risk level based on operation and optional sub-type.
@@ -98,10 +99,24 @@ function getRiskLevel(
         read_sensitive_file: 'medium',
         grep_sensitive_path: 'medium',
         fetch_internal_url: 'medium',
+        change_sandbox_settings: 'high',
     };
 
     return defaultRiskLevels[operation];
 }
+
+/** Dialog heading per operation. The client translates these by operation id. */
+const CONFIRMATION_TITLES: Record<ConfirmableOperation, string> = {
+    edit_file: 'Confirm File Edit',
+    write_file: 'Confirm File Write',
+    delete_file: 'Confirm File Deletion',
+    execute_command: 'Confirm Command Execution',
+    mcp_tool_call: 'Confirm Tool Call',
+    read_sensitive_file: 'Confirm Sensitive File Access',
+    grep_sensitive_path: 'Confirm Sensitive Path Search',
+    fetch_internal_url: 'Confirm Internal Network Access',
+    change_sandbox_settings: 'Confirm Permission Change',
+};
 
 /**
  * Create a new confirmation request for a file operation
@@ -119,21 +134,10 @@ export function createFileOperationConfirmation(
         commandInfo?: CommandExecutionInfo;
     }
 ): ConfirmationRequest {
-    const titles: Record<ConfirmableOperation, string> = {
-        edit_file: 'Confirm File Edit',
-        write_file: 'Confirm File Write',
-        delete_file: 'Confirm File Deletion',
-        execute_command: 'Confirm Command Execution',
-        mcp_tool_call: 'Confirm Tool Call',
-        read_sensitive_file: 'Confirm Sensitive File Access',
-        grep_sensitive_path: 'Confirm Sensitive Path Search',
-        fetch_internal_url: 'Confirm Internal Network Access',
-    };
-
     return {
         requestId: crypto.randomUUID(),
         inputType: 'choice',
-        title: titles[operation],
+        title: CONFIRMATION_TITLES[operation],
         message: details.additionalMessage,
         operation,
         context: {
@@ -149,6 +153,48 @@ export function createFileOperationConfirmation(
         options: createStandardConfirmationOptions(),
         defaultOptionId: CONFIRMATION_OPTIONS.NO,
         timeoutMs: 0, // No timeout - wait for user
+    };
+}
+
+/**
+ * Create a confirmation request for a change to Pipali's own sandbox permissions.
+ *
+ * Yes or no only: a change that widens what Pipali may do unsupervised is exactly what
+ * "don't ask again" would stop the user seeing.
+ *
+ * @param changes - What the change does, a line each, as describeSandboxChanges words it
+ */
+export function createPermissionChangeConfirmation(changes: string[]): ConfirmationRequest {
+    return {
+        requestId: crypto.randomUUID(),
+        inputType: 'choice',
+        title: CONFIRMATION_TITLES.change_sandbox_settings,
+        message: [
+            'Pipali asked to change its own sandbox permissions:',
+            '',
+            ...changes.map(change => `- ${change}`),
+            '',
+            'Apply this change?',
+        ].join('\n'),
+        summary: changes.join('; '),
+        operation: 'change_sandbox_settings',
+        context: { toolName: 'sandbox_settings', toolArgs: {}, riskLevel: 'high' },
+        options: [
+            {
+                id: CONFIRMATION_OPTIONS.YES,
+                label: 'Yes',
+                description: 'Apply this permission change',
+                style: 'primary',
+            },
+            {
+                id: CONFIRMATION_OPTIONS.NO,
+                label: 'No',
+                description: 'Leave permissions as they are',
+                style: 'danger',
+            },
+        ],
+        defaultOptionId: CONFIRMATION_OPTIONS.NO,
+        timeoutMs: 0,
     };
 }
 

@@ -2,7 +2,7 @@ import path from 'path';
 import { homedir } from 'os';
 import fs from 'fs/promises';
 import { minimatch } from 'minimatch';
-import { clampInt, extractLiteralFromRegex, getExcludedDirNamesForRootDir, isBroadSearch, resolveCaseInsensitivePath, resolvePath, walkFilePaths, runMdfind, TCC_PROTECTED_EXTENSIONS } from './actor.utils';
+import { clampInt, extractLiteralFromRegex, getExcludedDirNamesForRootDir, isBroadSearch, resolveCaseInsensitivePath, resolveLinks, resolvePath, walkFilePaths, runMdfind, TCC_PROTECTED_EXTENSIONS } from './actor.utils';
 import { extractDocumentText, isReadableDocumentFile } from './document_text';
 import { isSensitivePath, getSensitivePathReason } from '../../security';
 import {
@@ -221,12 +221,13 @@ export async function grepFiles(
         // Determine search path.
         let searchPath = resolvePath(searchPathArg);
 
-        // Check if path is sensitive and request confirmation if needed
-        if (isSensitivePath(searchPath) && options?.confirmationContext) {
-            const reason = getSensitivePathReason(searchPath) || 'sensitive location';
+        // A sensitive folder is asked about however it is reached, by name or through links
+        const sensitivePath = [searchPath, await resolveLinks(path.resolve(searchPath))].find(isSensitivePath);
+        if (sensitivePath && options?.confirmationContext) {
+            const reason = getSensitivePathReason(sensitivePath) || 'sensitive location';
             const confirmResult = await requestOperationConfirmation(
                 'grep_sensitive_path',
-                searchPath,
+                sensitivePath,
                 options.confirmationContext,
                 {
                     toolName: 'grep_files',

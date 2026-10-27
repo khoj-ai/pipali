@@ -89,6 +89,14 @@ started them. Read one with `inspect_task`, or pull just the parts you need from
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | GET | `/user/sandbox` | Sandbox config (allowed/denied paths, domains) |
+| PUT | `/user/sandbox` | Change the sandbox config. The user sees the change and approves it before it applies |
+
+PUT fields, all optional: `enabled`, `allowedWritePaths`, `deniedWritePaths`,
+`deniedReadPaths`, `allowedDomains`, `allowLocalBinding`. A list you send replaces the
+stored one; the built-in defaults stay either way. A change the user declines answers 403,
+one they leave unanswered 408, and 409 means there was no live task to ask them from.
+Permissions are unchanged in each case. The same change from the Settings > Permissions
+page is theirs to make and applies without asking.
 
 ## Memory
 | Method | Endpoint | Description |

@@ -435,7 +435,7 @@ async function buildServerBundle() {
         type: "module",
         dependencies: {
             "@electric-sql/pglite": "^0.3.14",
-            "@anthropic-ai/sandbox-runtime": "^0.0.49",
+            "@anthropic-ai/sandbox-runtime": "^0.0.81",
             "chrome-devtools-mcp": "^0.20.3",
         },
     };

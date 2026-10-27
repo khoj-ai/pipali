@@ -195,12 +195,18 @@ pub struct SidecarState {
     pub child: Mutex<Option<CommandChild>>,
     pub host: String,
     pub port: u16,
+    /// Lets the settings page change what the sandbox allows. Held in memory only.
+    pub settings_token: Mutex<Option<String>>,
 }
+
+/// Starts the stdout line carrying the server's settings token (src/server/routes/settings-token.ts)
+const SETTINGS_TOKEN_PREFIX: &str = "pipali-settings-token:";
 
 impl Default for SidecarState {
     fn default() -> Self {
         Self {
             child: Mutex::new(None),
+            settings_token: Mutex::new(None),
             host: std::env::var("PIPALI_HOST").unwrap_or_else(|_| "127.0.0.1".to_string()),
             port: std::env::var("PIPALI_PORT").unwrap_or_else(|_| "6464".to_string()).parse().unwrap_or(6464),
         }
@@ -356,6 +362,8 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
         .env("PIPALI_BUNDLED_RUNTIMES_DIR", binaries_dir.to_string_lossy().to_string())
         // Provide the server resources root for migrations/assets
         .env("PIPALI_SERVER_RESOURCE_DIR", server_dir.to_string_lossy().to_string())
+        // Ask the server to print its settings token, which only this process reads
+        .env("PIPALI_ANNOUNCE_SETTINGS_TOKEN", "1")
         .current_dir(data_dir);
 
     let (mut rx, child) = sidecar_command
@@ -372,7 +380,15 @@ pub fn start_sidecar(app: &AppHandle) -> Result<(), String> {
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
-                    log::info!("[Sidecar] {}", String::from_utf8_lossy(&line));
+                    let line = String::from_utf8_lossy(&line);
+                    // Kept for the webview and never logged: the log is a file sandboxed commands can read
+                    if let Some(token) = line.trim_end().strip_prefix(SETTINGS_TOKEN_PREFIX) {
+                        if let Some(state) = app_handle.try_state::<SidecarState>() {
+                            *state.settings_token.lock().unwrap() = Some(token.to_string());
+                        }
+                        continue;
+                    }
+                    log::info!("[Sidecar] {}", line);
                 }
                 CommandEvent::Stderr(line) => {
                     log::warn!("[Sidecar] {}", String::from_utf8_lossy(&line));
@@ -441,6 +457,7 @@ pub fn wait_for_sidecar_ready(host: &str, port: u16) -> Result<(), String> {
 /// Stop the sidecar process gracefully
 pub fn stop_sidecar(app: &AppHandle) -> Result<(), String> {
     let state: State<SidecarState> = app.state();
+    *state.settings_token.lock().unwrap() = None;
     let mut child_guard = state.child.lock().unwrap();
 
     if let Some(child) = child_guard.take() {
@@ -705,6 +722,7 @@ pub fn run() {
             commands::focus_window,
             commands::get_dropped_file_metadata,
             commands::get_device_fingerprint,
+            commands::get_settings_token,
             wake_lock::acquire_wake_lock,
             wake_lock::release_wake_lock,
             notification::send_notification

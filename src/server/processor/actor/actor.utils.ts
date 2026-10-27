@@ -2,10 +2,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
 import type { Dirent } from 'fs';
-
-// Linux is typically case-sensitive, macOS/Windows are case-insensitive.
-// Only do case-insensitive path resolution on case-insensitive filesystems.
-const isCaseInsensitiveFS = process.platform === 'darwin' || process.platform === 'win32';
+import { isCaseInsensitiveFS } from '../../utils';
 
 async function resolveCaseInsensitivePath(absolutePath: string): Promise<string | null> {
     // Cross-platform resolver for absolute paths (Windows/macOS/Linux).
@@ -42,6 +39,31 @@ async function resolveCaseInsensitivePath(absolutePath: string): Promise<string 
     }
 
     return currentDir;
+}
+
+/**
+ * The file a path leads to once links resolve, for a path that may not exist yet: the
+ * nearest existing folder resolved, with the rest appended. A dangling link leads to the
+ * file a write through it would create. File tools judge this as well as the path given,
+ * so their rules apply to the file actually read or written.
+ */
+async function resolveLinks(absolutePath: string, hops = 0): Promise<string> {
+    try {
+        return await fs.realpath(absolutePath);
+    } catch {
+        // Missing, or a dangling link
+    }
+    if (hops < 40) {
+        try {
+            const link = await fs.readlink(absolutePath);
+            return await resolveLinks(path.resolve(path.dirname(absolutePath), link), hops + 1);
+        } catch {
+            // Not a link
+        }
+    }
+    const parent = path.dirname(absolutePath);
+    if (parent === absolutePath) return absolutePath;
+    return path.join(await resolveLinks(parent, hops), path.basename(absolutePath));
 }
 
 /**
@@ -441,6 +463,7 @@ export {
     getExcludedDirNamesForRootDir,
     walkFilePaths,
     resolveCaseInsensitivePath,
+    resolveLinks,
     getMdfindPath,
     isBroadSearch,
     canTranslateToMdfind,
