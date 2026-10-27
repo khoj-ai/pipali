@@ -26,6 +26,8 @@ export type Message = {
     startedAt?: string;
     /** True for user messages waiting in the soft-interrupt queue (run_started not yet received). */
     isQueued?: boolean;
+    /** True for history's reply to the last turn while its run has recorded no answer */
+    isUnanswered?: boolean;
 };
 
 export type Thought = {

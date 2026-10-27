@@ -10,7 +10,6 @@ import "katex/dist/katex.min.css";
 // Types
 import type {
     Message,
-    Thought,
     ConfirmationRequest,
     ConversationSummary,
     ConversationState,
@@ -28,7 +27,8 @@ import { useFocusManagement, useFileDrop, useModels, useSidecar, useWebSocketCha
 // Utils
 import { setApiBaseUrl, apiFetch } from "./utils/api";
 import { IS_TOUCH } from "./utils/platform";
-import { generateUUID, generateDeterministicId, getToolCategory, formatAttachedFilesBlock, type ToolCategory } from "./utils/formatting";
+import { generateUUID, getToolCategory, formatAttachedFilesBlock, type ToolCategory } from "./utils/formatting";
+import { buildChatHistory } from "./utils/chat-messages";
 import { ensureServiceWorker } from "./utils/push";
 import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupNotificationClickListener, warmAudioContext } from "./utils/notifications";
 import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
@@ -992,161 +992,7 @@ const App = () => {
             const res = await apiFetch(`/api/chat/${id}/history`);
             if (!res.ok) return;
             const data = await res.json();
-            const historyMessages: Message[] = [];
-            let currentAgentMessage: Message | null = null;
-            let thoughts: Thought[] = [];
-            let firstAgentStepId: string | null = null;
-            // A run is bracketed by the user step that started it and its own last step.
-            let runStartedAt: string | undefined;
-            let lastAgentTimestamp: string | undefined;
-
-            const finalizeCurrentAgent = () => {
-                if (currentAgentMessage) {
-                    if (thoughts.length > 0) {
-                        currentAgentMessage.thoughts = thoughts;
-                    }
-                    currentAgentMessage.startedAt = runStartedAt;
-                    currentAgentMessage.createdAt = lastAgentTimestamp;
-                    historyMessages.push(currentAgentMessage);
-                } else if (thoughts.length > 0) {
-                    // Use the first agent step_id for orphaned thoughts so deletion works
-                    const msgId = firstAgentStepId ?? generateUUID();
-                    historyMessages.push({
-                        role: 'assistant',
-                        content: '',
-                        thoughts: thoughts,
-                        id: msgId,
-                        stableId: msgId,
-                        startedAt: runStartedAt,
-                        createdAt: lastAgentTimestamp,
-                    });
-                }
-                thoughts = [];
-                currentAgentMessage = null;
-                firstAgentStepId = null;
-                lastAgentTimestamp = undefined;
-            };
-
-            for (const msg of data.history) {
-                // Memories recalled for this turn - render collapsed, like compaction.
-                // Blockquoted so bold lines inside memory bodies don't read as new thought headings.
-                if (msg.source === 'system' && msg.extra?.kind === 'memory_recall') {
-                    const recalled = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
-                    const count = Array.isArray(msg.extra?.memory_paths) ? msg.extra.memory_paths.length : 0;
-                    const quoted = recalled
-                        .replace(/^# Memory recalled\n/, '')
-                        .split('\n')
-                        .map((line: string) => line ? `> ${line}` : '>')
-                        .join('\n');
-                    thoughts.push({
-                        type: 'thought',
-                        content: `**${t('thoughts.recalledMemories', { count })}**\n${quoted}`,
-                        id: generateDeterministicId('memory-recall', recalled),
-                        isInternalThought: true,
-                    });
-                    continue;
-                }
-
-                if (msg.source === 'user') {
-                    // Check if this is a compaction step - render as thought instead of user message
-                    if (msg.extra?.is_compaction === true) {
-                        // Add compaction summary as a thought for the next agent message
-                        const summaryContent = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
-                        const content = `**Compact Context.**\n${summaryContent}`;
-                        thoughts.push({
-                            type: 'thought',
-                            content: content,
-                            id: generateDeterministicId('compaction', content),
-                            isInternalThought: true,
-                        });
-                        continue;
-                    }
-                    finalizeCurrentAgent();
-                    const rawContent = typeof msg.message === 'string' ? msg.message : JSON.stringify(msg.message);
-                    const attachMatch = rawContent.match(/\n\n<attached_files>\n([\s\S]*?)\n<\/attached_files>$/);
-                    const attachedFiles = attachMatch
-                        ? attachMatch[1].split('\n').map((line: string) => line.replace(/^- /, '').trim()).filter(Boolean)
-                        : undefined;
-                    const stepId = msg.step_id != null ? String(msg.step_id) : generateUUID();
-                    historyMessages.push({
-                        role: 'user',
-                        content: rawContent.replace(/\n\n<attached_files>[\s\S]*?<\/attached_files>$/, ''),
-                        id: stepId,
-                        stableId: stepId,
-                        attachedFiles,
-                        createdAt: msg.timestamp,
-                    });
-                    runStartedAt = msg.timestamp;
-                }
-
-                if (msg.source === 'agent') {
-                    // Track first agent step_id for this message group (used for orphaned thoughts)
-                    if (firstAgentStepId === null) {
-                        firstAgentStepId = msg.step_id != null ? String(msg.step_id) : generateUUID();
-                    }
-                    lastAgentTimestamp = msg.timestamp;
-                    let toolResultsMap: Map<string, string> = new Map();
-                    const hasMessage = msg.message && msg.message.trim() !== '';
-                    const stepGroupId = msg.tool_calls && msg.tool_calls.length > 0
-                        ? (msg.step_id != null ? String(msg.step_id) : msg.tool_calls[0]?.tool_call_id || generateUUID())
-                        : undefined;
-
-                    if (msg.reasoning_content) {
-                        thoughts.push({
-                            type: 'thought',
-                            content: msg.reasoning_content,
-                            id: generateDeterministicId('thought', msg.reasoning_content),
-                            isInternalThought: true,
-                            stepGroupId,
-                        });
-                    }
-
-                    // Build tool results map from observation if present
-                    if (msg.observation && msg.observation.results) {
-                        toolResultsMap = new Map(
-                            msg.observation.results
-                                .filter((res: any) => res.source_call_id && res.content)
-                                .map((res: any) => [res.source_call_id, typeof res.content === 'string' ? res.content : JSON.stringify(res.content)])
-                        );
-                    }
-
-                    // Add tool calls as thoughts (with results if available)
-                    if (msg.tool_calls && msg.tool_calls.length > 0) {
-                        // If there's a message alongside tool calls, add it as a thought first
-                        if (hasMessage) {
-                            thoughts.push({
-                                type: 'thought',
-                                content: msg.message,
-                                id: generateDeterministicId('thought', msg.message),
-                                stepGroupId,
-                            });
-                        }
-                        for (const tc of msg.tool_calls) {
-                            thoughts.push({
-                                type: 'tool_call',
-                                toolName: tc.function_name,
-                                toolArgs: tc.arguments,
-                                toolResult: toolResultsMap.get(tc.tool_call_id),
-                                content: '',
-                                id: tc.tool_call_id,
-                                stepGroupId,
-                            });
-                        }
-                    } else if (hasMessage) {
-                        // No tool calls, just a message - set as currentAgentMessage
-                        const stepId = msg.step_id != null ? String(msg.step_id) : generateUUID();
-                        currentAgentMessage = {
-                            role: 'assistant',
-                            content: msg.message,
-                            id: stepId,
-                            stableId: stepId,
-                        };
-                    }
-                }
-            }
-
-            finalizeCurrentAgent();
-            mergeHistory(id, historyMessages);
+            mergeHistory(id, buildChatHistory(data.history, count => t('thoughts.recalledMemories', { count })));
             historyLoadedConversationIdRef.current = id;
 
             // Sync model dropdown to conversation's model and cache it

@@ -186,5 +186,15 @@ test.describe('Background commands', () => {
 
         // Moved, not re-asked: waking the conversation invents no user message.
         expect(steps.filter(step => step.source === 'user')).toHaveLength(1);
+
+        // Coming back rebuilds the chat from history, where the woken turn opens on the
+        // update. It still answers apart from the turn before, which keeps its own steps.
+        await chatPage.gotoConversation(conversationId);
+        const answers = page.locator(Selectors.assistantMessage);
+        await expect(answers).toHaveCount(2);
+        await expect(answers.nth(0)).toContainText('Started it, I will report back');
+        await expect(answers.nth(0).locator(Selectors.thoughtsSection)).toHaveCount(1);
+        await expect(answers.nth(1)).toContainText('finished while I was answering');
+        await expect(answers.nth(1).locator(Selectors.thoughtsSection)).toHaveCount(0);
     });
 });

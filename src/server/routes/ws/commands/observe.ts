@@ -46,6 +46,7 @@ export const ObserveCommandHandler: Command<ObserveCommand> = {
             hasActiveRun,
             runId: bus.activeRun?.runId,
             clientMessageId: bus.activeRun?.clientMessageId,
+            startedAt: bus.activeRun ? new Date(bus.activeRun.startedAt).toISOString() : undefined,
         }, conversationId);
 
         // Replay recent events for catch-up

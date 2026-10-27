@@ -20,7 +20,7 @@ import { useReducer, useRef, useCallback, useEffect } from 'react';
 import type { Message, Thought, ConversationState, ConfirmationRequest, ConfirmationResponseAttachment, BillingError, AuthError } from '../types';
 import { preventIdleSleep, releaseIdleSleep } from '../utils/wake-lock';
 import { formatToolCallsForSidebar, generateUUID, generateDeterministicId } from '../utils/formatting';
-import { trimHistoryTailAfterUser, mergeHistoryWithLive } from '../utils/chat-messages';
+import { dropUnansweredReply, mergeHistoryWithLive, type ChatHistory } from '../utils/chat-messages';
 import { useReadableTextStream } from './useReadableTextStream';
 
 // ============================================================================
@@ -79,9 +79,9 @@ export type ChatAction =
     | { type: 'CLEAR_CONFIRMATIONS'; conversationId: string }
     | { type: 'CLEAR_COMPLETED'; conversationId: string }
     | { type: 'CLEAR_STOPPED'; conversationId: string }
-    | { type: 'OBSERVE_ACTIVE_RUN'; conversationId: string; runId?: string; clientMessageId?: string }
+    | { type: 'OBSERVE_ACTIVE_RUN'; conversationId: string; runId?: string; clientMessageId?: string; startedAt?: string }
     | { type: 'OBSERVE_IDLE'; conversationId: string }
-    | { type: 'MERGE_HISTORY'; conversationId: string; historyMessages: Message[] };
+    | { type: 'MERGE_HISTORY'; conversationId: string; history: ChatHistory };
 
 export interface SendMessageOptions {
     clientMessageId?: string;
@@ -638,9 +638,10 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
 
             let messages = isCurrentConversation ? state.messages : (existing?.messages || []);
 
-            // If history was loaded mid-run, we may have an extra history-derived assistant tail
-            // (thoughts-only, no content). Trim it before we add/update the live run placeholder.
-            messages = trimHistoryTailAfterUser(messages);
+            // If history was loaded mid-run, it holds the run's unanswered reply so far.
+            // Drop it so the live run placeholder + replayed events become the single
+            // source of truth.
+            messages = dropUnansweredReply(messages);
 
             // If server overrode the runId, re-key the optimistic streaming assistant placeholder.
             if (suggestedRunId && suggestedRunId !== runId) {
@@ -658,10 +659,6 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             }
 
             if (findRunAssistantIndex(messages, runId) === -1) {
-                // If we have a synthetic history "assistant-with-only-thoughts" tail, drop it so
-                // the live run placeholder + replayed events become the single source of truth.
-                messages = trimHistoryTailAfterUser(messages);
-
                 const assistant: Message = {
                     id: runId,
                     stableId: runId,
@@ -1371,7 +1368,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             // This runs INSIDE the reducer so it always sees the latest state.messages,
             // avoiding the stale-ref race where messagesRef.current lags behind
             // because it's only updated in a useEffect (after render).
-            const { conversationId, historyMessages } = action;
+            const { conversationId, history: { messages: historyMessages, turnOpen } } = action;
             const isCurrentConversation = conversationId === state.conversationId;
 
             const currentMessages = isCurrentConversation
@@ -1387,20 +1384,14 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 // A streaming placeholder exists. Check if history already has the
                 // completed run — this happens when localStorage has a stale streaming
                 // placeholder but the server finalized the run before this fetch returned.
-                const lastHistory = historyMessages[historyMessages.length - 1];
-                const historyRunComplete = lastHistory?.role === 'assistant'
-                    && !!lastHistory.content
-                    && !lastHistory.isStreaming;
+                const historyRunComplete = !turnOpen && historyMessages.length > 0;
 
                 if (historyRunComplete) {
                     mergedMessages = historyMessages;
                 } else {
-                    // Genuine active run — strip history assistants after the last user
-                    // to avoid duplicates (history may capture the completed run in the
-                    // narrow window between DB persistence and bus cleanup).
-                    const lastUserIdx = historyMessages.findLastIndex(m => m.role === 'user');
-                    const prunedHistory = lastUserIdx === -1 ? [] : historyMessages.slice(0, lastUserIdx + 1);
-                    mergedMessages = mergeHistoryWithLive(prunedHistory, currentMessages);
+                    // Genuine active run — strip what history has of its reply so far, as
+                    // the placeholder replays it.
+                    mergedMessages = mergeHistoryWithLive(dropUnansweredReply(historyMessages), currentMessages);
                 }
             } else {
                 // When there's no active run, check if WebSocket events delivered
@@ -1430,13 +1421,13 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         }
 
         case 'OBSERVE_ACTIVE_RUN': {
-            const { conversationId, runId, clientMessageId } = action;
+            const { conversationId, runId, clientMessageId, startedAt } = action;
             const isCurrentConversation = conversationId === state.conversationId;
 
             const conversationStates = new Map(state.conversationStates);
             const existing = conversationStates.get(conversationId);
 
-            const baseMessages = trimHistoryTailAfterUser(existing?.messages || (isCurrentConversation ? state.messages : []));
+            const baseMessages = dropUnansweredReply(existing?.messages || (isCurrentConversation ? state.messages : []));
 
             // Insert a streaming assistant placeholder if we have a runId and none exists yet
             let updatedMessages = baseMessages;
@@ -1449,9 +1440,9 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
                     content: '',
                     isStreaming: true,
                     thoughts: [],
-                    // Tuning into a run already under way. It began when the message it
-                    // answers was recorded, not when we started watching.
-                    startedAt: baseMessages.findLast(m => m.role === 'user')?.createdAt,
+                    // Tuning into a run already under way, so it began before we started
+                    // watching. A woken run began long after the last user message.
+                    startedAt,
                 };
                 if (clientMessageId) {
                     const userIndex = baseMessages.findIndex(m => m.role === 'user' && (m.id === clientMessageId || m.stableId === clientMessageId));
@@ -1913,6 +1904,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                         conversationId: convId,
                         runId: message.runId,
                         clientMessageId: message.clientMessageId,
+                        startedAt: message.startedAt,
                     });
                 } else {
                     // Server says no active run — clear stale processing state from localStorage
@@ -2125,8 +2117,8 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
         dispatch({ type: 'DISMISS_CONFIRMATION', conversationId, requestId });
     }, []);
 
-    const mergeHistory = useCallback((conversationId: string, historyMessages: Message[]) => {
-        dispatch({ type: 'MERGE_HISTORY', conversationId, historyMessages });
+    const mergeHistory = useCallback((conversationId: string, history: ChatHistory) => {
+        dispatch({ type: 'MERGE_HISTORY', conversationId, history });
     }, []);
 
     return {

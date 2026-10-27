@@ -21,6 +21,13 @@ export const CONVERSATION_HEADER =
     /^Conversation: ([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/im;
 
 /**
+ * Kinds of `system` step reporting long-running work back to the conversation that
+ * started it. One arriving between turns wakes the conversation into a turn of its own.
+ */
+export const PARENT_INBOX_KINDS = ['delegated_task_update', 'background_command_update'] as const;
+export type ParentInboxKind = typeof PARENT_INBOX_KINDS[number];
+
+/**
  * A run records one agent step without tool calls, its answer, last. That ends a reply
  * even with no user message after it, as when background work reporting in wakes the
  * conversation. The chat groups steps into replies by it, and deleting one removes the

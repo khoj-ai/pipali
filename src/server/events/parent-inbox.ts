@@ -7,11 +7,13 @@
  *
  * Updates arrive as `system` steps. Those reach the model inline (see
  * generateChatmlMessagesWithContext) but are invisible to the conversation preview,
- * search, and the client's message list — so nothing needs to filter them out.
+ * search, and the client's message list — so nothing needs to filter them out. The
+ * client reads one arriving between turns as the start of the turn it wakes.
  */
 
 import { atifConversationService } from '../processor/conversation/atif/atif.service';
 import type { User } from '../db/schema';
+import type { ParentInboxKind } from '../../shared';
 import { getBus } from './conversation-event-bus';
 import { startConversationRun } from './conversation-runs';
 import { createChildLogger } from '../logger';
@@ -80,7 +82,7 @@ export interface DeliverToParentOptions {
     /** Written verbatim as a system step, so make it self-contained. */
     message: string;
     /** Names the kind of operation reporting in, for anything reading steps back. */
-    kind?: string;
+    kind?: ParentInboxKind;
 }
 
 /**

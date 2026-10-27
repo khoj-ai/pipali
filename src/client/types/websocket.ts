@@ -232,6 +232,7 @@ export type ObserveStatusMessage = {
     hasActiveRun: boolean;
     runId?: string;
     clientMessageId?: string;
+    startedAt?: string;
 };
 
 export type ServerMessage =

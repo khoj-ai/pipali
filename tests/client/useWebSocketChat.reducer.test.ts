@@ -1,8 +1,10 @@
-import { test, expect } from 'bun:test';
+import { test, expect, describe } from 'bun:test';
 import { __test__, type ChatState } from '../../src/client/hooks/useWebSocketChat';
 import { getCollapsedPreviewThoughts } from '../../src/client/components/thoughts/ThoughtsSection';
 import type { ConversationState, Message } from '../../src/client/types';
 import { generateDeterministicId } from '../../src/client/utils/formatting';
+import { buildChatHistory } from '../../src/client/utils/chat-messages';
+import type { ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
 
 function makeState(params: {
     conversationId: string;
@@ -700,11 +702,11 @@ test('MESSAGE_DELETED with rewind drops the edited message and everything after 
     expect(deleted.messages.map(m => m.id)).toEqual(['1', '2', '5', '6']);
 });
 
-test('OBSERVE_ACTIVE_RUN dates the placeholder from the message it answers, not from now', () => {
+test('OBSERVE_ACTIVE_RUN dates the placeholder from when the run began, not from now', () => {
     const conversationId = 'c1';
-    const askedAt = '2026-03-15T09:05:00.000Z';
     const messages: Message[] = [
-        { id: '1', stableId: '1', role: 'user', content: 'Take your time', createdAt: askedAt },
+        { id: '1', stableId: '1', role: 'user', content: 'Take your time', createdAt: '2026-03-15T09:05:00.000Z' },
+        { id: '2', stableId: '2', role: 'assistant', content: 'Started it, I will report back.' },
     ];
     const state = makeState({
         conversationId,
@@ -712,15 +714,113 @@ test('OBSERVE_ACTIVE_RUN dates the placeholder from the message it answers, not 
         conversationState: { isProcessing: true, isStopped: false, isCompleted: false, messages },
     });
 
+    // Background work reporting back woke the conversation hours after the user asked
+    const wokenAt = '2026-03-15T14:00:00.000Z';
     const observing = __test__.chatReducer(state, {
         type: 'OBSERVE_ACTIVE_RUN',
         conversationId,
-        runId: 'run-1',
-        clientMessageId: '1',
+        runId: 'run-2',
+        clientMessageId: 'wake-1',
+        startedAt: wokenAt,
     });
 
     // Watching from halfway through must not restart the clock at zero
-    const assistant = observing.messages.find(m => m.role === 'assistant');
+    const assistant = observing.messages.at(-1);
     expect(assistant?.isStreaming).toBe(true);
-    expect(assistant?.startedAt).toBe(askedAt);
+    expect(assistant?.startedAt).toBe(wokenAt);
+});
+
+describe('history loaded while background work has woken the conversation', () => {
+    const conversationId = 'c1';
+    const at = (step_id: number) => `2026-10-26T18:${String(step_id).padStart(2, '0')}:00.000Z`;
+    const toolStep = (step_id: number, name: string): ATIFStep => ({
+        step_id,
+        timestamp: at(step_id),
+        source: 'agent',
+        message: '',
+        tool_calls: [{ tool_call_id: `call-${step_id}`, function_name: name, arguments: {} }],
+        observation: { results: [{ source_call_id: `call-${step_id}`, content: 'ok' }] },
+    });
+    const woken: ATIFStep[] = [
+        { step_id: 1, timestamp: at(1), source: 'user', message: 'Fix the dependabot alerts' },
+        toolStep(2, 'shell_command'),
+        { step_id: 3, timestamp: at(3), source: 'agent', message: 'Started it, I will report back.' },
+        { step_id: 4, timestamp: at(4), source: 'system', message: '[Background command finished]', extra: { kind: 'background_command_update' } },
+    ];
+    const label = (count: number) => `Recalled ${count}`;
+
+    test('the live run survives the merge, so its steps keep landing on it', () => {
+        // Its first tool call waits on the user, so the run has persisted no step yet
+        const messages: Message[] = [
+            { id: '1', stableId: '1', role: 'user', content: 'Fix the dependabot alerts' },
+            { id: '3', stableId: 'run-1', role: 'assistant', content: 'Started it, I will report back.' },
+            { id: 'run-2', stableId: 'run-2', role: 'assistant', content: '', isStreaming: true, thoughts: [{ id: 'call-5', type: 'tool_call', content: '', toolName: 'shell_command', isPending: true }] },
+        ];
+        const state = makeState({
+            conversationId,
+            messages,
+            conversationState: { isProcessing: true, isStopped: false, isCompleted: false, messages },
+        });
+
+        const merged = __test__.chatReducer(state, { type: 'MERGE_HISTORY', conversationId, history: buildChatHistory(woken, label) });
+        expect(merged.messages.map(m => m.id)).toEqual(['1', '3', 'run-2']);
+
+        const stepped = __test__.chatReducer(merged, {
+            type: 'STEP_START',
+            conversationId,
+            runId: 'run-2',
+            toolCalls: [{ tool_call_id: 'call-6', function_name: 'grep_files', arguments: {} }],
+        });
+        expect(stepped.messages.at(-1)?.thoughts?.map(t => t.id)).toEqual(['call-5', 'call-6']);
+    });
+
+    test('observing after the merge keeps the run\'s steps off the answer before it', () => {
+        const state = makeState({
+            conversationId,
+            messages: [],
+            conversationState: { isProcessing: false, isStopped: false, isCompleted: false, messages: [] },
+        });
+
+        const history = buildChatHistory([...woken, toolStep(5, 'view_file')], label);
+        const merged = __test__.chatReducer(state, { type: 'MERGE_HISTORY', conversationId, history });
+        // A woken run answers no user message, so its client message id matches nothing
+        const observing = __test__.chatReducer(merged, {
+            type: 'OBSERVE_ACTIVE_RUN',
+            conversationId,
+            runId: 'run-2',
+            clientMessageId: 'wake-1',
+        });
+
+        // Replay refills the placeholder, so history's copy of the run in flight goes
+        expect(observing.messages.map(m => [m.id, m.content, m.thoughts?.map(t => t.id)])).toEqual([
+            ['1', 'Fix the dependabot alerts', undefined],
+            ['3', 'Started it, I will report back.', ['call-2']],
+            ['run-2', '', []],
+        ]);
+    });
+
+    test('observing keeps the reply before it even when that run answered with nothing', () => {
+        const state = makeState({
+            conversationId,
+            messages: [],
+            conversationState: { isProcessing: false, isStopped: false, isCompleted: false, messages: [] },
+        });
+
+        // A run that got no message from the model after retries records an empty answer
+        const emptyAnswer = woken.map(step => step.step_id === 3 ? { ...step, message: '' } : step);
+        const history = buildChatHistory([...emptyAnswer, toolStep(5, 'view_file')], label);
+        const merged = __test__.chatReducer(state, { type: 'MERGE_HISTORY', conversationId, history });
+        const observing = __test__.chatReducer(merged, {
+            type: 'OBSERVE_ACTIVE_RUN',
+            conversationId,
+            runId: 'run-2',
+            clientMessageId: 'wake-1',
+        });
+
+        expect(observing.messages.map(m => [m.id, m.thoughts?.map(t => t.id)])).toEqual([
+            ['1', undefined],
+            ['2', ['call-2']],
+            ['run-2', []],
+        ]);
+    });
 });

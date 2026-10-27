@@ -266,6 +266,8 @@ export interface ObserveStatusMessage {
     hasActiveRun: boolean;
     runId?: string;
     clientMessageId?: string;
+    /** ISO timestamp of when the active run began */
+    startedAt?: string;
 }
 
 /**
