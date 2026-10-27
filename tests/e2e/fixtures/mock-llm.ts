@@ -192,6 +192,34 @@ export function interruptDuringFinalResponseScenario(): MockScenario {
     };
 }
 
+/**
+ * One step that runs for seconds once approved, so a test can act while a tool is
+ * executing on any runner. The command prints only if the step runs to completion.
+ */
+export function longStepScenario(): MockScenario {
+    return {
+        name: 'long-step',
+        queryPattern: '^work through a long step$',
+        iterations: [
+            {
+                thought: 'Running the long step.',
+                toolCalls: [
+                    {
+                        function_name: 'shell_command',
+                        arguments: {
+                            justification: 'Run the long step',
+                            command: 'sleep 3; echo long-step-finished',
+                            operation_type: 'read-only',
+                        },
+                        tool_call_id: 'tc-long-step-1',
+                    },
+                ],
+            },
+        ],
+        finalResponse: 'The long step is done.',
+    };
+}
+
 export function scrollBehaviorSetupScenario(): MockScenario {
     return {
         name: 'scroll-behavior-setup',
@@ -1038,6 +1066,7 @@ export const defaultMockScenarios: MockScenario[] = [
     quickScenario(),
     simpleResponseNoTools(),
     interruptDuringFinalResponseScenario(),
+    longStepScenario(),
     scrollBehaviorSetupScenario(),
     scrollBehaviorFollowupScenario(),
     liveOutlineScrollScenario(),

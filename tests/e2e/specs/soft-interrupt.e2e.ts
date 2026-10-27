@@ -117,24 +117,28 @@ test.describe('Soft Interrupt', () => {
         await expect(finalAnswer).toHaveCount(1);
     });
 
-    test('soft interrupt during step execution waits for step to complete', async ({ page }) => {
-        // Start a slow task with visible tool calls
-        await chatPage.sendMessage('run a pausable analysis');
+    test('soft interrupt during step execution waits for step to complete', async ({ page, request }) => {
+        await chatPage.sendMessage('work through a long step');
+        const convId = await chatPage.waitForConversationId();
 
-        await chatPage.waitForProcessing();
+        // Once approved, the command holds its step open for seconds
+        await chatPage.clickConfirmationButton('yes');
+        await expect(page.locator('.thought-item.pending')).toBeVisible();
 
-        // Wait for at least one pending tool call to appear
-        await page.locator('.thought-item.pending').first().waitFor({ state: 'visible', timeout: 15000 });
-
-        // Send soft interrupt while tool is executing
         await chatPage.sendMessage('you good');
-
-        // Wait for completion
         await chatPage.waitForAssistantResponse();
         await chatPage.waitForIdle();
 
-        // Key assertion: Soft interrupt should NOT leave interrupted tool results
-        // This verifies the step completed normally before the run stopped
+        // The step ran to completion rather than being cut short
         await expect(page.locator('.thought-item:has-text("[interrupted]")')).toHaveCount(0);
+        const res = await request.get(`/api/chat/${convId}/history`);
+        const { history } = await res.json() as {
+            history: Array<{ message?: string; observation?: { results?: Array<{ content?: unknown }> } }>;
+        };
+        const toolOutput = history.flatMap(s => s.observation?.results ?? []).map(r => String(r.content)).join('\n');
+        expect(toolOutput).toContain('long-step-finished');
+
+        // The run stopped at that step instead of answering, so the interrupt landed mid-step
+        expect(history.map(s => s.message)).not.toContain('The long step is done.');
     });
 });
