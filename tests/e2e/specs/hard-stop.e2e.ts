@@ -44,15 +44,10 @@ test.describe('Hard Stop', () => {
     });
 
     test('escape key stops the run and marks pending tools as interrupted', async ({ page }) => {
-        // Start a slow task
-        await chatPage.sendMessage('run a pausable analysis');
-
-        await chatPage.waitForProcessing();
-        await chatPage.waitForConversationId();
-        await chatPage.waitForThoughts();
-
-        // Ensure we stop while a tool call is still pending
-        await page.locator('.thought-item.pending').first().waitFor({ state: 'visible', timeout: 15000 });
+        // Once approved, the command holds its step open for seconds
+        await chatPage.sendMessage('work through a long step');
+        await chatPage.clickConfirmationButton('yes');
+        await expect(page.locator('.thought-item.pending')).toBeVisible();
 
         // Press Escape to stop
         await chatPage.pressEscape();
