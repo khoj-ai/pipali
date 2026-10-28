@@ -19,6 +19,7 @@ export async function sendMessageToGpt(
     conversationId?: string,
     runId?: string,
     onStreamEvent?: (event: LlmStreamEvent) => void,
+    abortSignal?: AbortSignal,
 ): Promise<ResponseWithThought> {
     const openaiTools = toOpenaiTools(tools);
 
@@ -41,7 +42,7 @@ export async function sendMessageToGpt(
         tools: openaiTools,
         tool_choice: openaiTools ? toolChoice as Responses.ToolChoiceOptions : undefined,
         ...(Object.keys(tracer).length > 0 && { metadata: tracer }),
-    });
+    }, { signal: abortSignal });
 
     if (onStreamEvent) {
         // Keyed by output item id, so argument chunks can be attributed to a call

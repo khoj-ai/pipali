@@ -189,8 +189,8 @@ export async function startConversationRun(
 /**
  * Hard stop a conversation's run: abort it, drop queued messages, reject confirmations.
  *
- * The run ends here, not once it unwinds: it may still be waiting on a model call, and
- * the conversation is free for its next run meanwhile (see executeRun).
+ * The run ends here, not once it unwinds, so the conversation is free for its next run
+ * meanwhile (see executeRun).
  */
 export function stopConversationRun(conversationId: string, reason: 'user_stop' = 'user_stop'): boolean {
     const bus: ConversationEventBus | undefined = getBus(conversationId);

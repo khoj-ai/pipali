@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research, stepLimitWarningThreshold } from '../../src/server/processor/director';
+import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research, stepLimitWarningThreshold, ResearchPausedError } from '../../src/server/processor/director';
 import { isFirstRunEasterEgg } from '../../src/server/utils';
 import { MEMORY_RECALL_KIND } from '../../src/server/memory';
 import type { ATIFTrajectory, ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
@@ -279,6 +279,37 @@ describe('research request tracing', () => {
 
         // Distinct sentinels, so a slip in the positional call reads as a swap here
         expect(traced).toEqual([{ conversationId: 'conversation-1', sessionId: 'session-1', runId: 'run-1' }]);
+    });
+});
+
+describe('research stopped during a model call', () => {
+    const lateToolCall = { raw: [{ type: 'function_call' as const, id: 'fc-1', call_id: 'call-1', name: 'list_files', arguments: '{}' }] };
+
+    // The call ends after the stop: answered anyway, or cut off by the stop itself
+    test.each([
+        ['answers late', () => lateToolCall],
+        ['is cut off', () => { throw new Error('Request was aborted.'); }],
+    ])('yields nothing from a call that %s', async (_, respond) => {
+        const previousMock = globalThis.__pipaliMockLLM;
+        const stop = new AbortController();
+        globalThis.__pipaliMockLLM = () => {
+            stop.abort();
+            return respond() as typeof lateToolCall;
+        };
+        const yielded: unknown[] = [];
+        try {
+            const run = async () => {
+                for await (const iteration of research({
+                    chatHistory: trajectory([{ source: 'user', message: 'hi' }]),
+                    maxIterations: 2,
+                    abortSignal: stop.signal,
+                })) yielded.push(iteration);
+            };
+            await expect(run()).rejects.toBeInstanceOf(ResearchPausedError);
+        } finally {
+            globalThis.__pipaliMockLLM = previousMock;
+        }
+        expect(yielded).toEqual([]);
     });
 });
 

@@ -814,6 +814,7 @@ async function pickNextTool(
             config.runId,
             config.onStreamEvent,
             config.chatModelAlias,
+            config.abortSignal,
         );
 
         // Check if response is valid
@@ -907,6 +908,7 @@ async function pickNextTool(
             compactionSummary: response.compactionSummary,
         };
     } catch (error) {
+        if (config.abortSignal?.aborted) throw new ResearchPausedError();
         // Re-throw platform errors that should be handled by the caller instead of fed back to the model.
         if (error instanceof PlatformBillingError || error instanceof PlatformAuthError || isNonRecoverablePlatformModelError(error)) {
             throw error;
@@ -1236,6 +1238,8 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
         }
 
         const iteration = await pickNextTool({ ...config, currentIteration: i, thresholdStepCount, loadedMcpTools, providerToolSearch });
+        // A stop landing as the call completes drops its answer too
+        if (config.abortSignal?.aborted) throw new ResearchPausedError();
 
         // Handle warnings (e.g., invalid JSON in tool arguments, API errors) - feed back to model for retry
         // Must check before empty tool calls check, since warnings with no valid tool calls should continue loop

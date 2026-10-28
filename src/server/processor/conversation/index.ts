@@ -42,6 +42,7 @@ export async function sendMessageToModel(
     runId?: string,
     onStreamEvent?: (event: LlmStreamEvent) => void,
     chatModelAlias?: string,
+    abortSignal?: AbortSignal,
 ) {
     // Check for test mock (E2E tests inject this via preload)
     if (globalThis.__pipaliMockLLM) {
@@ -112,11 +113,13 @@ export async function sendMessageToModel(
                     conversationId,
                     runId,
                     onStreamEvent,
+                    abortSignal,
                 );
             });
             log.info({ model: modelName, durationMs: Date.now() - startTime }, 'Response received');
             return response;
         } catch (error) {
+            if (abortSignal?.aborted) throw error;
             if (error instanceof PlatformAuthError) {
                 log.error({ model: modelName, provider: aiModelApiName }, 'Platform authentication expired');
             }
@@ -139,10 +142,12 @@ export async function sendMessageToModel(
                 conversationId,
                 runId,
                 onStreamEvent,
+                abortSignal,
             );
             log.info({ model: modelName, durationMs: Date.now() - startTime }, 'Response received');
             return response;
         } catch (error) {
+            if (abortSignal?.aborted) throw error;
             log.error({ err: error, model: modelName, provider: aiModelApiName }, 'LLM request failed');
             throw error;
         }
