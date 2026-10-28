@@ -410,6 +410,10 @@ async function runExecution(
         // Build the prompt with trigger context
         const contextualPrompt = buildPromptWithContext(automation.prompt, triggerData);
 
+        // A conversation runs one run at a time, so one already going here, like the user
+        // following up on an earlier report, finishes first
+        while (getBus(conversationId)?.activeRun) await Bun.sleep(1_000);
+
         // Always create bus so WS observers can subscribe mid-run
         const bus = getOrCreateBus(conversationId);
 

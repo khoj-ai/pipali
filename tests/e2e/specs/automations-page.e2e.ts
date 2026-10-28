@@ -11,7 +11,7 @@
  */
 
 import { test, expect } from '@playwright/test';
-import { AutomationsPage, HomePage } from '../helpers/page-objects';
+import { AutomationsPage, ChatPage, HomePage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
 
 test.describe('Automations Page', () => {
@@ -684,6 +684,42 @@ test.describe('Automations Page', () => {
             // Trigger the automation
             const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
             expect(executionId).toBeTruthy();
+        });
+
+        test('waits for a run already going in its conversation to finish', async ({ page }) => {
+            const automationId = await automationsPage.createAutomationViaAPI({
+                name: 'Busy Conversation Test',
+                prompt: 'Say hello',
+            });
+            testAutomationIds.push(automationId);
+
+            const completes = (executionId: string | null) => expect.poll(async () => {
+                const response = await page.request.get(`/api/automations/executions/${executionId}`);
+                return (await response.json()).execution?.status;
+            }, { timeout: 30000 }).toBe('completed');
+
+            // A first run gives the routine its conversation
+            await completes(await automationsPage.triggerAutomationViaAPI(automationId));
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+
+            // The user follows up there, and the routine fires while that run awaits approval
+            const chatPage = new ChatPage(page);
+            await chatPage.gotoConversation(automation.conversationId);
+            await chatPage.sendMessage('work through a long step');
+            await chatPage.waitForConfirmationDialog();
+            const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
+            await chatPage.clickConfirmationButton('yes');
+
+            // The user's run finishes in view, and only then does the routine's begin
+            await expect(page.locator(Selectors.assistantMessage).filter({ hasText: 'The long step is done.' }))
+                .toBeVisible({ timeout: 20000 });
+            await completes(executionId);
+            const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as {
+                history: Array<{ message?: string }>;
+            };
+            const messages = history.map(step => step.message ?? '');
+            expect(messages.findLastIndex(message => message.includes('Say hello')))
+                .toBeGreaterThan(messages.indexOf('The long step is done.'));
         });
 
         test('should display next run time for scheduled automations', async () => {
