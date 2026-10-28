@@ -44,7 +44,9 @@ jobs:
 
   e2e-tests:
     name: 🎭 E2E Tests
-    runs-on: ubuntu-latest
+    # Playwright installs browsers only for Ubuntu releases it knows, so this moves
+    # with a Playwright upgrade rather than with GitHub's ubuntu-latest
+    runs-on: ubuntu-26.04
     steps:
       - name: ⬇️ Checkout Code
         uses: actions/checkout@v4
