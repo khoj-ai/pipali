@@ -1,3 +1,5 @@
+import { isDeepLink } from './deep-link';
+
 type MarkdownUrlTransformOptions = {
     baseUrl?: string;
     allowRelative?: boolean;
@@ -51,10 +53,11 @@ export function makeMarkdownUrlTransform(options: MarkdownUrlTransformOptions = 
                 case 'mailto:':
                 case 'tel:':
                 case 'file:':
-                // Our own scheme, for links between conversations. ExternalLink
-                // routes these in the app instead of navigating the webview.
-                case 'pipali:':
                     return inputUrl;
+                // Our own scheme, for links between conversations. ExternalLink routes the
+                // ones it recognizes in the app; any other would navigate the webview away.
+                case 'pipali:':
+                    return isDeepLink(inputUrl) ? inputUrl : '';
                 default:
                     return '';
             }

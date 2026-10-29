@@ -100,6 +100,11 @@ describe('safeMarkdownUrlTransform', () => {
         expect(safeMarkdownUrlTransform(link)).toBe(link);
     });
 
+    test('drops pipali links the app would not route, which would navigate it away', () => {
+        expect(safeMarkdownUrlTransform('Pipali://chat/9093ca2b-7f9d-43e0-998f-49dfbd7b6038')).toBe('');
+        expect(safeMarkdownUrlTransform('pipali:chat/9093ca2b-7f9d-43e0-998f-49dfbd7b6038')).toBe('');
+    });
+
     test('keeps the protocols the app opens itself', () => {
         expect(safeMarkdownUrlTransform('https://pipali.ai')).toBe('https://pipali.ai');
         expect(safeMarkdownUrlTransform('file:///tmp/notes.md')).toBe('file:///tmp/notes.md');
