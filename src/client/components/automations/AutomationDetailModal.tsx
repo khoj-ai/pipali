@@ -569,7 +569,7 @@ export function AutomationDetailModal({
                                             </>
                                         )}
 
-                                        <StartDateField value={startDate} onChange={setStartDate} />
+                                        <StartDateField value={startDate} onChange={setStartDate} timeZone={cronConfig?.timezone} />
                                     </div>
                                 )}
                             </div>

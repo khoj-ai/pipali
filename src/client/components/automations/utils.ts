@@ -62,8 +62,20 @@ export function formatSchedule(automation: AutomationInfo, t: TFunction, variant
     }
 }
 
-/** A local calendar date as YYYY-MM-DD, the format of date inputs and routine start dates. */
-export function toDateInputValue(date: Date = new Date()): string {
+/**
+ * A calendar date as YYYY-MM-DD, the format of date inputs and routine start dates, in the
+ * given timezone or else the local one.
+ */
+export function toDateInputValue(date: Date = new Date(), timeZone?: string): string {
+    if (timeZone) {
+        try {
+            const parts = new Intl.DateTimeFormat('en-US', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(date);
+            const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(p => p.type === type)?.value;
+            return `${part('year')}-${part('month')}-${part('day')}`;
+        } catch {
+            // A timezone the browser does not know reads as the local one
+        }
+    }
     const pad = (n: number) => n.toString().padStart(2, '0');
     return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
@@ -71,8 +83,9 @@ export function toDateInputValue(date: Date = new Date()): string {
 /** A routine's start date if its schedule has yet to begin, else empty. */
 export function upcomingStartDate(automation: AutomationInfo): string {
     const config = automation.triggerConfig;
-    const startDate = config?.type === 'cron' ? config.startDate : undefined;
-    return startDate && startDate > toDateInputValue() ? startDate : '';
+    if (config?.type !== 'cron' || !config.startDate) return '';
+    // The schedule begins on that day in the routine's timezone, which need not be the browser's
+    return config.startDate > toDateInputValue(new Date(), config.timezone) ? config.startDate : '';
 }
 
 /** Format a YYYY-MM-DD date for display in the UI language. */

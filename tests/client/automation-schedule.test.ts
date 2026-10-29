@@ -1,7 +1,7 @@
 import { test, expect, describe, afterEach, setSystemTime } from 'bun:test';
 import { buildCronSchedule, describeCron, parseFormSchedule, DEFAULT_FORM_SCHEDULE } from '../../src/client/components/automations/schedule';
-import { formatRunTimes } from '../../src/client/components/automations/utils';
-import { DAY_OF_MONTH_OPTIONS, DAYS_OF_WEEK, MINUTE_OPTIONS, TIME_OPTIONS } from '../../src/client/types/automations';
+import { formatRunTimes, toDateInputValue, upcomingStartDate } from '../../src/client/components/automations/utils';
+import { DAY_OF_MONTH_OPTIONS, DAYS_OF_WEEK, MINUTE_OPTIONS, TIME_OPTIONS, type AutomationInfo } from '../../src/client/types/automations';
 
 describe('routine form schedules', () => {
     test('every schedule the form builds reads back as itself', () => {
@@ -71,5 +71,34 @@ describe('routine next runs', () => {
 
         const startingNextYear = format([2027, 0, 4], [2027, 0, 11], [2027, 0, 18]);
         startingNextYear.forEach(run => expect(run).toContain('2027'));
+    });
+});
+
+describe('routine start date', () => {
+    afterEach(() => setSystemTime());
+
+    const startingOn = (startDate: string, timezone?: string) => ({
+        id: 'routine-1',
+        name: 'Daily brief',
+        prompt: 'Brief me',
+        status: 'active',
+        triggerType: 'cron',
+        triggerConfig: { type: 'cron', schedule: '0 21 * * *', timezone, startDate },
+        createdAt: '2026-10-01T00:00:00.000Z',
+    } as AutomationInfo);
+
+    test('is upcoming until that day begins in the routine timezone', () => {
+        // Nov 2 in Tokyo, still Nov 1 in Los Angeles
+        setSystemTime(new Date('2026-11-02T01:00:00Z'));
+
+        expect(upcomingStartDate(startingOn('2026-11-02', 'America/Los_Angeles'))).toBe('2026-11-02');
+        expect(upcomingStartDate(startingOn('2026-11-02', 'Asia/Tokyo'))).toBe('');
+    });
+
+    test('reads a timezone the browser does not know as the local one', () => {
+        setSystemTime(new Date(2026, 10, 2, 12));
+
+        expect(toDateInputValue(new Date(), 'Not/AZone')).toBe('2026-11-02');
+        expect(upcomingStartDate(startingOn('2026-11-03', 'Not/AZone'))).toBe('2026-11-03');
     });
 });
