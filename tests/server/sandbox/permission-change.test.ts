@@ -4,6 +4,9 @@
  */
 
 import { describe, expect, test, beforeEach, afterEach } from 'bun:test';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import api from '../../../src/server/routes/api';
 import {
     clearAllBuses,
@@ -123,6 +126,24 @@ describe('sandbox permission changes', () => {
         ]);
     });
 
+    test('names where an entry leads when how it is written hides that', async () => {
+        const linkToHome = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pipali-permissions-')), 'notes');
+        fs.symlinkSync(os.homedir(), linkToHome);
+        try {
+            const next = previewSandboxSettings(getDefaultConfig(), {
+                allowedWritePaths: ['~/.pipali/..', linkToHome, '~/Projects/not-made-yet'],
+                allowedDomains: ['*'],
+            });
+
+            expect(describeSandboxChanges(getDefaultConfig(), next)).toEqual([
+                'Let commands reach: * (every domain)',
+                `Write without asking in: ~/.pipali/.. (which is ~), ${linkToHome} (which is ~), ~/Projects/not-made-yet`,
+            ]);
+        } finally {
+            fs.rmSync(path.dirname(linkToHome), { recursive: true });
+        }
+    });
+
     test('a request that drops the built-in protections saves without asking, and they stay', async () => {
         const { asked } = startRun();
         const builtIn = getDefaultConfig();
@@ -194,6 +215,28 @@ describe('sandbox permission changes', () => {
         expect(response.status).toBe(200);
         expect(asked).toEqual([]);
         expect(getSandboxConfig().allowedDomains).toContain('api.example.com');
+    });
+
+    test('leaves permissions alone when the settings change while the user decides', async () => {
+        const { bus, run } = startRun();
+        const protectedByUser = [...getDefaultConfig().deniedReadPaths, '~/Finance'];
+        // The user protects a folder in Settings, then says yes to the ask still open
+        bus.subscribe(event => {
+            if (event.type !== 'confirmation_request') return;
+            void putSandboxSettings({ deniedReadPaths: protectedByUser }, { headers: DESKTOP_APP }).then(() => {
+                resolveConfirmationOnBus(bus, run, {
+                    requestId: event.data.requestId,
+                    selectedOptionId: CONFIRMATION_OPTIONS.YES,
+                    timestamp: new Date().toISOString(),
+                });
+            });
+        });
+
+        const response = await putSandboxSettings({ allowedDomains: ['api.example.com'], deniedReadPaths: getDefaultConfig().deniedReadPaths });
+
+        expect(response.status).toBe(409);
+        expect(getSandboxConfig().deniedReadPaths).toContain('~/Finance');
+        expect(getSandboxConfig().allowedDomains).not.toContain('api.example.com');
     });
 
     test('a wrong settings token is put to the user', async () => {

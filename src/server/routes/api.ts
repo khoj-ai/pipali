@@ -1008,6 +1008,7 @@ const UNAPPLIED_CHANGE_STATUS = {
     declined: 403,
     unanswered: 408,
     unreachable: 409,
+    outdated: 409,
 } as const;
 
 api.put('/user/sandbox', zValidator('json', sandboxSettingsSchema), async (c) => {

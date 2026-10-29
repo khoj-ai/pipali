@@ -9,6 +9,9 @@
  * for a routine nobody is watching.
  */
 
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
 import type { SandboxConfig } from './config';
 import { getSandboxConfig } from './index';
 import { previewSandboxSettings } from './settings';
@@ -50,6 +53,35 @@ function missingFrom(items: string[], other: string[]): string[] {
 }
 
 /**
+ * Where a path entry leads, home shown as ~, when that is not plain from how it is written:
+ * it climbs with .. or passes through a link. Undefined for name patterns such as .env.
+ */
+function whereItLeads(entry: string): string | undefined {
+    const home = os.homedir();
+    const expanded = entry === '~' || /^~[\\/]/.test(entry) ? path.join(home, entry.slice(1)) : entry;
+    if (!path.isAbsolute(expanded)) return undefined;
+    const normalized = path.resolve(expanded);
+    let resolved = normalized;
+    try {
+        // Resolving opens the path, which blocks on a pipe
+        const stats = fs.statSync(normalized);
+        if (stats.isDirectory() || stats.isFile()) resolved = fs.realpathSync(normalized);
+    } catch {
+        // Not there yet, so it leads where it says
+    }
+    if (resolved === normalized && !/(^|[\\/])\.\.?([\\/]|$)/.test(entry)) return undefined;
+    if (resolved === home) return '~';
+    return resolved.startsWith(home + path.sep) ? `~${resolved.slice(home.length)}` : resolved;
+}
+
+/** A list entry as the user should read it before approving it */
+function describeEntry(field: typeof LIST_CHANGES[number]['field'], entry: string): string {
+    if (field === 'allowedDomains') return entry === '*' ? '* (every domain)' : entry;
+    const leadsTo = whereItLeads(entry);
+    return leadsTo ? `${entry} (which is ${leadsTo})` : entry;
+}
+
+/**
  * What changes between two sandbox configurations, in the words of the change.
  * An empty list means the two allow exactly the same things.
  */
@@ -63,8 +95,8 @@ export function describeSandboxChanges(current: SandboxConfig, next: SandboxConf
     }
 
     for (const { field, added, removed } of LIST_CHANGES) {
-        const gained = missingFrom(next[field], current[field]);
-        const lost = missingFrom(current[field], next[field]);
+        const gained = missingFrom(next[field], current[field]).map(entry => describeEntry(field, entry));
+        const lost = missingFrom(current[field], next[field]).map(entry => describeEntry(field, entry));
         if (gained.length > 0) lines.push(`${added}: ${gained.join(', ')}`);
         if (lost.length > 0) lines.push(`${removed}: ${lost.join(', ')}`);
     }
@@ -86,7 +118,9 @@ export type SandboxChangeDecision =
     /** The ask went up and came back unanswered, or its run ended under it. */
     | { verdict: 'unanswered'; error: string }
     /** Nothing was running to ask from. */
-    | { verdict: 'unreachable'; error: string };
+    | { verdict: 'unreachable'; error: string }
+    /** Approved, but the settings changed while the user decided. */
+    | { verdict: 'outdated'; error: string };
 
 /**
  * Put a sandbox settings change to the user and report what they said.
@@ -135,6 +169,14 @@ export async function confirmSandboxChange(
         const response = await confirmationContext.requestConfirmation(request);
         const result = processConfirmationResponse(response);
         if (result.approved) {
+            // The request carries whole lists, so applying it over settings changed since
+            // the ask would drop those changes
+            if (JSON.stringify(getSandboxConfig()) !== JSON.stringify(current)) {
+                return {
+                    verdict: 'outdated',
+                    error: 'The sandbox settings changed while the user was deciding. The permissions are unchanged.',
+                };
+            }
             log.info({ conversationId: bus.conversationId, changes }, 'Sandbox permission change approved');
             return { verdict: 'approved' };
         }
