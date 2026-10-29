@@ -33,6 +33,7 @@ import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
 import { IS_COMPILED_BINARY, EMBEDDED_CHANGELOG } from '../embedded-assets';
 import { getBus } from '../events/conversation-event-bus';
+import { getServer } from '../server-instance';
 import {
     getSandboxConfig,
     getDefaultPaths,
@@ -944,6 +945,11 @@ api.delete('/skills/:name', async (c) => {
 
 // Sandbox settings endpoints
 
+/** Bun drops a request after 10 idle seconds, and these wait on the user to answer. */
+function waitOnUser(c: Context): void {
+    getServer()?.timeout(c.req.raw, 0);
+}
+
 // Get sandbox status (enabled, supported, running, platform, setup state)
 api.get('/sandbox/status', async (c) => {
     return c.json({
@@ -966,6 +972,7 @@ api.post('/sandbox/setup', async (c) => {
         return c.json({ error: 'Only Windows needs the sandbox set up' }, 400);
     }
     try {
+        waitOnUser(c);
         const { cancelled } = await setUpWindowsSandbox();
         return c.json({ cancelled, active: isSandboxActive(), error: getSandboxStartError() });
     } catch (err) {
@@ -1010,6 +1017,7 @@ api.put('/user/sandbox', zValidator('json', sandboxSettingsSchema), async (c) =>
         // With the settings token, the user is changing their own permissions in the desktop
         // app. Without it the request is Pipali asking, and the user decides before it applies.
         if (!hasSettingsToken(c.req.raw)) {
+            waitOnUser(c);
             const decision = await confirmSandboxChange(body, { signal: c.req.raw.signal });
             if (decision.verdict !== 'approved') {
                 log.info(`Sandbox settings unchanged: ${decision.verdict}`);
