@@ -6,6 +6,7 @@ import { readFile } from '../../../src/server/processor/actor/read_file';
 import { writeFile } from '../../../src/server/processor/actor/write_file';
 import { editFile } from '../../../src/server/processor/actor/edit_file';
 import { grepFiles } from '../../../src/server/processor/actor/grep_files';
+import { openJudgedFile } from '../../../src/server/processor/actor/actor.utils';
 import { getDefaultConfig } from '../../../src/server/sandbox/config';
 import { initializeSandboxWithConfig } from '../../../src/server/sandbox';
 import { isCaseInsensitiveFS } from '../../../src/server/utils';
@@ -328,6 +329,33 @@ describe('Tool Protection - Links and case', () => {
         expect(output).toContain('Updated');
         expect(await fs.readFile(path.join(allowed, 'notes.txt'), 'utf8')).toBe('updated');
         expect((await fs.lstat(path.join(allowed, 'notes'))).isSymbolicLink()).toBe(true);
+    });
+
+    test('writes nothing through a link planted in a folder the write just made', async () => {
+        const victim = path.join(outside, 'rc');
+        const realMkdir = fs.mkdir;
+        // As a sandboxed command watching for the folder can: link the file in before the write lands
+        fs.mkdir = (async (...args: Parameters<typeof fs.mkdir>) => {
+            const made = await realMkdir(...args);
+            await fs.symlink(victim, path.join(String(args[0]), 'payload'));
+            return made;
+        }) as typeof fs.mkdir;
+        try {
+            const { requests, output } = await asDeniedBy(context => writeFile({ file_path: path.join(allowed, 'fresh', 'payload'), content: 'replaced' }, { confirmationContext: context }));
+            expect(requests).toHaveLength(0);
+            expect(output).toContain('changed while it was being written');
+        } finally {
+            fs.mkdir = realMkdir;
+        }
+        expect(await fs.readFile(victim, 'utf8')).toBe('original');
+    });
+
+    test('opens nothing for writing through a folder swapped for a link once judged', async () => {
+        // Judged as a file in the write folders, before its folder became a link out of them
+        const swapped = path.join(allowed, 'swapped');
+        await fs.symlink(outside, swapped);
+        await expect(openJudgedFile(path.join(swapped, 'rc'))).rejects.toThrow('changed while it was being written');
+        expect(await fs.readFile(path.join(outside, 'rc'), 'utf8')).toBe('original');
     });
 
     describe('with write folders of their own', () => {

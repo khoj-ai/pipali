@@ -1,7 +1,7 @@
 import path from 'path';
 import os from 'os';
-import fs from 'fs/promises';
-import type { Dirent } from 'fs';
+import fs, { type FileHandle } from 'fs/promises';
+import { constants as fsConstants, type Dirent } from 'fs';
 import { isCaseInsensitiveFS } from '../../utils';
 
 async function resolveCaseInsensitivePath(absolutePath: string): Promise<string | null> {
@@ -64,6 +64,53 @@ async function resolveLinks(absolutePath: string, hops = 0): Promise<string> {
     const parent = path.dirname(absolutePath);
     if (parent === absolutePath) return absolutePath;
     return path.join(await resolveLinks(parent, hops), path.basename(absolutePath));
+}
+
+/** Where an open file is, read off its handle rather than off any path to it */
+async function locateOpenFile(handle: FileHandle, target: string): Promise<string> {
+    if (process.platform !== 'win32') {
+        try {
+            return await fs.realpath(`/dev/fd/${handle.fd}`);
+        } catch {
+            // No /dev/fd to read it off, as on Windows
+        }
+    }
+    // The path has to still lead to the file held open
+    const [held, named] = await Promise.all([handle.stat(), fs.stat(target)]);
+    return held.dev === named.dev && held.ino === named.ino ? fs.realpath(target) : '';
+}
+
+/**
+ * Open the file a write was judged for, to write through the handle. The judging resolved
+ * the path's links, and a sandboxed command can plant one before the write lands, so the
+ * file opened is checked by where it is. A link at the path, or one swapped in for a folder
+ * on the way, leaves it unwritten. The file is opened untruncated.
+ */
+async function openJudgedFile(target: string, { create = false } = {}): Promise<FileHandle> {
+    const changed = new Error(`${target} changed while it was being written, so it was left as it was`);
+    const flags = fsConstants.O_RDWR | (create ? fsConstants.O_CREAT : 0) | (fsConstants.O_NOFOLLOW ?? 0);
+    const handle = await fs.open(target, flags).catch((error: NodeJS.ErrnoException) => {
+        throw error.code === 'ELOOP' ? changed : error;
+    });
+    try {
+        const landed = await locateOpenFile(handle, target);
+        if (landed !== target && !(isCaseInsensitiveFS && landed.toLowerCase() === target.toLowerCase())) {
+            throw changed;
+        }
+        return handle;
+    } catch (error) {
+        await handle.close();
+        throw error;
+    }
+}
+
+/** Replace the content of an open file */
+async function overwriteFile(handle: FileHandle, content: string): Promise<void> {
+    const bytes = Buffer.from(content, 'utf-8');
+    await handle.truncate(0);
+    for (let offset = 0; offset < bytes.length;) {
+        offset += (await handle.write(bytes, offset, bytes.length - offset, offset)).bytesWritten;
+    }
 }
 
 /**
@@ -464,6 +511,8 @@ export {
     walkFilePaths,
     resolveCaseInsensitivePath,
     resolveLinks,
+    openJudgedFile,
+    overwriteFile,
     getMdfindPath,
     isBroadSearch,
     canTranslateToMdfind,

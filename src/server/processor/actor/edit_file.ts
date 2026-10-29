@@ -1,7 +1,7 @@
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
-import { resolveCaseInsensitivePath } from './actor.utils';
+import { openJudgedFile, overwriteFile, resolveCaseInsensitivePath } from './actor.utils';
 import {
     type ConfirmationContext,
     requestOperationConfirmation,
@@ -270,7 +270,21 @@ async function editResolvedFile(
         }
     }
 
-    await fs.writeFile(target, contentToWrite, 'utf-8');
+    const handle = await openJudgedFile(target);
+    try {
+        // The edit applies to what was read, so a file changed since is left alone
+        if (await handle.readFile('utf-8') !== content) {
+            return {
+                query,
+                file: file_path,
+                uri: file_path,
+                compiled: `Error: ${file_path} changed since it was read. Read it again before editing.`,
+            };
+        }
+        await overwriteFile(handle, contentToWrite);
+    } finally {
+        await handle.close();
+    }
 
     const replacementCount = replace_all ? occurrences : 1;
     const message = `Successfully replaced ${replacementCount} occurrence${replacementCount > 1 ? 's' : ''} in ${file_path}`;

@@ -6,7 +6,7 @@ import {
     requestOperationConfirmation,
 } from '../confirmation';
 import { isPathWithinAllowedWrite } from '../../sandbox';
-import { resolveLinks } from './actor.utils';
+import { openJudgedFile, overwriteFile, resolveLinks } from './actor.utils';
 import { isMemoryFile, memoryWriteError, stampProvenance } from '../../memory';
 import { createChildLogger } from '../../logger';
 
@@ -134,7 +134,12 @@ export async function writeFile(
         }
 
         await fs.mkdir(path.dirname(target), { recursive: true });
-        await fs.writeFile(target, contentToWrite, 'utf-8');
+        const handle = await openJudgedFile(target, { create: true });
+        try {
+            await overwriteFile(handle, contentToWrite);
+        } finally {
+            await handle.close();
+        }
 
         const action = exists ? 'Updated' : 'Created';
         const lineCount = contentToWrite.split('\n').length;
