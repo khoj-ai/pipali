@@ -50,6 +50,9 @@ let runtimeReady = false;
 // Why the runtime last failed to start, unless that was the missing Windows setup
 let runtimeError: string | null = null;
 
+// Whether the runtime's last start failed. A restart takes it down for a moment without that.
+let startFailed = false;
+
 // Starts and stops of the runtime run one at a time, so overlapping ones cannot leave a
 // stale policy in force or tear down a runtime another just started
 let runtimeQueue: Promise<void> = Promise.resolve();
@@ -87,6 +90,7 @@ async function startRuntime(): Promise<void> {
         }
         runtimeReady = true;
         runtimeError = null;
+        startFailed = false;
         log.info({
             platform: process.platform,
             allowWrite: runtimeConfig.filesystem.allowWrite,
@@ -99,6 +103,7 @@ async function startRuntime(): Promise<void> {
             log.error({ err: error }, 'Sandbox failed to start, commands will ask for confirmation');
         }
         runtimeError = awaitingSetup ? null : error instanceof Error ? error.message : String(error);
+        startFailed = true;
         // A failed start can leave part of the runtime up. Clear it so the next start begins clean.
         await SandboxManager.reset().catch(err => log.warn({ err }, 'Could not clear the failed sandbox start'));
     }
@@ -246,7 +251,7 @@ export function isSandboxSupported(): boolean {
  * sandboxed commands run as. Setting up again also repairs one that stopped working.
  */
 export function needsSandboxSetup(platform: NodeJS.Platform = process.platform): boolean {
-    return platform === 'win32' && isSandboxEnabled() && isSandboxSupported() && !isSandboxActive();
+    return platform === 'win32' && isSandboxEnabled() && isSandboxSupported() && !isSandboxActive() && startFailed;
 }
 
 /** Why the sandbox last failed to start, if it was not just awaiting setup. */
@@ -290,7 +295,10 @@ let windowsSetup: { elevated: Promise<void>; done: Promise<{ cancelled: boolean 
  * makes the user's profile readable to the sandbox account, which can take minutes on a
  * large profile; `onElevated` is called as that starts.
  */
-export function setUpWindowsSandbox(onElevated?: () => void): Promise<{ cancelled: boolean }> {
+export function setUpWindowsSandbox(
+    onElevated?: () => void,
+    install: typeof installWindowsSandboxAsync = installWindowsSandboxAsync,
+): Promise<{ cancelled: boolean }> {
     if (!windowsSetup) {
         const elevated = Promise.withResolvers<void>();
         const done = queueRuntime(async (): Promise<{ cancelled: boolean }> => {
@@ -299,24 +307,24 @@ export function setUpWindowsSandbox(onElevated?: () => void): Promise<{ cancelle
             await SandboxManager.reset();
 
             const { windows } = buildRuntimeConfig(currentConfig, 'win32');
-            const result = await installWindowsSandboxAsync({
+            const result = await install({
                 srtWin: resolveSrtWin(windows?.srtWin),
                 // Loopback is open or closed for the whole install, and sessions must ask for that mode
                 allowLoopback: currentConfig.allowLocalBinding,
                 force: true,
                 onProfileGrantStart: () => elevated.resolve(),
             });
-            if (result.cancelled) {
-                return { cancelled: true };
+            if (!result.cancelled) {
+                const grant = result.profileGrant;
+                log.info({ profileGrant: grant?.applied ? 'applied' : grant?.reason }, 'Windows sandbox set up');
+                fs.rmSync(setupDeclinedMarker(), { force: true });
             }
-            const grant = result.profileGrant;
-            log.info({ profileGrant: grant?.applied ? 'applied' : grant?.reason }, 'Windows sandbox set up');
-            fs.rmSync(setupDeclinedMarker(), { force: true });
 
+            // Declining changed nothing, so a sandbox that ran before runs again
             if (currentConfig.enabled) {
                 await startRuntime();
             }
-            return { cancelled: false };
+            return { cancelled: result.cancelled === true };
         }).finally(() => {
             elevated.resolve();
             windowsSetup = undefined;
@@ -351,6 +359,10 @@ export async function setUpSandboxOnFirstNeed({
     platform?: NodeJS.Platform;
     setUp?: (onElevated: () => void) => Promise<{ cancelled: boolean }>;
 } = {}): Promise<void> {
+    if (platform !== 'win32') return;
+    // A restart under way takes the sandbox down for a moment, so the command runs in it once
+    // it is back. A setup under way is joined below, to wait only for its prompt.
+    if (!windowsSetup) await queueRuntime(async () => {});
     if (!needsSandboxSetup(platform) || fs.existsSync(setupDeclinedMarker())) {
         return;
     }

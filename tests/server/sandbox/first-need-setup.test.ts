@@ -1,6 +1,7 @@
 /**
  * On Windows the sandbox needs a one-time setup, behind a UAC prompt. The first command that
- * needs it raises that prompt, once, and a "no" is not asked again.
+ * needs it raises that prompt, once, and a "no" is not asked again. A sandbox that is only
+ * restarting does not need it.
  *
  * The runtime's failure to start is produced by making its initialize throw, the way it does
  * before the sandbox account exists, and setup stands in for the install behind the prompt.
@@ -10,12 +11,13 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { SandboxManager } from '@anthropic-ai/sandbox-runtime';
+import { SandboxManager, type WindowsInstallResult } from '@anthropic-ai/sandbox-runtime';
 import { getDefaultConfig } from '../../../src/server/sandbox/config';
 import {
     initializeSandboxWithConfig,
     isSandboxActive,
     setUpSandboxOnFirstNeed,
+    setUpWindowsSandbox,
 } from '../../../src/server/sandbox';
 
 const realInitialize = SandboxManager.initialize;
@@ -108,6 +110,35 @@ describe('Windows sandbox setup on first need', () => {
         await startWithoutSetup();
         await setUpSandboxOnFirstNeed({ platform: 'win32', setUp: approved });
         expect(prompts).toBe(2);
+        expect(isSandboxActive()).toBe(true);
+    });
+
+    test('a command arriving while a working sandbox restarts runs in it, without a prompt', async () => {
+        let prompts = 0;
+        const declined = async () => {
+            prompts++;
+            return { cancelled: true };
+        };
+        SandboxManager.initialize = async () => {};
+        await initializeSandboxWithConfig(getDefaultConfig());
+
+        // As when a protected path is replaced: the runtime takes a moment to come back
+        SandboxManager.initialize = () => Bun.sleep(50);
+        const restart = initializeSandboxWithConfig(getDefaultConfig());
+        await Bun.sleep(10);
+
+        await setUpSandboxOnFirstNeed({ platform: 'win32', setUp: declined });
+        expect(prompts).toBe(0);
+        expect(isSandboxActive()).toBe(true);
+        await restart;
+    });
+
+    test('declining the setup leaves a sandbox that was running, running', async () => {
+        SandboxManager.initialize = async () => {};
+        await initializeSandboxWithConfig(getDefaultConfig());
+
+        const declined = async () => ({ cancelled: true }) as WindowsInstallResult;
+        expect(await setUpWindowsSandbox(undefined, declined)).toEqual({ cancelled: true });
         expect(isSandboxActive()).toBe(true);
     });
 });
