@@ -1,9 +1,11 @@
 ; Macros Tauri inserts into its NSIS installer and uninstaller (bundle.windows.nsis.installerHooks)
 
-; Stop every process running from the install directory before its files are replaced or removed.
+; Stop Pipali's processes running from the install directory before its files are replaced or removed.
 ; Besides the app, these are its server and the bundled tools the server started (bun, uv, srt-win).
 ; They outlive the app when it is killed or exits without stopping them, as the updater up to 0.10.0
 ; does, and a running executable cannot be overwritten. Abort before touching any file if one stays.
+; Only Pipali's own executables are stopped, so an install directory shared with other programs
+; leaves those running.
 !macro StopProcessesInInstallDir
   ; The app first, as Tauri's installer does, so an interactive install asks before closing it
   !insertmacro CheckIfAppIsRunning "${MAINBINARYNAME}.exe" "${PRODUCTNAME}"
@@ -23,8 +25,21 @@
       System::Call 'kernel32::QueryFullProcessImageNameW(p r5, i 0, w .r6, *i ${NSIS_MAX_STRLEN}) i .r7'
       System::Call 'kernel32::CloseHandle(p r5)'
       StrCpy $0 $6 $8
+      StrCpy $R1 0
       ${If} $7 <> 0
       ${AndIf} $0 == "$INSTDIR\"
+        ; The app and its bundled runtimes sit beside each other, everything else under resources
+        StrCpy $R2 $6 "" $8
+        StrCpy $R3 $R2 10
+        ${If} $R3 == "resources\"
+        ${OrIf} $R2 == "${MAINBINARYNAME}.exe"
+        ${OrIf} $R2 == "bun.exe"
+        ${OrIf} $R2 == "uv.exe"
+        ${OrIf} $R2 == "uvx.exe"
+          StrCpy $R1 1
+        ${EndIf}
+      ${EndIf}
+      ${If} $R1 == 1
         DetailPrint "Stopping $6"
         ; PROCESS_TERMINATE | SYNCHRONIZE. A process this cannot open fails the wait.
         System::Call 'kernel32::OpenProcess(i 0x100001, i 0, i r4) p .r5'
