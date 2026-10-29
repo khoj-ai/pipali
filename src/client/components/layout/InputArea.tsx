@@ -432,7 +432,9 @@ export function InputArea({
                                 ) : (
                                     <button
                                         type="button"
-                                        onClick={onStop}
+                                        // Send turns into stop under the pointer, so the second
+                                        // click of a double click on send would stop its own run
+                                        onClick={(e) => { if (e.detail < 2) onStop(); }}
                                         className="action-button stop"
                                         title={t('inputArea.stop')}
                                     >

@@ -43,6 +43,25 @@ test.describe('Hard Stop', () => {
         expect(await chatPage.isStopped()).toBe(false);
     });
 
+    test('a double click on send starts the run without stopping it', async ({ page }) => {
+        await chatPage.inputTextarea.fill('run a pausable analysis');
+        const box = (await chatPage.sendButton.boundingBox())!;
+        await chatPage.sendButton.click();
+
+        // Send has turned into stop under the pointer when the second click of the pair lands
+        await chatPage.waitForProcessing();
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.down({ clickCount: 2 });
+        await page.mouse.up({ clickCount: 2 });
+
+        await chatPage.waitForThoughts();
+        expect(await chatPage.isProcessing()).toBe(true);
+        expect(await chatPage.isStopped()).toBe(false);
+
+        await chatPage.pressEscape();
+        await expect(chatPage.inputTextarea).toHaveAttribute('placeholder', /stopped/i);
+    });
+
     test('escape key stops the run and marks pending tools as interrupted', async ({ page }) => {
         // Once approved, the command holds its step open for seconds
         await chatPage.sendMessage('work through a long step');
