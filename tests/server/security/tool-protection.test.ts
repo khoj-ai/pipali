@@ -329,6 +329,38 @@ describe('Tool Protection - Links and case', () => {
         expect(await fs.readFile(path.join(allowed, 'notes.txt'), 'utf8')).toBe('updated');
         expect((await fs.lstat(path.join(allowed, 'notes'))).isSymbolicLink()).toBe(true);
     });
+
+    describe('with write folders of their own', () => {
+        afterAll(async () => {
+            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [allowed] });
+        });
+
+        test('writes without asking under a write folder spelled through a link', async () => {
+            const linked = path.join(root, 'linked-allowed');
+            await fs.symlink(allowed, linked);
+            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [linked] });
+
+            const { requests } = await asDeniedBy(context => writeFile({ file_path: path.join(allowed, 'via-link.txt'), content: 'linked' }, { confirmationContext: context }));
+            expect(requests).toHaveLength(0);
+            expect(await fs.readFile(path.join(allowed, 'via-link.txt'), 'utf8')).toBe('linked');
+        });
+
+        test('asks before writing outside a write folder replaced with a link', async () => {
+            const home = path.join(root, 'home');
+            const writable = path.join(home, '.pipali');
+            await fs.mkdir(writable, { recursive: true });
+            await fs.writeFile(path.join(home, '.zshrc'), 'original');
+            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [writable] });
+
+            // What a sandboxed command can do to a folder it may write: move it, and link home in its place
+            await fs.rename(writable, path.join(root, 'moved-away'));
+            await fs.symlink(home, writable);
+
+            const { requests } = await asDeniedBy(context => writeFile({ file_path: path.join(home, '.zshrc'), content: 'replaced' }, { confirmationContext: context }));
+            expect(requests).toHaveLength(1);
+            expect(await fs.readFile(path.join(home, '.zshrc'), 'utf8')).toBe('original');
+        });
+    });
 });
 
 describe('Tool Protection - Internal URL Confirmation', () => {

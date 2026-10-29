@@ -44,6 +44,16 @@ const log = createChildLogger({ component: 'sandbox' });
 // Current sandbox configuration (loaded from database)
 let currentConfig: SandboxConfig = getDefaultConfig();
 
+// Where each path rule leads once links resolve, taken as its config is applied, as the
+// runtime takes its rules as it starts. A sandboxed command can replace a write folder with
+// a link, and must not carry the rule along with it.
+let resolvedRules = resolveRules(currentConfig);
+
+function applyConfig(config: SandboxConfig): void {
+    currentConfig = config;
+    resolvedRules = resolveRules(config);
+}
+
 // Whether the sandbox runtime finished initializing. Commands only run sandboxed when it did.
 let runtimeReady = false;
 
@@ -140,12 +150,12 @@ export async function initializeSandbox(): Promise<void> {
         // Check if sandbox is disabled via environment variable (for testing)
         if (process.env.PIPALI_SANDBOX_DISABLED === 'true') {
             log.info('Sandbox disabled via PIPALI_SANDBOX_DISABLED environment variable');
-            currentConfig = { ...getDefaultConfig(), enabled: false };
+            applyConfig({ ...getDefaultConfig(), enabled: false });
             return;
         }
 
         // Load settings from database (or create defaults)
-        currentConfig = await ensureSandboxSettings(DEFAULT_USER_ID);
+        applyConfig(await ensureSandboxSettings(DEFAULT_USER_ID));
 
         if (!isSandboxSupported()) {
             log.info(`Sandbox not supported on ${process.platform}, will use confirmation-based security`);
@@ -169,7 +179,7 @@ export async function initializeSandbox(): Promise<void> {
  * Used in integration tests where the DB is not available.
  */
 export async function initializeSandboxWithConfig(config: SandboxConfig): Promise<void> {
-    currentConfig = config;
+    applyConfig(config);
     if (!isSandboxSupported() || !config.enabled) {
         return;
     }
@@ -198,7 +208,7 @@ export async function shutdownSandbox(): Promise<void> {
  * Call this after settings are updated.
  */
 export async function reloadSandboxConfig(): Promise<void> {
-    currentConfig = await loadSandboxSettings(DEFAULT_USER_ID);
+    applyConfig(await loadSandboxSettings(DEFAULT_USER_ID));
 
     if (!currentConfig.enabled) {
         log.info('Sandbox disabled after config reload');
@@ -587,19 +597,35 @@ function expandHome(p: string, style: PathStyle): string {
 }
 
 /**
- * Whether a path in match form falls under a rule, as written or where the rule leads once
- * links resolve. File tools also judge the file a path resolves to, and that path is
- * spelled the resolved way: /tmp is /private/tmp on macOS, and Windows' temp folder can be
- * spelled short.
+ * Whether a path in match form falls under a rule, as written or where the rule led once
+ * links resolved when its config was applied. File tools also judge the file a path
+ * resolves to, and that path is spelled the resolved way: /tmp is /private/tmp on macOS,
+ * and Windows' temp folder can be spelled short.
  */
 function isWithinRule(matchPath: string, rule: string, style: PathStyle): boolean {
     if (isPathWithinDirectory(matchPath, toMatchForm(rule, style))) return true;
     if (style.path !== path || style.home !== os.homedir()) return false;
-    try {
-        return isPathWithinDirectory(matchPath, toMatchForm(fs.realpathSync(expandHome(rule, style)), style));
-    } catch {
-        return false;
+    const resolved = resolvedRules.get(rule);
+    return resolved !== undefined && isPathWithinDirectory(matchPath, toMatchForm(resolved, style));
+}
+
+/** Where a config's ~ and absolute path rules lead once links resolve, for those that exist. */
+function resolveRules(config: SandboxConfig): Map<string, string> {
+    const style = hostPathStyle();
+    const rules = [...config.allowedWritePaths, ...config.deniedWritePaths, ...config.deniedReadPaths, ...DEFAULT_ALLOWED_READ_PATHS];
+    const resolved = new Map<string, string>();
+    for (const rule of rules) {
+        if (!rule.startsWith('~') && !style.path.isAbsolute(rule)) continue;
+        try {
+            const expanded = expandHome(rule, style);
+            // Resolving opens the path, which blocks on a pipe
+            const stats = fs.statSync(expanded);
+            if (stats.isDirectory() || stats.isFile()) resolved.set(rule, fs.realpathSync(expanded));
+        } catch {
+            // Not there, so matched as written
+        }
     }
+    return resolved;
 }
 
 /**
