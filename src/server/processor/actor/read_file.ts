@@ -1,7 +1,7 @@
 import path from 'path';
 import os from 'os';
 import fs from 'fs/promises';
-import { resolveCaseInsensitivePath } from './actor.utils';
+import { resolveCaseInsensitivePath, resolveLinks } from './actor.utils';
 import { extractDocumentText, getLegacyOfficeReplacement, isReadableDocumentFile } from './document_text';
 import { getSensitivePathReason } from '../../security';
 import {
@@ -9,6 +9,7 @@ import {
     requestOperationConfirmation,
 } from '../confirmation';
 import { isPathDeniedForRead } from '../../sandbox';
+import { isCaseInsensitiveFS } from '../../utils';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'read_file' });
@@ -184,10 +185,12 @@ export async function readFile(
             };
         };
 
-        // A protected name is asked about before looking, so whether it exists stays private
-        const askedFirst = isPathDeniedForRead(absolutePath);
-        if (askedFirst) {
-            const cancelled = await askToRead(absolutePath);
+        // A protected name is asked about before looking, so whether it exists stays private.
+        // Its folders are resolved first, so the ask names where a linked folder leads.
+        const namedPath = path.join(await resolveLinks(path.dirname(absolutePath)), path.basename(absolutePath));
+        const askedPath = isPathDeniedForRead(absolutePath) || isPathDeniedForRead(namedPath) ? namedPath : undefined;
+        if (askedPath) {
+            const cancelled = await askToRead(askedPath);
             if (cancelled) return cancelled;
         }
 
@@ -215,10 +218,13 @@ export async function readFile(
             };
         }
 
-        // The file read is the one judged, so a protected file is asked about however it is reached
+        // The file read is the one judged, so a protected file is asked about however it is
+        // reached. A protected name that is itself a link was asked about as the link.
         resolvedPath = await fs.realpath(resolvedPath);
         file = Bun.file(resolvedPath);
-        if (!askedFirst && isPathDeniedForRead(resolvedPath)) {
+        const wasAsked = resolvedPath === askedPath
+            || (isCaseInsensitiveFS && resolvedPath.toLowerCase() === askedPath?.toLowerCase());
+        if (!wasAsked && isPathDeniedForRead(resolvedPath)) {
             const cancelled = await askToRead(resolvedPath);
             if (cancelled) return cancelled;
         }

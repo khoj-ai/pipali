@@ -5,6 +5,7 @@ import { minimatch } from 'minimatch';
 import { clampInt, extractLiteralFromRegex, getExcludedDirNamesForRootDir, isBroadSearch, resolveCaseInsensitivePath, resolveLinks, resolvePath, walkFilePaths, runMdfind, TCC_PROTECTED_EXTENSIONS } from './actor.utils';
 import { extractDocumentText, isReadableDocumentFile } from './document_text';
 import { isSensitivePath, getSensitivePathReason } from '../../security';
+import { isPathDeniedForRead } from '../../sandbox';
 import {
     type ConfirmationContext,
     requestOperationConfirmation,
@@ -221,8 +222,10 @@ export async function grepFiles(
         // Determine search path.
         let searchPath = resolvePath(searchPathArg);
 
-        // A sensitive folder is asked about however it is reached, by name or through links
-        const sensitivePath = [searchPath, await resolveLinks(path.resolve(searchPath))].find(isSensitivePath);
+        // A sensitive or protected folder is asked about however it is reached, by name or
+        // through links, and named as where it leads
+        const isProtected = (p: string) => isSensitivePath(p) || isPathDeniedForRead(p);
+        const sensitivePath = [await resolveLinks(path.resolve(searchPath)), searchPath].find(isProtected);
         if (sensitivePath && options?.confirmationContext) {
             const reason = getSensitivePathReason(sensitivePath) || 'sensitive location';
             const confirmResult = await requestOperationConfirmation(

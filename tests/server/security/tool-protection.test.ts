@@ -287,6 +287,25 @@ describe('Tool Protection - Links and case', () => {
         expect(output).not.toContain('FAKE_SSH_KEY_CONTENT');
     });
 
+    test('asks about the file a link with a protected name leads to, by its own path', async () => {
+        const envLink = path.join(allowed, '.env');
+        await fs.symlink(secret, envLink);
+        const requests: ConfirmationRequest[] = [];
+        // Yes to the env file the name suggests, no once the file it leads to is named
+        const context: ConfirmationContext = {
+            requestConfirmation: async (request) => {
+                requests.push(request);
+                const approved = requests.length === 1;
+                return { requestId: request.requestId, selectedOptionId: approved ? CONFIRMATION_OPTIONS.YES : CONFIRMATION_OPTIONS.NO, timestamp: new Date().toISOString() };
+            },
+            preferences: createEmptyPreferences(),
+        };
+
+        const result = await readFile({ path: envLink }, { confirmationContext: context });
+        expect(requests.map(r => r.context?.affectedFiles)).toEqual([[envLink], [secret]]);
+        expect(String(result.compiled)).not.toContain('FAKE_SSH_KEY_CONTENT');
+    });
+
     test.if(isCaseInsensitiveFS)('asks before reading a protected file spelled in another case', async () => {
         const { requests, output } = await asDeniedBy(context => readFile({ path: path.join(root, '.SSH', 'id_rsa') }, { confirmationContext: context }));
         expect(requests).toHaveLength(1);
@@ -358,9 +377,21 @@ describe('Tool Protection - Links and case', () => {
         expect(await fs.readFile(path.join(outside, 'rc'), 'utf8')).toBe('original');
     });
 
-    describe('with write folders of their own', () => {
+    describe('with sandbox settings of their own', () => {
         afterAll(async () => {
             await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [allowed] });
+        });
+
+        test('asks before searching a folder the settings protect', async () => {
+            const finance = path.join(root, 'finance');
+            await fs.mkdir(finance);
+            await fs.writeFile(path.join(finance, 'salary.txt'), 'FAKE_SALARY');
+            const deniedReadPaths = [...getDefaultConfig().deniedReadPaths, finance];
+            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [allowed], deniedReadPaths });
+
+            const { requests, output } = await asDeniedBy(context => grepFiles({ pattern: 'FAKE', path: finance }, { confirmationContext: context }));
+            expect(requests.map(r => r.operation)).toEqual(['grep_sensitive_path']);
+            expect(output).not.toContain('FAKE_SALARY');
         });
 
         test('writes without asking under a write folder spelled through a link', async () => {
