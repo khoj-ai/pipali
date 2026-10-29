@@ -96,7 +96,7 @@ interface ActiveTurn {
  * dictate, and dictation is allowed to pause for as long as it likes.
  */
 function replyInvitationOpen(turn: ActiveTurn): boolean {
-    return turn.kind === 'reply' && !turn.finishing && turn.inFlight === 0 && !turn.transcript.text;
+    return turn.kind === 'reply' && !turn.finishing && turn.inFlight === 0 && !turn.transcript.spoke;
 }
 
 export interface UseVoiceCompanionParams {
@@ -763,7 +763,7 @@ export function useVoiceCompanion(params: UseVoiceCompanionParams) {
         // The segment that stopped the reply window may have held nothing —
         // echo, a hallucination, a cough someone else made. Restart it if so;
         // armReplyLapse decides, and every other outcome above has left the
-        // turn holding text or released it outright.
+        // turn with words the user said, scratched or not, or released it outright.
         armReplyLapse(turn);
     }, [completeTurn, cancelTurn, maybeShortCircuit, armReplyLapse]);
 

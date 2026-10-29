@@ -148,6 +148,7 @@ export class TurnTranscript {
     private parts = new Map<number, string>();
     private assembledThrough = -1;
     private assembled: string[] = [];
+    private spokeBefore = false;
 
     /** Add a transcribed segment; returns the action implied by the new tail. */
     addSegment(seq: number, rawText: string): TurnAction {
@@ -159,7 +160,10 @@ export class TurnTranscript {
             this.assembledThrough++;
             const part = this.parts.get(this.assembledThrough)!;
             this.parts.delete(this.assembledThrough);
-            if (part) this.assembled.push(part);
+            if (part) {
+                this.assembled.push(part);
+                this.spokeBefore = true;
+            }
             advanced = true;
         }
         if (!advanced) return { type: 'none' };
@@ -168,6 +172,11 @@ export class TurnTranscript {
 
     get text(): string {
         return this.assembled.join(' ');
+    }
+
+    /** Whether anything was said this turn, even if scratched since */
+    get spoke(): boolean {
+        return this.spokeBefore;
     }
 
     /** Tap-to-end: take whatever has been assembled, no phrase required. */

@@ -36,6 +36,15 @@ describe('replyInvitationOpen', () => {
         expect(replyInvitationOpen(turn({ said: 'check the deploy logs' }))).toBe(false);
     });
 
+    // "Scratch that" empties the transcript while the user works out a rephrase,
+    // which a restarted window would cut off after a long enough pause.
+    test('words scratched out still leave the floor with the user', () => {
+        const scratched = turn({ said: 'check the deploy logs' });
+        scratched.transcript.clear();
+        expect(scratched.transcript.text).toBe('');
+        expect(replyInvitationOpen(scratched)).toBe(false);
+    });
+
     test('a segment still transcribing is not silence', () => {
         expect(replyInvitationOpen(turn({ inFlight: 1 }))).toBe(false);
     });
