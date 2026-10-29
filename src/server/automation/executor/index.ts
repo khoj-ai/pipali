@@ -405,14 +405,22 @@ async function runExecution(
 
         // Get or create the automation's conversation
         const conversationId = await getOrCreateAutomationConversation(automation, user);
-        running.conversationId = conversationId;
 
         // Build the prompt with trigger context
         const contextualPrompt = buildPromptWithContext(automation.prompt, triggerData);
 
         // A conversation runs one run at a time, so one already going here, like the user
-        // following up on an earlier report, finishes first
+        // following up on an earlier report, finishes first. That run is not the routine's
+        // to stop, so the conversation is recorded for cancelling only once it is free.
         while (getBus(conversationId)?.activeRun) await Bun.sleep(1_000);
+        if (runningExecutions.get(automationId) !== running) {
+            log.info(`Execution ${executionId} cancelled before it started`);
+            await db.update(AutomationExecution)
+                .set({ status: 'cancelled', completedAt: new Date() })
+                .where(eq(AutomationExecution.id, executionId));
+            return;
+        }
+        running.conversationId = conversationId;
 
         // Always create bus so WS observers can subscribe mid-run
         const bus = getOrCreateBus(conversationId);
@@ -471,7 +479,8 @@ async function runExecution(
         throw error;
 
     } finally {
-        runningExecutions.delete(automationId);
+        // Cancelling already freed the slot, which a later execution may hold by now
+        if (runningExecutions.get(automationId) === running) runningExecutions.delete(automationId);
         processQueue(); // Check if more can run
     }
 }
