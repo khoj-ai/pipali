@@ -116,10 +116,38 @@ files.get('/', async (c) => {
     }
 });
 
+// Converting holds several times a document's unpacked size, and a small file can unpack huge
+const MAX_UNPACKED_DOCX_BYTES = 5 * MAX_CONTENT_BYTES;
+
+/**
+ * What a zip's files add up to unpacked, as its central directory records them, or undefined
+ * when there is no directory to read, which leaves reporting that to the converter.
+ */
+export function unpackedZipSize(bytes: Uint8Array): number | undefined {
+    const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+    // The directory's end record closes the file, after a comment of up to 64 KiB
+    for (let end = bytes.length - 22; end >= Math.max(0, bytes.length - 22 - 0xffff); end--) {
+        if (view.getUint32(end, true) !== 0x06054b50) continue;
+        const entries = view.getUint16(end + 10, true);
+        let entry = view.getUint32(end + 16, true);
+        // Only an archive of gigabytes or 65535 files needs the 64-bit format
+        if (entries === 0xffff || entry === 0xffffffff) return Infinity;
+        let total = 0;
+        for (let i = 0; i < entries; i++) {
+            if (entry + 46 > bytes.length || view.getUint32(entry, true) !== 0x02014b50) return undefined;
+            total += view.getUint32(entry + 24, true);
+            entry += 46 + view.getUint16(entry + 28, true) + view.getUint16(entry + 30, true) + view.getUint16(entry + 32, true);
+        }
+        return total;
+    }
+    return undefined;
+}
+
 /** The HTML mammoth makes of a Word document, or null when it cannot read the file as one */
 async function docxToHtml(bytes: Uint8Array, filePath: string): Promise<string | null> {
     try {
-        const { value, messages } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) });
+        // A style map a document carries can name any element, <style> included
+        const { value, messages } = await mammoth.convertToHtml({ buffer: Buffer.from(bytes) }, { includeEmbeddedStyleMap: false });
         if (messages.length) log.debug({ messages, path: filePath }, 'Document converted with warnings');
         return value;
     } catch (err) {
@@ -141,6 +169,7 @@ files.get('/content', async (c) => {
         const bytes = new Uint8Array(await Bun.file(file.realPath).arrayBuffer());
         let body: Uint8Array<ArrayBuffer> | string = bytes;
         if (path.extname(filePath).toLowerCase() === '.docx') {
+            if ((unpackedZipSize(bytes) ?? 0) > MAX_UNPACKED_DOCX_BYTES) return c.json({ error: 'File too large to view' }, 413);
             const html = await docxToHtml(bytes, file.realPath);
             if (html === null) return c.json({ error: 'Document could not be read' }, 422);
             body = html;

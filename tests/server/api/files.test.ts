@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { copyFile, mkdir, realpath, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import JSZip from 'jszip';
 import api from '../../../src/server/routes/api';
 import { MAX_CONTENT_BYTES, isUnderAllowedRoot } from '../../../src/server/routes/files';
 
@@ -172,5 +173,41 @@ describe('GET /api/files/content', () => {
     test('refuses a .docx it cannot read as a document', async () => {
         const response = await api.fetch(contentRequest(brokenDocxPath));
         expect(response.status).toBe(422);
+    });
+
+    /** The fixture with its body replaced, and changed further by `edit` */
+    async function writeDocx(filePath: string, body: string, edit?: (zip: JSZip) => Promise<void>) {
+        const zip = await JSZip.loadAsync(await Bun.file(docxPath).arrayBuffer());
+        zip.file('word/document.xml', '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            + `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`);
+        await edit?.(zip);
+        await writeFile(filePath, await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' }));
+        created.push(filePath);
+    }
+
+    test('converts a Word document without the style map it carries', async () => {
+        // A carried style map can turn a styled paragraph into any element, <style> included
+        const styledPath = path.join(dir, 'styled.docx');
+        await writeDocx(styledPath, '<w:p><w:pPr><w:pStyle w:val="Beacon"/></w:pPr><w:r><w:t>body{background:url(https://beacon.example/opened)}</w:t></w:r></w:p>', async zip => {
+            zip.file('mammoth/style-map', "p[style-name='Beacon'] => style");
+            const styles = await zip.file('word/styles.xml')!.async('string');
+            zip.file('word/styles.xml', styles.replace('</w:styles>', '<w:style w:type="paragraph" w:styleId="Beacon"><w:name w:val="Beacon"/></w:style></w:styles>'));
+        });
+
+        const response = await api.fetch(contentRequest(styledPath));
+        expect(response.status).toBe(200);
+        const html = await response.text();
+        expect(html).toContain('beacon.example');
+        expect(html).not.toContain('<style');
+    });
+
+    test('refuses a Word document that unpacks too large to convert', async () => {
+        // Under a megabyte on disk, but over 50 MB of text once unpacked
+        const bombPath = path.join(dir, 'bomb.docx');
+        await writeDocx(bombPath, `<w:p><w:r><w:t>${'a'.repeat(51 * 1024 * 1024)}</w:t></w:r></w:p>`);
+        expect(Bun.file(bombPath).size).toBeLessThan(1024 * 1024);
+
+        const response = await api.fetch(contentRequest(bombPath));
+        expect(response.status).toBe(413);
     });
 });
