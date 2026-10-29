@@ -755,7 +755,9 @@ export async function describeSandboxRefusals(
     } catch (error) {
         log.warn({ err: error }, 'Could not read what the sandbox refused');
     }
-    const isConnection = (line: string) => line.includes('network-outbound');
+    // A refused connection names where it was going. macOS also records bare network-outbound
+    // lines for lookups a client such as Bun's fetch makes on its way through the proxy.
+    const isConnection = (line: string) => /network-outbound \S+:\d+/.test(line);
     const refusals = [...new Set(recorded)].filter(line => failed || isConnection(line));
     const refusalError = failed && (REFUSAL_ERRORS[platform] ?? []).some(error => errors.includes(error));
 

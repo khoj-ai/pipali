@@ -6,7 +6,7 @@
 import { test, expect, describe } from 'bun:test';
 import os from 'os';
 import path from 'path';
-import { VENDORED_SRT_WIN_EXE } from '@anthropic-ai/sandbox-runtime';
+import { SandboxManager, VENDORED_SRT_WIN_EXE } from '@anthropic-ai/sandbox-runtime';
 import {
     getDefaultConfig,
     buildRuntimeConfig,
@@ -186,6 +186,30 @@ describe('describeSandboxRefusals', () => {
     ] as const)('on %s, exit %d with %p, points at the sandbox: %p', async (platform, exitCode, errors, told) => {
         const note = await describeSandboxRefusals(crypto.randomUUID(), { exitCode, errors }, platform);
         expect(note.startsWith('[sandbox_refusal]')).toBe(told);
+    });
+
+    /** Record refusals as the runtime does, under the first 100 characters of the command id */
+    function recordRefusals(commandId: string, ...lines: string[]) {
+        const encodedCommand = Buffer.from(commandId.slice(0, 100)).toString('base64');
+        for (const line of lines) {
+            SandboxManager.getSandboxViolationStore().addViolation({ line, encodedCommand, timestamp: new Date() });
+        }
+    }
+
+    test('reports a connection the proxy refused even when the command exits 0', async () => {
+        const commandId = crypto.randomUUID();
+        recordRefusals(commandId, 'deny network-outbound example.com:443 (domain not allowed)');
+
+        const note = await describeSandboxRefusals(commandId, { exitCode: 0, errors: '' }, 'darwin');
+        expect(note).toContain('- network-outbound example.com:443 (domain not allowed)');
+        expect(note).toContain('execution_mode "direct"');
+    });
+
+    test('leaves a command that succeeded alone when macOS logged only a bare lookup', async () => {
+        const commandId = crypto.randomUUID();
+        recordRefusals(commandId, 'bun(4095) deny(1) network-outbound');
+
+        expect(await describeSandboxRefusals(commandId, { exitCode: 0, errors: '' }, 'darwin')).toBe('');
     });
 });
 
