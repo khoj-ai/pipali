@@ -3,7 +3,7 @@ import { copyFile, mkdir, realpath, rm, symlink, writeFile } from 'fs/promises';
 import os from 'os';
 import path from 'path';
 import api from '../../../src/server/routes/api';
-import { MAX_CONTENT_BYTES } from '../../../src/server/routes/files';
+import { MAX_CONTENT_BYTES, isUnderAllowedRoot } from '../../../src/server/routes/files';
 
 // Under os.tmpdir(), one of the allowed roots, like the uploads directory the app itself uses
 const dir = path.join(os.tmpdir(), 'pipali', `files-test-${crypto.randomUUID()}`);
@@ -15,6 +15,8 @@ const hugePath = path.join(dir, 'huge.log');
 const docxPath = path.join(dir, 'brief.docx');
 const brokenDocxPath = path.join(dir, 'broken.docx');
 const escapingLinkPath = path.join(dir, 'hosts-link.png');
+// A file outside the allowed roots on every platform, for a link to escape to
+const hostsPath = process.platform === 'win32' ? 'C:\\Windows\\System32\\drivers\\etc\\hosts' : '/etc/hosts';
 // The working directory is the one place under $HOME a sandboxed test may write
 const cwdUnderHome = !path.relative(os.homedir(), process.cwd()).startsWith('..');
 const homeImagePath = path.join(process.cwd(), `.files-test-${crypto.randomUUID()}.png`);
@@ -33,7 +35,7 @@ beforeAll(async () => {
     await writeFile(hugePath, Buffer.alloc(MAX_CONTENT_BYTES + 1, 0x61));
     await copyFile(path.resolve(import.meta.dir, '../../fixtures/brief.docx'), docxPath);
     await writeFile(brokenDocxPath, 'not a zip, let alone a document');
-    await symlink('/etc/hosts', escapingLinkPath);
+    await symlink(hostsPath, escapingLinkPath);
     if (cwdUnderHome) {
         await writeFile(homeImagePath, PNG_HEADER);
         await writeFile(homeTextPath, 'home sweet home\n');
@@ -90,6 +92,17 @@ describe('GET /api/files', () => {
         expect(response.status).toBe(403);
     });
 
+    test('takes Windows paths under a root however they are cased, and nothing beside it', () => {
+        const roots = ['C:\\Users\\alice', 'C:\\Users\\alice\\AppData\\Local\\Temp'];
+        const allowed = (filePath: string) => isUnderAllowedRoot(filePath, roots, path.win32);
+
+        expect(allowed('C:\\Users\\alice\\Documents\\brief.docx')).toBe(true);
+        expect(allowed('c:\\users\\ALICE\\Documents\\brief.docx')).toBe(true);
+        expect(allowed('C:\\Users\\alice2\\brief.docx')).toBe(false);
+        expect(allowed('D:\\Users\\alice\\brief.docx')).toBe(false);
+        expect(allowed('C:\\Users\\alice')).toBe(false);
+    });
+
     test('returns 404 for a missing file under an allowed root', async () => {
         const response = await api.fetch(imageRequest(path.join(dir, 'missing.png')));
         expect(response.status).toBe(404);
@@ -127,7 +140,7 @@ describe('GET /api/files/content', () => {
     });
 
     test('shares the resolver with the image route', async () => {
-        expect((await api.fetch(contentRequest('/etc/hosts'))).status).toBe(403);
+        expect((await api.fetch(contentRequest(hostsPath))).status).toBe(403);
         expect((await api.fetch(contentRequest(escapingLinkPath))).status).toBe(403);
         expect((await api.fetch(contentRequest(path.join(dir, 'missing.txt')))).status).toBe(404);
     });

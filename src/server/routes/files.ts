@@ -54,8 +54,12 @@ async function getAllowedRoots(): Promise<string[]> {
     return resolvedRoots;
 }
 
-function isUnderAllowedRoot(filePath: string, roots: string[]): boolean {
-    return roots.some(root => filePath.startsWith(root + '/'));
+/** Whether a file lies inside one of the roots, compared as the host's paths compare */
+export function isUnderAllowedRoot(filePath: string, roots: string[], style: path.PlatformPath = path): boolean {
+    return roots.some(root => {
+        const inner = style.relative(root, filePath);
+        return !!inner && inner.split(style.sep)[0] !== '..' && !style.isAbsolute(inner);
+    });
 }
 
 type ServableFile =
