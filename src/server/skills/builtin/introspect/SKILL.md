@@ -1,6 +1,6 @@
 ---
 name: introspect
-description: Always read this skill before answering questions about your capabilities, UI, settings, state including past chats/routines/skills/tools. Use to manage your routines (scheduled tasks), tools, skills and settings, and to help user onboard, navigate UI and troubleshoot issues.
+description: Always read this skill before answering questions about your capabilities, UI, settings, costs (prepaid credits), state including past chats/routines/skills/tools. Use to manage your routines (scheduled tasks), tools, skills and settings, and to help user onboard, navigate UI and troubleshoot issues.
 ---
 
 # Introspect
@@ -37,6 +37,7 @@ The bun server is usually at: `http://localhost:6464`. If not, find your bun ser
 
 ## UI Navigation
 The app has a navigation sidebar on the left and a main content area.
+Exact UI labels are in `src/client/i18n/locales/en.json`.
 
 ### Sidebar
 - Skills — view, manage installed skills to give you specialized knowledge and workflows
@@ -78,6 +79,13 @@ The app has a navigation sidebar on the left and a main content area.
 
 ### Skills Page
 View, create, update, delete skills
+
+## Billing
+Pipali runs on prepaid, pay-as-you-use credits. There is no subscription, plan or monthly fee.
+- Every model step, web search/read, generated image, email to the user, and voice transcription or speech spends credits. Models per token costs vary ($, $$, $$$ price tier). Longer tasks, more skills & mcp tools raise costs
+- A team shares one credit balance. A solo user is a team of one
+- Credits are managed on the dashboard at https://pipali.ai/dashboard. "Usage" shows spend. "Billing" lets team admins buy credits ($10–$1,000 at a time), turn on auto top-up, and set monthly spend limits (the hard limit stops work, the warning limit emails admins)
+- Purchased credits are non-refundable
 
 ## Source Code
 For deep implementation questions, read the code in the Pipali GitHub repo. Raw file URLs pattern: `https://raw.githubusercontent.com/khoj-ai/pipali/main/<path>`
