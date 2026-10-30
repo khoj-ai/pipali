@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.11.0
+
+### 🎁 New
+- Sandbox shell commands on Windows, so they no longer need your approval each time
+- View Word documents in the in-app file viewer
+- Start routines from a future date
+
+### 🧪 Improve
+- Enable voice mode by default, with a much more reliable wake word
+- Tasks can run much longer before hitting the step limit
+- Harden sandboxing to ensure safer and more reliable work by Pipali
+  - Pipali needs user approval to change its own sandbox permissions
+  - Stricter checks before Pipali reads or writes files without asking
+  - On macOS, sandboxed commands need your approval to reach your local network
+  - On Linux, commands ask before running unsandboxed when bubblewrap, socat or ripgrep is missing
+
+### 🛠️ Fix
+- Fix Windows auto-updates, and show when one fails
+- The file viewer and chat images work on Windows
+- pipali:// links open the linked chat when clicked inside the app
+- Double-clicking send no longer stops the reply it started
+- Routines keep their timezone and schedule through edits, and don't show "Overdue" after running
+- Background task answers display and delete correctly in chat
+
 ## 0.10.0
 
 ### 🎁 New
