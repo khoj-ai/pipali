@@ -33,6 +33,7 @@ import { ensureServiceWorker } from "./utils/push";
 import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupNotificationClickListener, warmAudioContext } from "./utils/notifications";
 import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
 import { FileViewerContext } from "./hooks/useFileViewer";
+import { createComposerDraft } from "./hooks/useComposerDraft";
 import { useVoiceSettings } from "./hooks/useVoiceSettings";
 import { useVoiceCompanion } from "./hooks/useVoiceCompanion";
 import type { VoiceMode } from "./utils/voice/voice-config";
@@ -111,7 +112,8 @@ const App = () => {
     };
 
     // Core state
-    const [input, setInput] = useState("");
+    const [composerDraft] = useState(createComposerDraft);
+    const setInput = composerDraft.set;
     const [conversations, setConversations] = useState<ConversationSummary[]>([]);
     const [sidebarOpen, setSidebarOpen] = useState(() => localStorage.getItem(SIDEBAR_STORAGE_KEY) === 'true');
     const [copyingConversationId, setCopyingConversationId] = useState<string | null>(null);
@@ -1668,7 +1670,7 @@ const App = () => {
 
         // Voice and message edits supply the text directly; typed sends read the composer.
         const isSupplied = options?.text !== undefined;
-        const rawValue = options?.text ?? (textareaRef.current?.value ?? input);
+        const rawValue = options?.text ?? (textareaRef.current?.value ?? composerDraft.get());
         let messageText = rawValue.trim();
         const filePaths = isSupplied
             ? (options?.attachedFiles ?? [])
@@ -1731,7 +1733,7 @@ const App = () => {
     const sendAsBackgroundTask = () => {
         if (!isConnected) return;
 
-        const rawValue = textareaRef.current?.value ?? input;
+        const rawValue = textareaRef.current?.value ?? composerDraft.get();
         let userMsg = rawValue.trim();
         const hasFiles = stagedFiles.length > 0;
 
@@ -1847,7 +1849,7 @@ const App = () => {
                                 }
                             }}
                             userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]}
-                            hasInput={input.trim().length > 0}
+                            draft={composerDraft}
                         />
                     )}
                     {currentPage === 'skills' && (
@@ -1872,7 +1874,7 @@ const App = () => {
                     {currentPage === 'chat' && (
                         <div className={`chat-split${viewerPath ? ' has-viewer' : ''}`}>
                             <ErrorBoundary>
-                                <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onForkConversation={forkConversationFrom} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} hasInput={input.trim().length > 0} isProcessing={isProcessing} zoom={mainViewZoom} />
+                                <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onForkConversation={forkConversationFrom} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} draft={composerDraft} isProcessing={isProcessing} zoom={mainViewZoom} />
                             </ErrorBoundary>
                             {viewerPath && (
                                 <ErrorBoundary>
@@ -1884,8 +1886,7 @@ const App = () => {
                     )}
 
                     <InputArea
-                        input={input}
-                        onInputChange={setInput}
+                        draft={composerDraft}
                         onSubmit={sendMessage}
                         onKeyDown={handleKeyDown}
                         isConnected={isConnected}

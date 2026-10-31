@@ -6,6 +6,7 @@ import type { ConfirmationRequest, ChatModelInfo } from '../../types';
 import type { VoiceMode, VoiceStatus } from '../../utils/voice/voice-config';
 import { voiceCoachKey } from '../../utils/voice/voice-coach';
 import type { StagedFile } from '../../hooks/useFileDrop';
+import { useDraftText, type ComposerDraft } from '../../hooks/useComposerDraft';
 import { ConfirmationDialog } from '../confirmation/ConfirmationDialog';
 import { formatFileSize } from '../../utils/formatting';
 import { localImageSrc } from '../../utils/markdown';
@@ -14,8 +15,7 @@ import { isTauri } from '../../utils/tauri';
 import { useTranslation } from 'react-i18next';
 
 interface InputAreaProps {
-    input: string;
-    onInputChange: (value: string) => void;
+    draft: ComposerDraft;
     onSubmit: (e?: React.FormEvent) => void;
     onKeyDown: (e: React.KeyboardEvent) => void;
     isConnected: boolean;
@@ -61,8 +61,7 @@ function getFileIcon(fileName: string) {
 }
 
 export function InputArea({
-    input,
-    onInputChange,
+    draft,
     onSubmit,
     onKeyDown,
     isConnected,
@@ -93,6 +92,7 @@ export function InputArea({
     onSelectModel,
 }: InputAreaProps) {
     const { t } = useTranslation();
+    const input = useDraftText(draft);
     const hasFiles = stagedFiles.length > 0;
     const canSend = input.trim() || hasFiles;
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -183,7 +183,7 @@ export function InputArea({
                     if (pendingConfirmation && (input.trim() || hasFiles)) {
                         e.preventDefault();
                         onConfirmationRespond('guidance', input.trim() || undefined);
-                        onInputChange('');
+                        draft.set('');
                         return;
                     }
                     onSubmit(e);
@@ -229,7 +229,7 @@ export function InputArea({
                     <textarea
                         ref={textareaRef}
                         value={input}
-                        onChange={(e) => onInputChange(e.target.value)}
+                        onChange={(e) => draft.set(e.target.value)}
                         onPaste={(e) => {
                             const files = e.clipboardData?.files;
                             if (files && files.length > 0) {
@@ -242,7 +242,7 @@ export function InputArea({
                             if (pendingConfirmation && e.key === 'Enter' && !e.shiftKey && (input.trim() || hasFiles)) {
                                 e.preventDefault();
                                 onConfirmationRespond('guidance', input.trim() || undefined);
-                                onInputChange('');
+                                draft.set('');
                                 return;
                             }
                             // Cmd+Enter (Mac) or Ctrl+Enter (Windows/Linux): background task

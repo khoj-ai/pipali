@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import type { Message } from '../../types';
+import type { ComposerDraft } from '../../hooks/useComposerDraft';
 import { MessageItem } from './MessageItem';
 import { MessageNavigator } from './MessageNavigator';
 import { EmptyHomeState } from '../home/EmptyHomeState';
@@ -20,7 +21,7 @@ interface MessageListProps {
     onAuthDismiss?: (messageId: string) => void;
     onRunErrorDismiss?: (messageId: string) => void;
     userFirstName?: string;
-    hasInput?: boolean;
+    draft: ComposerDraft;
     isProcessing?: boolean;
     zoom?: number;
 }
@@ -38,7 +39,7 @@ export function MessageList({
     onAuthDismiss,
     onRunErrorDismiss,
     userFirstName,
-    hasInput,
+    draft,
     isProcessing = false,
     zoom = 1,
 }: MessageListProps) {
@@ -60,7 +61,7 @@ export function MessageList({
         <main className="main-content" ref={mainContentRef} style={{ zoom }}>
             <div className="messages-container">
                 {messages.length === 0 ? (
-                    <EmptyHomeState userFirstName={userFirstName} hasInput={hasInput} />
+                    <EmptyHomeState userFirstName={userFirstName} draft={draft} />
                 ) : (
                     <div className="messages" ref={messagesRef}>
                         {messages.map((msg, index) => (

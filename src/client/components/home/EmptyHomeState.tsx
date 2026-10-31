@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { RibbonAnimation } from './RibbonAnimation';
+import { useHasDraft, type ComposerDraft } from '../../hooks/useComposerDraft';
 import i18n from '../../i18n';
 
 type TimeSlot = 'lateNight' | 'earlyMorning' | 'morning' | 'afternoon' | 'evening' | 'night';
@@ -88,15 +89,16 @@ function getGreeting(name?: string): string {
 
 interface EmptyHomeStateProps {
     userFirstName?: string;
-    hasInput?: boolean;
+    draft: ComposerDraft;
 }
 
-export function EmptyHomeState({ userFirstName, hasInput = false }: EmptyHomeStateProps) {
+export function EmptyHomeState({ userFirstName, draft }: EmptyHomeStateProps) {
     const [greeting] = useState(() => getGreeting(userFirstName));
+    const hasDraft = useHasDraft(draft);
 
     return (
         <div className="empty-state home-empty">
-            <RibbonAnimation resolved={hasInput} />
+            <RibbonAnimation resolved={hasDraft} />
             <h2>{greeting}</h2>
         </div>
     );
