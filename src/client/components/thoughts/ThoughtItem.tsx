@@ -1,6 +1,6 @@
 // Individual thought/tool_call rendering
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { Thought } from '../../types';
 import { formatCharCount, formatDelegationToolResult, formatToolArgs, getFriendlyToolName, formatToolArgsRich, getToolCategory, getDelegatedConversationId } from '../../utils/formatting';
@@ -52,7 +52,7 @@ interface ThoughtItemProps {
     stepNumber: number; // Position among tool_call thoughts
     isPreview?: boolean;
     showResult?: boolean; // false = outline (title only), true = full (title + result)
-    onToggle?: () => void; // Toggle this item's detail level individually
+    onToggle?: (id: string) => void; // Toggle this item's detail level individually
     uidMap?: Map<string, { role: string; label: string }>; // Chrome snapshot uid→label map
     delegatedTaskTitles?: Map<string, string>;
     runStreaming?: boolean; // The run this thought belongs to is still in flight
@@ -141,9 +141,11 @@ function useSampledText(text: string, active: boolean): string {
     return sampled;
 }
 
-export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult = true, onToggle, uidMap, delegatedTaskTitles, runStreaming = false }: ThoughtItemProps) {
+// A live run redraws its trajectory on every streamed delta, so settled rows opt out
+export const ThoughtItem = memo(function ThoughtItem({ thought, stepNumber, isPreview = false, showResult = true, onToggle, uidMap, delegatedTaskTitles, runStreaming = false }: ThoughtItemProps) {
     const { t } = useTranslation();
     const navigateToConversation = useConversationNavigation();
+    const toggle = onToggle ? () => onToggle(thought.id) : undefined;
     // Internal reasoning collapses to one line outside the detailed view. While the run is
     // live that line tracks where the model got to; at run end every row reverts to its
     // first line at once, so nothing above the step being read shifts mid-run.
@@ -166,11 +168,11 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult
             : (text.split('\n')[0] ?? text);
         const displayText = isOutline ? outlineText : text;
         const isTruncated = isOutline && (text.includes('\n') || isOverflowing);
-        const canToggle = onToggle && isInternal && (isTruncated || showResult);
+        const canToggle = toggle && isInternal && (isTruncated || showResult);
         return (
             <div
                 className={`thought-item reasoning ${isInternal ? 'internal' : ''} ${isPreview ? 'preview' : ''}${canToggle ? ' clickable' : ''}`}
-                onClick={canToggle ? onToggle : undefined}
+                onClick={canToggle ? toggle : undefined}
             >
                 <div className="thought-step"><span className="thought-reasoning-dot" /></div>
                 <div className="thought-content">
@@ -222,19 +224,19 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult
 
         // Determine success/error status for step indicator (pending takes precedence)
         const stepStatus = thought.isPending ? 'pending' : getToolResultStatus(thought.toolResult, toolName);
-        const canToggle = !!onToggle;
+        const canToggle = !!toggle;
         // Delegated conversations are kept out of the sidebar, so this step is the way in
         const delegatedConversationId = getDelegatedConversationId(toolName, thought.toolResult);
 
         return (
             <div className={`thought-item ${isPreview ? 'preview' : ''} ${thought.isPending ? 'pending' : ''}`}>
-                <div className={`thought-step ${showResult ? stepStatus : ''}${canToggle ? ' clickable' : ''}`} onClick={canToggle ? onToggle : undefined}>
+                <div className={`thought-step ${showResult ? stepStatus : ''}${canToggle ? ' clickable' : ''}`} onClick={toggle}>
                     {showResult ? stepNumber : (
                         <span className={`thought-category-dot thought-category-dot--${category}${thought.isPending ? ' thought-category-dot--pending' : ''}`} />
                     )}
                 </div>
                 <div className="thought-content">
-                    <div className={`thought-tool${canToggle ? ' clickable' : ''}`} onClick={canToggle ? onToggle : undefined}>
+                    <div className={`thought-tool${canToggle ? ' clickable' : ''}`} onClick={toggle}>
                         {friendlyToolName}
                         {operationType === 'unsafe' && (
                             <span className="thought-op-badge thought-op-badge--unsafe" title="This action may have lasting side effects">unsafe</span>
@@ -364,4 +366,4 @@ export function ThoughtItem({ thought, stepNumber, isPreview = false, showResult
     }
 
     return null;
-}
+});

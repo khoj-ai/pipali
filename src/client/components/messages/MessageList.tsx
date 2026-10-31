@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import type { Message } from '../../types';
 import type { ComposerDraft } from '../../hooks/useComposerDraft';
+import { useStableCallback } from '../../hooks/useStableCallback';
 import { MessageItem } from './MessageItem';
 import { MessageNavigator } from './MessageNavigator';
 import { EmptyHomeState } from '../home/EmptyHomeState';
@@ -12,14 +13,14 @@ interface MessageListProps {
     messages: Message[];
     conversationId?: string;
     platformFrontendUrl?: string;
-    onDeleteMessage?: (messageId: string, role: 'user' | 'assistant') => void;
-    onEditMessage?: (messageId: string, text: string) => void;
-    onForkConversation?: (messageId: string) => void;
-    onBillingContinue?: (messageId: string) => void;
-    onBillingDismiss?: (messageId: string) => void;
-    onAuthSignIn?: (messageId: string) => void;
-    onAuthDismiss?: (messageId: string) => void;
-    onRunErrorDismiss?: (messageId: string) => void;
+    onDeleteMessage: (messageId: string, role: 'user' | 'assistant') => void;
+    onEditMessage: (messageId: string, text: string) => void;
+    onForkConversation: (messageId: string) => void;
+    onBillingContinue: (messageId: string) => void;
+    onBillingDismiss: (messageId: string) => void;
+    onAuthSignIn: (messageId: string) => void;
+    onAuthDismiss: (messageId: string) => void;
+    onRunErrorDismiss: (messageId: string) => void;
     userFirstName?: string;
     draft: ComposerDraft;
     isProcessing?: boolean;
@@ -52,6 +53,17 @@ export function MessageList({
         registerMessageRef,
     } = useMessageListScroll({ messages, conversationId, isProcessing });
 
+    const handlers = {
+        onDelete: useStableCallback(onDeleteMessage),
+        onEdit: useStableCallback(onEditMessage),
+        onFork: useStableCallback(onForkConversation),
+        onBillingContinue: useStableCallback(onBillingContinue),
+        onBillingDismiss: useStableCallback(onBillingDismiss),
+        onAuthSignIn: useStableCallback(onAuthSignIn),
+        onAuthDismiss: useStableCallback(onAuthDismiss),
+        onRunErrorDismiss: useStableCallback(onRunErrorDismiss),
+    };
+
     const messageIndices = useMemo(
         () => messages.map((_, i) => i),
         [messages.length]
@@ -72,14 +84,7 @@ export function MessageList({
                                 <MessageItem
                                     message={msg}
                                     platformFrontendUrl={platformFrontendUrl}
-                                    onDelete={onDeleteMessage}
-                                    onEdit={onEditMessage}
-                                    onFork={onForkConversation}
-                                    onBillingContinue={onBillingContinue}
-                                    onBillingDismiss={onBillingDismiss}
-                                    onAuthSignIn={onAuthSignIn}
-                                    onAuthDismiss={onAuthDismiss}
-                                    onRunErrorDismiss={onRunErrorDismiss}
+                                    {...handlers}
                                     isActiveRun={hasActiveRun && msg.role === 'assistant' && msg.stableId === activeRunStableId}
                                 />
                             </div>

@@ -34,6 +34,7 @@ import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNo
 import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
 import { FileViewerContext } from "./hooks/useFileViewer";
 import { createComposerDraft } from "./hooks/useComposerDraft";
+import { useStableCallback } from "./hooks/useStableCallback";
 import { useVoiceSettings } from "./hooks/useVoiceSettings";
 import { useVoiceCompanion } from "./hooks/useVoiceCompanion";
 import type { VoiceMode } from "./utils/voice/voice-config";
@@ -1301,6 +1302,8 @@ const App = () => {
         // Sync model dropdown from cached model ID immediately; history fetch will reconcile.
         syncSelectedModelForConversation(id);
     };
+    // A context value that changes redraws every consumer straight through memo
+    const navigateToConversation = useStableCallback(selectConversation);
 
     const startNewConversation = () => {
         conversationIdRef.current = undefined;
@@ -1794,7 +1797,7 @@ const App = () => {
     }
 
     return (
-        <ConversationNavigationContext.Provider value={selectConversation}>
+        <ConversationNavigationContext.Provider value={navigateToConversation}>
         <FileViewerContext.Provider value={setViewerPath}>
         <ErrorBoundary>
             <div className="app-wrapper">

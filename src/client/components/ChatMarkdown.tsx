@@ -2,7 +2,7 @@
 // intermediate messages. Owns the plugin config (GFM, math) so rendering
 // behavior stays consistent across both surfaces.
 
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
@@ -43,7 +43,9 @@ interface ChatMarkdownProps {
     compact?: boolean;
 }
 
-export function ChatMarkdown({ children, compact = false }: ChatMarkdownProps) {
+// Parsing runs synchronously in render and dwarfs everything else a message does, so it
+// happens only when the text changes.
+export const ChatMarkdown = memo(function ChatMarkdown({ children, compact = false }: ChatMarkdownProps) {
     const markdown = (
         <ReactMarkdown
             remarkPlugins={[[remarkGfm, { singleTilde: false }], [remarkMath, { singleDollarTextMath: false }]]}
@@ -55,4 +57,4 @@ export function ChatMarkdown({ children, compact = false }: ChatMarkdownProps) {
         </ReactMarkdown>
     );
     return compact ? <div className="chat-markdown-compact">{markdown}</div> : markdown;
-}
+});

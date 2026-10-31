@@ -43,35 +43,42 @@ interface ThoughtsSectionProps {
     endedAt?: string;
 }
 
+// Keyed on the source thought, so the rows of an unchanged thought keep their identity
+// while a later one streams, and stay memoized.
+const splitThoughts = new WeakMap<Thought, Thought[]>();
+
 // Split a thought with multiple **heading** sections into separate thoughts for display.
 // e.g. "**Doing X**\nbody\n**Doing Y**\nbody2" → two thought items.
+function splitMultiHeadingThought(thought: Thought): Thought[] {
+    if (thought.type !== 'thought' || !thought.content) return [thought];
+
+    const cached = splitThoughts.get(thought);
+    if (cached) return cached;
+
+    const text = thought.content.trim();
+    // Split on lines that start with **heading** (bold markdown)
+    const sections = text.split(/(?=^\*\*[^*]+\*\*)/m);
+    const rows = sections.length <= 1
+        ? [thought]
+        : sections.flatMap((rawSection, i) => {
+            const section = rawSection.trim();
+            return section ? [{ ...thought, id: `${thought.id}-${i}`, content: section }] : [];
+        });
+    splitThoughts.set(thought, rows);
+    return rows;
+}
+
 function splitMultiHeadingThoughts(thoughts: Thought[]): Thought[] {
-    const result: Thought[] = [];
-    for (const thought of thoughts) {
-        if (thought.type !== 'thought' || !thought.content) {
-            result.push(thought);
-            continue;
-        }
+    return thoughts.flatMap(splitMultiHeadingThought);
+}
 
-        const text = thought.content.trim();
-        // Split on lines that start with **heading** (bold markdown)
-        const sections = text.split(/(?=^\*\*[^*]+\*\*)/m);
-        if (sections.length <= 1) {
-            result.push(thought);
-            continue;
-        }
-
-        for (let i = 0; i < sections.length; i++) {
-            const section = sections[i]!.trim();
-            if (!section) continue;
-            result.push({
-                ...thought,
-                id: `${thought.id}-${i}`,
-                content: section,
-            });
-        }
+/** The previous array for as long as its items are unchanged, so it can key a useMemo. */
+function useStableItems<T>(items: T[]): T[] {
+    const previous = useRef(items);
+    if (items.length !== previous.current.length || items.some((item, i) => item !== previous.current[i])) {
+        previous.current = items;
     }
-    return result;
+    return previous.current;
 }
 
 export function getCollapsedPreviewThoughts(thoughts: Thought[]): Thought[] {
@@ -83,17 +90,7 @@ export function getCollapsedPreviewThoughts(thoughts: Thought[]): Thought[] {
         ? thoughts.filter(thought => thought.stepGroupId === latestStepGroupId)
         : thoughts.slice(thoughts.findLastIndex(thought => thought.type === 'tool_call'));
 
-    return stepThoughts
-        .filter(thought => thought.type === 'tool_call' || (thought.type === 'thought' && !thought.isInternalThought))
-        .map(thought => {
-            if (thought.type === 'tool_call' && thought.toolResult !== undefined) {
-                return {
-                    ...thought,
-                    toolResult: undefined,
-                };
-            }
-            return thought;
-        });
+    return stepThoughts.filter(thought => thought.type === 'tool_call' || (thought.type === 'thought' && !thought.isInternalThought));
 }
 
 export function ThoughtsSection({ thoughts, isStreaming, startedAt, endedAt }: ThoughtsSectionProps) {
@@ -128,20 +125,23 @@ export function ThoughtsSection({ thoughts, isStreaming, startedAt, endedAt }: T
         </span>
     );
 
+    // The lookups below reach every row, so they follow only the steps they read. Keyed on
+    // the whole trajectory, each streamed delta would redraw every row.
+    const snapshots = useStableItems(thoughts.filter(t => t.type === 'tool_call' && t.toolName === 'chrome-browser__take_snapshot' && t.toolResult));
+    const delegations = useStableItems(thoughts.filter(t => t.type === 'tool_call' && t.toolName === 'delegate_task'));
+
     // Build uid→label map from chrome snapshot results for resolving interaction tool args
     const uidMap = useMemo(() => {
         const map = new Map<string, { role: string; label: string }>();
-        for (const t of thoughts) {
-            if (t.type === 'tool_call' && t.toolName === 'chrome-browser__take_snapshot' && t.toolResult) {
-                for (const [uid, info] of parseSnapshotUids(t.toolResult)) {
-                    map.set(uid, info); // Later snapshots overwrite earlier ones (uid numbers change)
-                }
+        for (const t of snapshots) {
+            for (const [uid, info] of parseSnapshotUids(t.toolResult!)) {
+                map.set(uid, info); // Later snapshots overwrite earlier ones (uid numbers change)
             }
         }
         return map.size > 0 ? map : undefined;
-    }, [thoughts]);
+    }, [snapshots]);
 
-    const delegatedTaskTitles = useMemo(() => buildDelegatedTaskTitleMap(thoughts), [thoughts]);
+    const delegatedTaskTitles = useMemo(() => buildDelegatedTaskTitleMap(delegations), [delegations]);
 
     const collapsedPreviewThoughts = useMemo(() => (
         isStreaming && expandLevel === 0
@@ -272,7 +272,7 @@ export function ThoughtsSection({ thoughts, isStreaming, startedAt, endedAt }: T
                                     stepNumber={stepNumber}
                                     isPreview={false}
                                     showResult={showResult}
-                                    onToggle={() => toggleItem(thought.id)}
+                                    onToggle={toggleItem}
                                     uidMap={uidMap}
                                     delegatedTaskTitles={delegatedTaskTitles}
                                     runStreaming={isStreaming}

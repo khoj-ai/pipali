@@ -95,10 +95,8 @@ describe('collapsed thoughts preview', () => {
         expect(preview[0]?.content).toBe('I will inspect the workspace.');
         expect(preview[1]?.type).toBe('tool_call');
         expect(preview[1]?.toolName).toBe('list_files');
-        expect(preview[1]?.toolResult).toBeUndefined();
         expect(preview[2]?.type).toBe('tool_call');
         expect(preview[2]?.toolName).toBe('view_file');
-        expect(preview[2]?.toolResult).toBeUndefined();
     });
 });
 

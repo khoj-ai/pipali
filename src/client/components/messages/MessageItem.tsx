@@ -1,6 +1,6 @@
 // Individual message component
 
-import { useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Trash2, Paperclip, Clock, Copy, Check, Pencil, GitBranch } from 'lucide-react';
 import type { Message } from '../../types';
@@ -28,7 +28,9 @@ interface MessageItemProps {
     isActiveRun?: boolean;
 }
 
-export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, onFork, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, onRunErrorDismiss, isActiveRun = false }: MessageItemProps) {
+// The reducer keeps an unchanged message's identity, so a streaming update redraws the
+// one message it touched rather than the whole conversation.
+export const MessageItem = memo(function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, onFork, onBillingContinue, onBillingDismiss, onAuthSignIn, onAuthDismiss, onRunErrorDismiss, isActiveRun = false }: MessageItemProps) {
     const { t, i18n } = useTranslation();
     const isUser = message.role === 'user';
     const isStreaming = message.isStreaming || isActiveRun;
@@ -222,4 +224,4 @@ export function MessageItem({ message, platformFrontendUrl, onDelete, onEdit, on
             )}
         </div>
     );
-}
+});
