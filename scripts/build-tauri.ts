@@ -316,6 +316,10 @@ async function buildServerBundle() {
         entrypoints: ["src/client/app.tsx"],
         outdir: "src/client/dist",
         minify: true,
+        // Without this the bundle carries development React
+        define: {
+            "process.env.NODE_ENV": JSON.stringify("production"),
+        },
     });
 
     if (!frontendResult.success) {

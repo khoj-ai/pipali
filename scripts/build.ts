@@ -65,6 +65,10 @@ async function buildFrontend(): Promise<{ appJs: string }> {
         outdir: tempOutDir,
         minify: true,
         sourcemap: "none",
+        // Without this the bundle carries development React
+        define: {
+            "process.env.NODE_ENV": JSON.stringify("production"),
+        },
     });
 
     if (!result.success) {
