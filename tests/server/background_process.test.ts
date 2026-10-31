@@ -89,6 +89,19 @@ describe('background commands', () => {
         expect(isAlive(childPid)).toBe(false);
     });
 
+    test('stopping kills a child that ignores SIGTERM after the shell has gone', async () => {
+        const record = start(`(trap '' TERM; sleep 30) & echo CHILD=$!; wait`);
+
+        await Bun.sleep(300);
+        const childPid = Number(fs.readFileSync(record.logPath, 'utf8').match(/CHILD=(\d+)/)?.[1]);
+        expect(isAlive(childPid)).toBe(true);
+
+        expect(stopBackgroundProcess(record.pid)).toBe(true);
+        await Bun.sleep(2_500);
+
+        expect(isAlive(childPid)).toBe(false);
+    });
+
     test('hitting the limit says what is running, so a stale one can be picked', () => {
         const theirs = start('sleep 30 # another chat', 'conv-theirs');
 

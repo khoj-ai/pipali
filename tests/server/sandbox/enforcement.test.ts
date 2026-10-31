@@ -38,7 +38,7 @@ const outsideFile = path.join(os.homedir(), `pipali-sandbox-test-outside-${stamp
 const created: string[] = [];
 
 /** Run a command the way the agent does, counting confirmations asked for. */
-async function run(command: string) {
+async function run(command: string, timeout?: number) {
     if (!isSandboxActive()) throw new Error('The sandbox is not running');
     let asked = 0;
     const confirmationContext: ConfirmationContext = {
@@ -49,7 +49,7 @@ async function run(command: string) {
         },
     };
     const result = await shellCommand(
-        { justification: 'sandbox test', command, operation_type: 'read-write', execution_mode: 'sandbox' },
+        { justification: 'sandbox test', command, operation_type: 'read-write', execution_mode: 'sandbox', timeout },
         { confirmationContext },
     );
     return { output: String(result.compiled), asked };
@@ -165,6 +165,15 @@ describeHere('macOS and Linux sandbox', () => {
         expect(output).toMatch(/^403\b/);
         expect(output).not.toContain('[Exit code');
         expect(output).toContain('- network-outbound example.com:80');
+    });
+
+    test('a timeout reaches through the sandbox wrapper to what the command started', async () => {
+        const startedAt = Date.now();
+        const { output } = await run('echo before; sleep 20; echo after', 1000);
+        expect(Date.now() - startedAt).toBeLessThan(5_000);
+        expect(output).toContain('before');
+        expect(output).not.toContain('after');
+        expect(output).toContain('1000ms timeout');
     });
 
     test("passes a Python heredoc's != through as written", async () => {

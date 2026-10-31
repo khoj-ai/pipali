@@ -234,16 +234,25 @@ function signalGroup(pid: number, signal: NodeJS.Signals): void {
     }
 }
 
+/**
+ * SIGTERM the group, then SIGKILL whatever in it outlasts the grace period, even once the
+ * shell has gone. Not on Windows: SIGTERM already ends the process there, and there is no
+ * group, so a later kill could land on whatever reused the pid.
+ */
+export function terminateProcessGroup(pid: number): void {
+    signalGroup(pid, 'SIGTERM');
+    if (process.platform === 'win32') return;
+
+    const forceKill = setTimeout(() => signalGroup(pid, 'SIGKILL'), KILL_GRACE_MS);
+    forceKill.unref?.();
+}
+
 export function stopBackgroundProcess(pid: number): boolean {
     const record = processes.get(pid);
     if (!record?.running) return false;
 
     record.stopRequested = true;
-    signalGroup(pid, 'SIGTERM');
-    const forceKill = setTimeout(() => {
-        if (processes.get(pid)?.running) signalGroup(pid, 'SIGKILL');
-    }, KILL_GRACE_MS);
-    forceKill.unref?.();
+    terminateProcessGroup(pid);
     return true;
 }
 

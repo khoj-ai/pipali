@@ -1,5 +1,9 @@
-import { test, expect, describe } from 'bun:test';
-import { isShellFindCommand, extractFindPath } from '../../src/server/processor/director/index';
+import { test, expect, describe, afterEach } from 'bun:test';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { isShellFindCommand, extractFindPath, truncateToolOutput } from '../../src/server/processor/director/index';
+import { shellCommand } from '../../src/server/processor/actor/shell_command';
 
 describe('isShellFindCommand', () => {
     test('detects find as standalone command or after chain operators', () => {
@@ -45,5 +49,136 @@ describe('extractFindPath', () => {
 
     test('returns undefined for find-like text inside a heredoc body', () => {
         expect(extractFindPath("python3 << 'EOF'\n# parse the payload; find target_query\nEOF")).toBeUndefined();
+    });
+});
+
+/**
+ * A foreground shell_command has to hand the turn back on time. What has to hold: a
+ * timeout stops the command along with what it started, and a process the command
+ * leaves running can neither hold the call open nor be killed by it returning.
+ */
+describe.skipIf(process.platform === 'win32')('shell command timeouts', () => {
+    const leftRunning: number[] = [];
+
+    async function run(command: string, timeout: number = 1000) {
+        const startedAt = Date.now();
+        const { compiled } = await shellCommand({
+            justification: 'test',
+            command,
+            operation_type: 'read-write',
+            execution_mode: 'direct',
+            timeout,
+        });
+        return { output: compiled, elapsedMs: Date.now() - startedAt };
+    }
+
+    function childPid(output: string): number {
+        const pid = Number(output.match(/CHILD=(\d+)/)?.[1]);
+        expect(pid).toBeGreaterThan(0);
+        return pid;
+    }
+
+    function isAlive(pid: number): boolean {
+        try {
+            process.kill(pid, 0);
+            return true;
+        } catch {
+            return false;
+        }
+    }
+
+    afterEach(() => {
+        for (const group of leftRunning.splice(0)) {
+            try {
+                process.kill(-group, 'SIGKILL');
+            } catch {
+                // Already gone.
+            }
+        }
+    });
+
+    test('a timeout ends a compound command, keeps what it printed and says so', async () => {
+        // The shell is not the only process here, so killing it alone leaves `sleep`
+        // holding the output pipe open.
+        const { output, elapsedMs } = await run('echo before; sleep 20; echo after');
+
+        expect(elapsedMs).toBeLessThan(5_000);
+        expect(output).toContain('before');
+        expect(output).not.toContain('after');
+        expect(output).toContain('1000ms timeout');
+        // BashCommandView marks a result as failed by this
+        expect(output).toContain('[Exit code:');
+    });
+
+    test('a timeout stops what the command started', async () => {
+        const { output } = await run('sleep 20 & echo CHILD=$!; wait');
+        const pid = childPid(output);
+
+        await Bun.sleep(300);
+        expect(isAlive(pid)).toBe(false);
+    });
+
+    test('a timeout stops a command that ignores SIGTERM', async () => {
+        const { output, elapsedMs } = await run(`trap '' TERM; sleep 20; echo after`);
+
+        expect(elapsedMs).toBeLessThan(8_000);
+        expect(output).not.toContain('after');
+        expect(output).toContain('1000ms timeout');
+    });
+
+    test('a timed out command that exits cleanly still reads as failed', async () => {
+        const { output } = await run(`trap 'exit 0' TERM; sleep 20 & wait`);
+
+        expect(output).toContain('[Exit code:');
+        expect(output).toContain('1000ms timeout');
+    });
+
+    test('a command too chatty to keep stays bounded and still reports its timeout', async () => {
+        const { output } = await run('yes');
+
+        expect(output.length).toBeLessThan(1_000_000);
+        // The tool result keeps the start of a long output and drops the rest
+        expect(truncateToolOutput(output)).toContain('1000ms timeout');
+        expect(truncateToolOutput(output)).toContain('[Exit code:');
+    });
+
+    test('a malformed timeout falls back to the default', async () => {
+        const { output } = await run('echo before; sleep 1; echo after', 'soon' as unknown as number);
+
+        expect(output).toContain('after');
+        expect(output).not.toContain('timeout');
+    });
+
+    test('a process left running does not hold the call open, and is reported', async () => {
+        // `&` backgrounds the whole list while the redirect covers only `sleep`, so the
+        // subshell running the list keeps the output pipe for as long as `sleep` lasts.
+        const { output, elapsedMs } = await run('true && sleep 10 > /dev/null 2>&1 & echo CHILD=$! GROUP=$$', 30_000);
+        leftRunning.push(Number(output.match(/GROUP=(\d+)/)?.[1]));
+
+        expect(elapsedMs).toBeLessThan(5_000);
+        expect(isAlive(childPid(output))).toBe(true);
+        expect(output).toContain('still running');
+        expect(output).not.toContain('timeout');
+    });
+
+    test('a process left running can still write once the call has returned', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipali-shell-'));
+        const marker = path.join(dir, 'survived');
+
+        // Closing the pipe on return would kill this with SIGPIPE before it reaches touch.
+        const { output } = await run(`(sleep 2; echo late; touch ${marker}) & echo started`, 30_000);
+        expect(output).not.toContain('late');
+
+        await Bun.sleep(2_000);
+        expect(fs.existsSync(marker)).toBe(true);
+        fs.unlinkSync(marker);
+        fs.rmdirSync(dir);
+    });
+
+    test('characters split across output chunks stay intact', async () => {
+        const { output } = await run(`yes 'नमस्ते' | head -n 20000`, 5_000);
+
+        expect(output).not.toContain('�');
+        expect(output.split('\n')).toHaveLength(20_000);
     });
 });

@@ -17,6 +17,7 @@ import {
     getBackgroundProcess,
     startBackgroundProcess,
     stopBackgroundProcess,
+    terminateProcessGroup,
     type StartBackgroundProcessOptions,
 } from '../../events/background-processes';
 import type { User } from '../../db/schema';
@@ -97,6 +98,15 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 60_000;
 
 /**
+ * How long output may keep arriving once the shell has exited. Only a command that leaves
+ * a process holding its pipes waits this out, everything else reaches EOF first.
+ */
+const OUTPUT_GRACE_MS = 1_000;
+
+/** Bounds what a chatty command holds in memory. Past what tool results keep anyway. */
+const MAX_CAPTURED_CHARS = 200_000;
+
+/**
  * Executes a shell command on the user's system.
  * Uses bash on Unix/macOS and PowerShell on Windows.
  *
@@ -165,7 +175,7 @@ export async function shellCommand(
 
     // Clamp timeout to valid range
     const effectiveTimeout = Math.min(
-        Math.max(timeout ?? DEFAULT_TIMEOUT_MS, 1000),
+        Math.max(Number(timeout) || DEFAULT_TIMEOUT_MS, 1000),
         MAX_TIMEOUT_MS
     );
 
@@ -276,12 +286,28 @@ export async function shellCommand(
             env,
             stdout: 'pipe',
             stderr: 'pipe',
-            timeout: effectiveTimeout,
+            // On Unix its own process group, so a timeout takes what the command started
+            // too. Killing the shell alone would leave a child holding the pipes.
+            detached: !isWindows,
         });
+        const stdoutCapture = captureOutput(proc.stdout);
+        const stderrCapture = captureOutput(proc.stderr);
+
+        let timedOut = false;
+        const timer = setTimeout(() => {
+            timedOut = true;
+            terminateProcessGroup(proc.pid);
+        }, effectiveTimeout);
 
         const exitCode = await proc.exited;
-        const stdout = (await new Response(proc.stdout).text()).trim();
-        let stderr = (await new Response(proc.stderr).text()).trim();
+        clearTimeout(timer);
+        const outputClosed = await Promise.race([
+            Promise.all([stdoutCapture.closed, stderrCapture.closed]).then(() => true),
+            Bun.sleep(OUTPUT_GRACE_MS).then(() => false),
+        ]);
+
+        const stdout = stdoutCapture.stop().trim();
+        let stderr = stderrCapture.stop().trim();
 
         // Filter out known cosmetic xcrun cache creation warnings from stderr on macOS.
         // Sandbox works fine, just can't cache the SDK path lookup. Unable to disable it.
@@ -309,10 +335,14 @@ export async function shellCommand(
             output = '(no output)';
         }
 
-        // Add exit code if non-zero
-        if (exitCode !== 0) {
-            output += `\n\n[Exit code: ${exitCode}]`;
-        }
+        // Ahead of the output, which tool result truncation cuts from the end
+        const status: string[] = [];
+        if (exitCode !== 0 || timedOut) status.push(`[Exit code: ${exitCode}]`);
+        if (timedOut) status.push(effectiveTimeout < MAX_TIMEOUT_MS
+            ? `[Stopped at the ${effectiveTimeout}ms timeout. run_in_background has no time limit]`
+            : `[Stopped at the ${effectiveTimeout}ms max timeout for foreground commands. run_in_background has no such time limit]`);
+        if (!outputClosed) status.push('[A process this command started is still running. Its further output is not captured]');
+        if (status.length > 0) output = `${status.join('\n')}\n\n${output}`;
 
         const refusals = sandboxed ? await describeSandboxRefusals(commandId, { exitCode, errors: stderr }) : '';
         if (refusals) {
@@ -329,18 +359,6 @@ export async function shellCommand(
             compiled: output,
         };
     } catch (error) {
-        // Handle timeout specifically
-        if (error instanceof Error && error.message.includes('timed out')) {
-            const errorMsg = `Command timed out after ${effectiveTimeout}ms: ${command}`;
-            log.error(`${errorMsg}`);
-            return {
-                query,
-                file: workingDir,
-                uri: workingDir,
-                compiled: errorMsg,
-            };
-        }
-
         const errorMsg = `Error executing command: ${error instanceof Error ? error.message : String(error)}`;
         log.error({ err: error }, errorMsg);
 
@@ -351,6 +369,34 @@ export async function shellCommand(
             compiled: errorMsg,
         };
     }
+}
+
+/**
+ * Collect a stream until told to stop, then keep reading and discarding it. A process the
+ * command left running may still hold the pipe, and would die of SIGPIPE if it were closed
+ * or block once it filled.
+ */
+function captureOutput(stream: ReadableStream<Uint8Array>) {
+    const decoder = new TextDecoder();
+    let text = '';
+    let capturing = true;
+
+    const closed = (async () => {
+        const reader = stream.getReader();
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            if (capturing && text.length < MAX_CAPTURED_CHARS) text += decoder.decode(value, { stream: true });
+        }
+    })();
+
+    return {
+        closed,
+        stop() {
+            capturing = false;
+            return text;
+        },
+    };
 }
 
 /**
