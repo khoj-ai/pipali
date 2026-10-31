@@ -400,13 +400,13 @@ REQUIRED:
                 },
                 timeout: {
                     type: 'integer',
-                    description: 'The timeout for the command in milliseconds. Range: 1000-300000 ms. Default: 30000 ms.',
+                    description: 'The timeout for the command in milliseconds. Range: 1000-60000 ms. Default: 30000 ms.',
                     minimum: 1000,
-                    maximum: 300000,
+                    maximum: 60000,
                 },
                 run_in_background: {
                     type: 'boolean',
-                    description: 'Set true for work that outlives a tool call: builds, test suites, dev servers. Returns the pid and a log file to tail or grep, and you are told when the command exits. Ignores timeout.',
+                    description: 'Set true for work that outlives a tool call: builds, test suites, dev servers. Returns the pid and a log file to tail or grep, and you are told when the command exits. No time limit, so timeout does not apply.',
                 },
             },
             required: ['justification', 'command', 'operation_type'],
