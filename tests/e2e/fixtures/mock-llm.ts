@@ -5,6 +5,8 @@
  * Scenarios define what tool calls and responses the mock LLM returns.
  */
 
+import type { BillingErrorDetails } from '../../../src/server/http/billing-errors';
+
 export interface MockToolCall {
     function_name: string;
     arguments: Record<string, unknown>;
@@ -35,6 +37,8 @@ export interface MockScenario {
     // conversation woken by an inbox update. Without it the mock replays the scenario
     // from its first tool call, since a woken turn carries the same user message.
     resumedResponse?: string;
+    // Refuse the turn as the platform does when the account can't pay for it
+    billingError?: BillingErrorDetails;
 }
 
 /**
@@ -1054,6 +1058,24 @@ export function sandboxPermissionScenario(): MockScenario {
 }
 
 /**
+ * The platform refusing a turn once the account's starter credits run out,
+ * with free credits on offer for adding a card
+ */
+export function outOfFreeCreditsScenario(): MockScenario {
+    return {
+        name: 'out-of-free-credits',
+        queryPattern: '^spend my last free credit$',
+        iterations: [],
+        finalResponse: '',
+        billingError: {
+            code: 'insufficient_credits',
+            message: 'Insufficient credits. Please purchase more credits to continue.',
+            card_bonus_usd: 20,
+        },
+    };
+}
+
+/**
  * Default scenarios used in tests
  */
 export const defaultMockScenarios: MockScenario[] = [
@@ -1088,6 +1110,7 @@ export const defaultMockScenarios: MockScenario[] = [
     backgroundUpdateDuringFinalResponseScenario(),
     delegateAndStopScenario(),
     sandboxPermissionScenario(),
+    outOfFreeCreditsScenario(),
     memoryRecallUserScenario(),
     // Last, so selector queries match here before the user-message scenario,
     // whose pattern also appears inside the selector query

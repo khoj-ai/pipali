@@ -5,7 +5,7 @@ import { AlertTriangle, CreditCard, X, ExternalLink as ExternalLinkIcon } from '
 import { useTranslation } from 'react-i18next';
 import { ExternalLink } from '../ExternalLink';
 import type { BillingAlert } from '../../types/billing';
-import { getBillingActionLabel, getBillingTitle } from './billing-messages';
+import { getBillingActionLabel, getBillingTitle, getCardBonusMessage } from './billing-messages';
 
 interface BillingAlertBannerProps {
     alerts: BillingAlert[];
@@ -27,9 +27,10 @@ export function BillingAlertBanner({
     if (!latestAlert) return null;
 
     const isCreditsError = latestAlert.code === 'insufficient_credits';
+    const cardBonusUsd = latestAlert.details?.card_bonus_usd;
     const billingUrl = `${platformFrontendUrl}/dashboard/billing`;
-    const title = getBillingTitle(latestAlert.code);
-    const actionLabel = getBillingActionLabel(latestAlert.code);
+    const title = getBillingTitle(latestAlert.code, cardBonusUsd);
+    const actionLabel = getBillingActionLabel(latestAlert.code, cardBonusUsd);
 
     return (
         <div className={`billing-alert-banner ${isCreditsError ? '' : 'billing-alert-banner--limit'}`}>
@@ -48,9 +49,11 @@ export function BillingAlertBanner({
                     </button>
                 </div>
                 <p className="billing-alert-message">
-                    {isCreditsError
-                        ? t('billing.addCreditsMessage')
-                        : t('billing.increaseLimitMessage')}
+                    {cardBonusUsd !== undefined
+                        ? getCardBonusMessage(cardBonusUsd)
+                        : isCreditsError
+                            ? t('billing.addCreditsMessage')
+                            : t('billing.increaseLimitMessage')}
                 </p>
                 {alerts.length > 1 && (
                     <span className="billing-alert-count">

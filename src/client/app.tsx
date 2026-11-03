@@ -333,6 +333,7 @@ const App = () => {
                     credits_balance_cents: billingError.credits_balance_cents,
                     current_period_spent_cents: billingError.current_period_spent_cents,
                     spend_hard_limit_cents: billingError.spend_hard_limit_cents,
+                    card_bonus_usd: billingError.card_bonus_usd,
                 },
             };
             setBillingAlerts(prev => [alert, ...prev]);
@@ -343,7 +344,7 @@ const App = () => {
 
             if (!convId || convId === conversationIdRef.current) {
                 const billingMsgId = generateUUID();
-                const friendlyMessage = getRandomBillingMessage(billingError.code);
+                const friendlyMessage = getRandomBillingMessage(billingError.code, billingError.card_bonus_usd);
                 const next = [
                     ...messagesRef.current,
                     {
@@ -351,7 +352,11 @@ const App = () => {
                         stableId: billingMsgId,
                         role: 'assistant' as const,
                         content: '',
-                        billingInfo: { code: billingError.code, message: friendlyMessage },
+                        billingInfo: {
+                            code: billingError.code,
+                            message: friendlyMessage,
+                            cardBonusUsd: billingError.card_bonus_usd,
+                        },
                     },
                 ];
                 setChatMessages(next);

@@ -284,6 +284,7 @@ export async function withTokenRefresh<T>(
                     credits_balance_cents: errorBody?.credits_balance_cents,
                     current_period_spent_cents: errorBody?.current_period_spent_cents,
                     spend_hard_limit_cents: errorBody?.spend_hard_limit_cents,
+                    card_bonus_usd: errorBody?.card_bonus_usd,
                 });
             }
 

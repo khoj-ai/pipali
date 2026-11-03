@@ -9,6 +9,7 @@
 import { appendFileSync } from 'node:fs';
 import { findMatchingScenario, defaultMockScenarios, type MockScenario } from './fixtures/mock-llm';
 import type { ResponseWithThought } from '../../src/server/processor/conversation/conversation';
+import { PlatformBillingError } from '../../src/server/http/billing-errors';
 
 type MockMessage = { type?: string | null; role?: string; content?: unknown };
 type MockCtx = {
@@ -168,6 +169,7 @@ function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought | Pr
     }
 
     console.log(`[MockLLM] Matched scenario: ${scenario.name} for query: "${query}"`);
+    if (scenario.billingError) throw new PlatformBillingError(scenario.billingError);
 
     const key = getStateKey(query, scenario.name, ctx);
     const sessionId = ctx?.sessionId;

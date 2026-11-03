@@ -286,6 +286,7 @@ export interface BillingError {
     credits_balance_cents?: number;
     current_period_spent_cents?: number;
     spend_hard_limit_cents?: number;
+    card_bonus_usd?: number;
 }
 
 /**

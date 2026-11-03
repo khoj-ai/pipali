@@ -79,6 +79,7 @@ export const MessageItem = memo(function MessageItem({ message, platformFrontend
                 <BillingMessage
                     code={message.billingInfo.code}
                     message={message.billingInfo.message}
+                    cardBonusUsd={message.billingInfo.cardBonusUsd}
                     platformFrontendUrl={platformFrontendUrl}
                     onContinue={onBillingContinue ? () => onBillingContinue(message.id) : undefined}
                     onDismiss={onBillingDismiss ? () => onBillingDismiss(message.id) : undefined}

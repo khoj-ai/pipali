@@ -9,6 +9,7 @@ import { ExternalLink } from '../ExternalLink';
 interface BillingMessageProps {
     code: BillingAlertCode;
     message: string;
+    cardBonusUsd?: number;
     platformFrontendUrl: string;
     onContinue?: () => void;
     onDismiss?: () => void;
@@ -18,12 +19,12 @@ interface BillingMessageProps {
  * A styled billing message for the chat thread.
  * Shows a friendly message with a CTA to resolve the billing issue.
  */
-export function BillingMessage({ code, message, platformFrontendUrl, onContinue, onDismiss }: BillingMessageProps) {
+export function BillingMessage({ code, message, cardBonusUsd, platformFrontendUrl, onContinue, onDismiss }: BillingMessageProps) {
     const { t } = useTranslation();
     const billingUrl = `${platformFrontendUrl}/dashboard/billing`;
     const isCreditsError = code === 'insufficient_credits';
-    const title = getBillingTitle(code);
-    const actionLabel = getBillingActionLabel(code);
+    const title = getBillingTitle(code, cardBonusUsd);
+    const actionLabel = getBillingActionLabel(code, cardBonusUsd);
 
     return (
         <div className={`billing-message ${isCreditsError ? 'billing-message--credits' : 'billing-message--limit'}`}>

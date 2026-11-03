@@ -10,6 +10,8 @@ export interface BillingErrorDetails {
     credits_balance_cents?: number;
     current_period_spent_cents?: number;
     spend_hard_limit_cents?: number;
+    /** Free credits the account unlocks by adding a card */
+    card_bonus_usd?: number;
 }
 
 /**
@@ -43,6 +45,7 @@ export class PlatformBillingError extends Error {
                     credits_balance_cents: parsed.error.credits_balance_cents,
                     current_period_spent_cents: parsed.error.current_period_spent_cents,
                     spend_hard_limit_cents: parsed.error.spend_hard_limit_cents,
+                    card_bonus_usd: parsed.error.card_bonus_usd,
                 });
             }
         } catch {

@@ -202,6 +202,11 @@
                 "Il est temps de recharger ! Ajoute des cr\u00e9dits et on reprend l\u00e0 o\u00f9 on en \u00e9tait."
             ]
         },
+        "cardBonus": {
+            "title": "Crédits gratuits épuisés",
+            "message": "Ajoute une carte pour obtenir {{amount}} de crédits gratuits en plus. Ta carte ne sera pas débitée.",
+            "action": "Ajouter une carte"
+        },
         "spendLimit": {
             "title": "Limite de d\u00e9penses atteinte",
             "action": "G\u00e9rer les limites",

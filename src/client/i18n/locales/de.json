@@ -202,6 +202,11 @@
                 "Zeit für Nachschub. Lade Guthaben auf, dann machen wir dort weiter, wo wir aufgehört haben."
             ]
         },
+        "cardBonus": {
+            "title": "Gratisguthaben aufgebraucht",
+            "message": "Hinterlege eine Karte und erhalte {{amount}} zusätzlich als Gratisguthaben. Deine Karte wird nicht belastet.",
+            "action": "Karte hinzufügen"
+        },
         "spendLimit": {
             "title": "Ausgabenlimit erreicht",
             "action": "Limits verwalten",

@@ -248,6 +248,11 @@
                 "Time for a refill! Add credits to your account and let's pick up where we left off."
             ]
         },
+        "cardBonus": {
+            "title": "Free Credits Used Up",
+            "message": "Add a card to get {{amount}} more in free credits. Your card won't be charged.",
+            "action": "Add Card"
+        },
         "spendLimit": {
             "title": "Spend Limit Reached",
             "action": "Manage Limits",

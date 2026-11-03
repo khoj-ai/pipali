@@ -10,6 +10,7 @@ export type Message = {
     billingInfo?: {
         code: 'insufficient_credits' | 'spend_limit_reached';
         message: string;
+        cardBonusUsd?: number;
     };
     authInfo?: {
         code: 'session_expired';
