@@ -149,6 +149,75 @@ describe('webSearch', () => {
         expect(capturedPayload.userLocation).toBe('GB');
     });
 
+    test('should send a lite Exa search with dynamic highlights and join them into snippets', async () => {
+        process.env.EXA_API_KEY = 'test-api-key';
+
+        const requests: RequestInit[] = [];
+        const preconnect = (globalThis.fetch as typeof fetch).preconnect;
+        const fetchImpl = Object.assign(
+            async (...args: Parameters<typeof fetch>) => {
+                requests.push(args[1]!);
+                return new Response(JSON.stringify({
+                    results: [{ title: 'A', url: 'https://a.test', highlights: ['First excerpt.', 'Second excerpt.'] }],
+                }));
+            },
+            { preconnect }
+        ) satisfies typeof fetch;
+        fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchImpl);
+
+        const result = await webSearch({ query: 'test' });
+
+        expect(requests).toHaveLength(1);
+        expect((requests[0]!.headers as Record<string, string>)['Exa-Beta']).toBe('dynamic-highlights-2026-08-28');
+        expect(JSON.parse(requests[0]!.body as string)).toEqual({
+            query: 'test',
+            type: 'lite',
+            userLocation: 'US',
+            numResults: 10,
+            contents: { text: false, highlights: { dynamic: true, verbosity: 'low' } },
+        });
+        expect(result.compiled).toContain('First excerpt.\n\nSecond excerpt.');
+    });
+
+    test('should search Exa with per page highlights only when it rejects the preview', async () => {
+        process.env.EXA_API_KEY = 'test-api-key';
+
+        const preconnect = (globalThis.fetch as typeof fetch).preconnect;
+        const mockExa = (respond: (attempt: number) => Response) => {
+            const requests: RequestInit[] = [];
+            const fetchImpl = Object.assign(
+                async (...args: Parameters<typeof fetch>) => {
+                    requests.push(args[1]!);
+                    return respond(requests.length);
+                },
+                { preconnect }
+            ) satisfies typeof fetch;
+            fetchSpy?.mockRestore();
+            fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(fetchImpl);
+            return requests;
+        };
+
+        // 400 is Exa's answer to an invalid request, 403 to a feature off for the plan
+        for (const status of [400, 403]) {
+            const requests = mockExa((attempt) => attempt === 1
+                ? new Response(JSON.stringify({ error: 'beta feature used without its Exa-Beta header', tag: 'INVALID_REQUEST' }), { status })
+                : new Response(JSON.stringify({ results: [{ title: 'A', url: 'https://a.test', highlights: ['Excerpt.'] }] })));
+
+            const result = await webSearch({ query: 'test' });
+
+            expect(requests).toHaveLength(2);
+            expect(requests[1]!.headers).not.toHaveProperty('Exa-Beta');
+            expect(JSON.parse(requests[1]!.body as string).contents).toEqual({ text: false, highlights: { maxCharacters: 400 } });
+            expect(result.compiled).toContain('Excerpt.');
+        }
+
+        // Errors the preview cannot cause are not retried
+        const requests = mockExa(() => new Response('rate limited', { status: 429 }));
+        const result = await webSearch({ query: 'test' });
+        expect(requests).toHaveLength(1);
+        expect(result.compiled).toContain('Exa search failed: 429');
+    });
+
     test('should handle Exa API error gracefully', async () => {
         process.env.EXA_API_KEY = 'test-api-key';
 

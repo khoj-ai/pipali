@@ -19,6 +19,9 @@ const SEARCH_REQUEST_TIMEOUT = 30000;
 // Maximum query length for Serper API
 const SERPER_MAX_QUERY_LENGTH = 2048;
 
+// Exa rejects dynamic highlights, a research preview, without this beta flag
+const EXA_DYNAMIC_HIGHLIGHTS_BETA = 'dynamic-highlights-2026-08-28';
+
 // Get environment variables at runtime (not module load time)
 function getExaApiKey(): string | undefined {
     return process.env.EXA_API_KEY;
@@ -295,37 +298,45 @@ async function searchWithExa(
     }
 
     const searchEndpoint = `${effectiveBaseUrl}/search`;
-    const headers = {
-        'Content-Type': 'application/json',
-        'x-api-key': effectiveApiKey,
-    };
-
-    const payload = {
-        query,
-        type: 'auto',
-        userLocation: countryCode.toUpperCase(),
-        numResults: maxResults,
-        contents: {
-            text: false,
-            highlights: {
-                numSentences: 3,
-                highlightsPerUrl: 1,
-            },
-        },
-    };
 
     log.debug(`Searching Exa for: "${query}"`);
 
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), SEARCH_REQUEST_TIMEOUT);
 
-    try {
-        const response = await fetch(searchEndpoint, {
+    // Dynamic highlights spread one excerpt budget across the whole result set,
+    // short excerpts for most results and longer ones for the most relevant.
+    // Low verbosity, and the per page cap used without the preview, keep a 10
+    // result search near 5k characters of excerpts.
+    const search = (dynamicHighlights: boolean) =>
+        fetch(searchEndpoint, {
             method: 'POST',
-            headers,
-            body: JSON.stringify(payload),
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-key': effectiveApiKey,
+                ...(dynamicHighlights && { 'Exa-Beta': EXA_DYNAMIC_HIGHLIGHTS_BETA }),
+            },
+            body: JSON.stringify({
+                query,
+                type: 'lite',
+                userLocation: countryCode.toUpperCase(),
+                numResults: maxResults,
+                contents: {
+                    text: false,
+                    highlights: dynamicHighlights ? { dynamic: true, verbosity: 'low' } : { maxCharacters: 400 },
+                },
+            }),
             signal: controller.signal,
         });
+
+    try {
+        let response = await search(true);
+        // Exa answers an invalid request with 400 and a feature off for the plan with
+        // 403; either may be the preview, so retry with per page highlights
+        if (response.status === 400 || response.status === 403) {
+            log.warn(`Exa rejected dynamic highlights (${response.status}), searching without them: ${await response.text()}`);
+            response = await search(false);
+        }
 
         clearTimeout(timeoutId);
 
@@ -340,7 +351,7 @@ async function searchWithExa(
         const organic: SearchResult[] = results.map((item: any) => ({
             title: item.title || '',
             link: item.url || '',
-            snippet: item.highlights?.[0] || item.text?.slice(0, 200) || '',
+            snippet: item.highlights?.join('\n\n') || '',
         }));
 
         return { organic };
