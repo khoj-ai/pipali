@@ -19,6 +19,7 @@ import {
     getOrCreateBus,
     type ConversationEvent,
     type ConversationEventBus,
+    type RunHandle,
 } from './conversation-event-bus';
 import { executeRun } from './run-executor';
 import { createChildLogger } from '../logger';
@@ -190,11 +191,11 @@ export async function startConversationRun(
  * Hard stop a conversation's run: abort it, drop queued messages, reject confirmations.
  *
  * The run ends here, not once it unwinds, so the conversation is free for its next run
- * meanwhile (see executeRun).
+ * meanwhile (see executeRun). Returns the stopped run, whose `settled` marks the unwind.
  */
-export function stopConversationRun(conversationId: string, reason: 'user_stop' = 'user_stop'): boolean {
+export function stopConversationRun(conversationId: string, reason: 'user_stop' = 'user_stop'): RunHandle | undefined {
     const bus: ConversationEventBus | undefined = getBus(conversationId);
-    if (!bus?.activeRun) return false;
+    if (!bus?.activeRun) return undefined;
 
     const runHandle = bus.activeRun;
     runHandle.stopMode = 'hard';
@@ -206,7 +207,7 @@ export function stopConversationRun(conversationId: string, reason: 'user_stop' 
     bus.publish({ type: 'run_stopped', conversationId, runId: runHandle.runId, reason });
     setSessionInactive(conversationId);
     bus.onRunFinished();
-    return true;
+    return runHandle;
 }
 
 /**

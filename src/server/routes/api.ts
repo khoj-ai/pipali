@@ -33,6 +33,7 @@ import { syncPlatformModels, syncPlatformWebTools } from '../auth';
 import { createChildLogger } from '../logger';
 import { IS_COMPILED_BINARY, EMBEDDED_CHANGELOG } from '../embedded-assets';
 import { getBus } from '../events/conversation-event-bus';
+import { stopConversationRun } from '../events/conversation-runs';
 import { getServer } from '../server-instance';
 import {
     getSandboxConfig,
@@ -449,6 +450,9 @@ api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
 
     try {
         if (rewind) {
+            // A run still answering would land its reply after the cut, so it stops first
+            // and the cut waits for the steps it records as it unwinds
+            await stopConversationRun(conversationId)?.settled;
             const deletedCount = await atifConversationService.rewindToStep(conversationId, stepId);
             if (deletedCount === 0) {
                 return c.json({ error: 'Message not found' }, 404);

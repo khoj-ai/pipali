@@ -45,9 +45,16 @@ export interface RunHandle {
      * Already persisted; queued here so the running loop can pick them up.
      */
     injectedSteps: ATIFStep[];
+    /**
+     * Resolves once the run has written its last step. A stopped run gives up the bus at
+     * once but still records what it was cut short doing as it unwinds.
+     */
+    settled: Promise<void>;
+    settle: () => void;
 }
 
 export function createRunHandle(runId: string, clientMessageId: string, conversationId: string): RunHandle {
+    const { promise: settled, resolve: settle } = Promise.withResolvers<void>();
     return {
         runId,
         clientMessageId,
@@ -59,6 +66,8 @@ export function createRunHandle(runId: string, clientMessageId: string, conversa
         queuedMessages: [],
         pendingConfirmations: new Map(),
         injectedSteps: [],
+        settled,
+        settle,
     };
 }
 

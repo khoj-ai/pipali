@@ -201,11 +201,6 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             log.error({ err: error, conversationId }, 'Failed to persist system prompt');
         }
 
-        if (isNonEmptyString(userMessage)) {
-            await persistUserMessage(bus, conversationId, runIdAuthoritative, runHandle.clientMessageId, userMessage);
-            userMessage = undefined;
-        }
-
         const confirmationContext: ConfirmationContext = {
             requestConfirmation: createConfirmationCallback(bus, conversationId, runHandle, confirmationPersistence),
             preferences: confirmationPreferences,
@@ -217,6 +212,11 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
         let queuedAfterComplete: QueuedMessage[] = [];
 
         try {
+            if (isNonEmptyString(userMessage)) {
+                await persistUserMessage(bus, conversationId, runIdAuthoritative, runHandle.clientMessageId, userMessage);
+                userMessage = undefined;
+            }
+
             const runner = runResearchWithConversation({
                 conversationId,
                 user,
@@ -464,6 +464,8 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
             setSessionInactive(conversationId);
             bus.onRunFinished();
             return;
+        } finally {
+            runHandle.settle();
         }
     }
 }

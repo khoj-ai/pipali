@@ -34,6 +34,8 @@ export const Selectors = {
     messageActionEdit: '.message-action-btn.edit',
     messageActionFork: '.message-action-btn.fork',
     messageActionDelete: '.message-action-btn.delete',
+    messageEditInput: '.message-edit-input',
+    messageEditResend: '.message-edit-actions .btn-primary',
 
     // Thoughts / Train of Thought
     thoughtsSection: '.thoughts-section',

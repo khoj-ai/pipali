@@ -256,6 +256,20 @@ export class ChatPage extends AppPage {
     }
 
     /**
+     * Rewrite a user message by index (0-based) and resend it.
+     * Edit is offered once the message is saved, so this waits for that too.
+     */
+    async editUserMessage(index: number, text: string): Promise<void> {
+        const userMessage = this.userMessages.nth(index);
+        await userMessage.hover();
+        const editBtn = userMessage.locator(Selectors.messageActionEdit);
+        await editBtn.waitFor({ state: 'visible', timeout: 5000 });
+        await editBtn.click({ force: true });
+        await userMessage.locator(Selectors.messageEditInput).fill(text);
+        await userMessage.locator(Selectors.messageEditResend).click();
+    }
+
+    /**
      * Delete an assistant message by index (0-based)
      * Hovers over the message to reveal the delete button, then clicks it
      */

@@ -197,6 +197,20 @@ export function interruptDuringFinalResponseScenario(): MockScenario {
 }
 
 /**
+ * An answer that takes seconds with no step before it: the model is still thinking
+ * while the test acts.
+ */
+export function slowThoughtScenario(): MockScenario {
+    return {
+        name: 'slow-thought',
+        queryPattern: '^think it over slowly$',
+        iterations: [],
+        finalResponse: 'Here is what I thought over.',
+        finalResponseDelayMs: 4000,
+    };
+}
+
+/**
  * One step that runs for seconds once approved, so a test can act while a tool is
  * executing on any runner. The command prints only if the step runs to completion.
  */
@@ -1013,6 +1027,16 @@ export function memoryRecallSelectorScenario(): MockScenario {
     };
 }
 
+/** Recall that takes seconds for one message, so a test can act before its turn's model call */
+export function slowMemoryRecallSelectorScenario(): MockScenario {
+    return {
+        ...memoryRecallSelectorScenario(),
+        name: 'slow-memory-recall-selector',
+        queryPattern: '<memory_catalogue>[\\s\\S]*recall it slowly',
+        finalResponseDelayMs: 3000,
+    };
+}
+
 /** The user turn whose message the selector scenario recalls a memory for */
 export function memoryRecallUserScenario(): MockScenario {
     return {
@@ -1088,6 +1112,7 @@ export const defaultMockScenarios: MockScenario[] = [
     quickScenario(),
     simpleResponseNoTools(),
     interruptDuringFinalResponseScenario(),
+    slowThoughtScenario(),
     longStepScenario(),
     scrollBehaviorSetupScenario(),
     scrollBehaviorFollowupScenario(),
@@ -1112,9 +1137,11 @@ export const defaultMockScenarios: MockScenario[] = [
     sandboxPermissionScenario(),
     outOfFreeCreditsScenario(),
     memoryRecallUserScenario(),
-    // Last, so selector queries match here before the user-message scenario,
-    // whose pattern also appears inside the selector query
+    // Selectors last, so their queries match here before the user-message scenario,
+    // whose pattern also appears inside the selector query. The slow one goes after
+    // the general one, whose pattern matches its queries too
     memoryRecallSelectorScenario(),
+    slowMemoryRecallSelectorScenario(),
 ];
 
 /**
