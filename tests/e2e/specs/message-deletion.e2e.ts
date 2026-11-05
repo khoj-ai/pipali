@@ -129,4 +129,34 @@ test.describe('Message Deletion', () => {
         expect(remainingUserMessages).toHaveLength(1);
         expect(remainingUserMessages[0]).toBe('first question');
     });
+
+    test('deleting the message being answered stops its run, and only that one', async ({ page, request }) => {
+        const chatPage = new ChatPage(page);
+        await chatPage.goto();
+
+        await chatPage.sendMessage('first question');
+        await chatPage.waitForAssistantResponse();
+        await chatPage.sendMessage('think it over slowly');
+        const convId = await chatPage.waitForConversationId();
+        await chatPage.waitForProcessing();
+
+        // An earlier turn goes without disturbing the one in flight
+        await chatPage.deleteUserMessage(0);
+        await expect(chatPage.userMessages).toHaveCount(1);
+        expect(await chatPage.isProcessing()).toBe(true);
+
+        await chatPage.deleteUserMessage(0);
+        await expect(chatPage.userMessages).toHaveCount(0, { timeout: 10000 });
+
+        // A run left going would answer first, with this queued behind it
+        await chatPage.sendMessage('you good');
+        await chatPage.waitForAssistantResponse();
+        await chatPage.waitForIdle();
+        await expect(chatPage.assistantMessages).toHaveCount(1);
+
+        const res = await request.get(`/api/chat/${convId}/history`);
+        const { history } = await res.json() as { history: Array<{ source: string; message?: string }> };
+        expect(history.filter(s => s.source !== 'system').map(s => s.message))
+            .toEqual(['you good', "I'm doing great, thanks for asking!"]);
+    });
 });

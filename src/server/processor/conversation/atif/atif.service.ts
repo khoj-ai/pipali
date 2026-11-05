@@ -19,6 +19,7 @@ import {
 import {
   removeStepFromTrajectory,
   removeTurnFromTrajectory,
+  turnSteps,
   removeAgentMessageFromTrajectory,
   truncateTrajectoryFrom,
   validateATIFTrajectory,
@@ -422,6 +423,12 @@ export class ATIFConversationService {
     await this.persistStepDeletions(conversationId, beforeSteps, trajectory.steps);
 
     return true;
+  }
+
+  /** The step ids deleteTurn would remove for this user message */
+  async turnStepIds(conversationId: string, stepId: number): Promise<number[]> {
+    const conversation = await this.getConversation(conversationId);
+    return turnSteps(conversation?.trajectory.steps ?? [], stepId).map(s => s.step_id);
   }
 
   /**

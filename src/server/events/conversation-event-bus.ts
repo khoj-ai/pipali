@@ -28,6 +28,8 @@ export interface RunHandle {
     runId: string;
     clientMessageId: string;
     conversationId: string;
+    /** The user message this run answers, once saved. A run woken by an update has none. */
+    userStepId?: number;
     startedAt: number;
     abortController: AbortController;
     /**

@@ -425,7 +425,8 @@ api.delete('/conversations/:conversationId', async (c) => {
 });
 
 // Delete a message from a conversation
-// For user messages: deletes just that step
+// For user messages: deletes it and the assistant message answering it. A run still
+// answering it stops, rather than landing its reply under a message that is gone
 // For assistant messages: deletes all associated agent steps (reasoning, tool calls, etc.)
 // With ?rewind=true: deletes the message and everything said after it, so an edited
 // message can be asked again from the same point in the conversation
@@ -478,7 +479,12 @@ api.delete('/conversations/:conversationId/messages/:stepId', async (c) => {
             });
             return c.json({ success: true, deletedCount });
         } else {
-            // Delete user message and the following assistant message (if any)
+            // Read before looking at the run, so a run started meanwhile is never the one stopped
+            const turn = await atifConversationService.turnStepIds(conversationId, stepId);
+            const run = getBus(conversationId)?.activeRun;
+            if (run?.userStepId !== undefined && turn.includes(run.userStepId)) {
+                await stopConversationRun(conversationId)?.settled;
+            }
             const deletedCount = await atifConversationService.deleteTurn(conversationId, stepId);
             if (deletedCount === 0) {
                 return c.json({ error: 'Message not found' }, 404);

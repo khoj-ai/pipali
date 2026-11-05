@@ -241,32 +241,23 @@ function isUserMessage(step: ATIFStep | undefined): boolean {
 }
 
 /**
- * Removes a user message and the following assistant message (agent steps through the
- * run's answer, or until the next user message if it has none) from the trajectory. Also
- * removes inline system steps and any intermediate user messages within the deleted turn.
- * Returns the number of steps removed.
+ * The turn a user message opens: the message and the following assistant message (agent
+ * steps through the run's answer, or until the next user message if it has none), with
+ * inline system steps and any intermediate user messages. Empty unless the step is a user
+ * message.
  */
-export function removeTurnFromTrajectory(
-  trajectory: ATIFTrajectory,
-  stepId: number
-): number {
-  const startIndex = trajectory.steps.findIndex(s => s.step_id === stepId);
-
-  if (startIndex === -1) {
-    return 0;
-  }
-
-  // Verify this is a user message
-  if (trajectory.steps[startIndex]?.source !== 'user') {
-    return 0;
+export function turnSteps(steps: ATIFStep[], stepId: number): ATIFStep[] {
+  const startIndex = steps.findIndex(s => s.step_id === stepId);
+  if (startIndex === -1 || steps[startIndex]?.source !== 'user') {
+    return [];
   }
 
   // Find the end of the following assistant message (through its answer, else until the
   // next user message that follows an agent step, or end of trajectory)
   let endIndex = startIndex;
   let foundAgentStep = false;
-  for (let i = startIndex + 1; i < trajectory.steps.length; i++) {
-    const step = trajectory.steps[i];
+  for (let i = startIndex + 1; i < steps.length; i++) {
+    const step = steps[i];
     if (step?.source === 'agent') {
       foundAgentStep = true;
       endIndex = i;
@@ -284,13 +275,28 @@ export function removeTurnFromTrajectory(
     }
   }
 
-  const removeCount = endIndex - startIndex + 1;
-  trajectory.steps.splice(startIndex, removeCount);
+  return steps.slice(startIndex, endIndex + 1);
+}
+
+/**
+ * Removes a user message's turn (see turnSteps) from the trajectory.
+ * Returns the number of steps removed.
+ */
+export function removeTurnFromTrajectory(
+  trajectory: ATIFTrajectory,
+  stepId: number
+): number {
+  const turn = turnSteps(trajectory.steps, stepId);
+  if (turn.length === 0) {
+    return 0;
+  }
+
+  trajectory.steps.splice(trajectory.steps.indexOf(turn[0]!), turn.length);
 
   // Recalculate final metrics
   trajectory.final_metrics = calculateFinalMetrics(trajectory.steps);
 
-  return removeCount;
+  return turn.length;
 }
 
 /**

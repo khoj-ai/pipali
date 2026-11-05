@@ -126,7 +126,7 @@ async function persistUserMessage(
     runId: string,
     clientMessageId: string,
     message: string,
-): Promise<void> {
+): Promise<number> {
     const userStep = await atifConversationService.addStep(conversationId, 'user', message);
     bus.publish({
         type: 'user_step_saved',
@@ -136,6 +136,7 @@ async function persistUserMessage(
         stepId: userStep.step_id,
         message,
     });
+    return userStep.step_id;
 }
 
 /**
@@ -213,7 +214,7 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
 
         try {
             if (isNonEmptyString(userMessage)) {
-                await persistUserMessage(bus, conversationId, runIdAuthoritative, runHandle.clientMessageId, userMessage);
+                runHandle.userStepId = await persistUserMessage(bus, conversationId, runIdAuthoritative, runHandle.clientMessageId, userMessage);
                 userMessage = undefined;
             }
 
