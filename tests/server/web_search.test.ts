@@ -186,6 +186,8 @@ describe('webSearch', () => {
         const result = await webSearch({ query: 'obscure query no results' });
 
         expect(result.compiled).toContain('No search results found');
+        // Search worked, so nothing points at configuring a provider
+        expect(result.compiled).not.toContain('configured');
     });
 
     test('should include search results in result object', async () => {

@@ -449,9 +449,12 @@ export async function webSearch(args: WebSearchArgs, conversationId?: string): P
         }
 
         if (!extendedResult || extendedResult.organic.length === 0) {
-            const errorMessage = lastError
-                ? `No search results found. Last error: ${lastError.message}`
-                : 'No search results found. Ensure a web search provider (Serper or Exa) is configured.';
+            // A provider that answered with nothing settles it, whatever the others failed with
+            const errorMessage = extendedResult
+                ? 'No search results found for this query. Try different search terms.'
+                : lastError
+                  ? `No search results found. Last error: ${lastError.message}`
+                  : 'No search results found. Ensure a web search provider (Serper or Exa) is configured.';
 
             return {
                 query: `**Web search for**: "${query}"`,
