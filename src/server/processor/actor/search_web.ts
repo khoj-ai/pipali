@@ -7,7 +7,7 @@
 
 import { db } from '../../db';
 import { WebSearchProvider } from '../../db/schema';
-import { desc, eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { platformFetch } from '../../http/platform-fetch';
 import { createChildLogger } from '../../logger';
 
@@ -90,7 +90,7 @@ export interface WebSearchResult {
 }
 
 /**
- * Get enabled web search providers from database, ordered by priority (highest first)
+ * Get enabled web search providers from database, lowest priority number first
  */
 async function getEnabledWebSearchProviders(): Promise<(typeof WebSearchProvider.$inferSelect)[]> {
     try {
@@ -98,7 +98,7 @@ async function getEnabledWebSearchProviders(): Promise<(typeof WebSearchProvider
             .select()
             .from(WebSearchProvider)
             .where(eq(WebSearchProvider.enabled, true))
-            .orderBy(desc(WebSearchProvider.priority));
+            .orderBy(asc(WebSearchProvider.priority), asc(WebSearchProvider.id));
         return providers;
     } catch (error) {
         log.debug('No web search providers configured in database, using environment variables');

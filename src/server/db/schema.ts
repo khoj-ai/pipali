@@ -254,7 +254,7 @@ export const WebSearchProvider = pgTable('web_search_provider', {
     type: WebSearchProviderTypeEnum('type').notNull(),
     apiKey: text('api_key'),
     apiBaseUrl: text('api_base_url'),
-    priority: integer('priority').default(0).notNull(),  // Higher priority = tried first
+    priority: integer('priority').default(0).notNull(),  // Lower number = tried first
     enabled: boolean('enabled').default(true).notNull(),
     ...dbBaseModel,
 });
@@ -268,7 +268,7 @@ export const WebScraper = pgTable('web_scraper', {
     type: WebScraperTypeEnum('type').notNull(),
     apiKey: text('api_key'),
     apiBaseUrl: text('api_base_url'),
-    priority: integer('priority').default(0).notNull(),  // Higher priority = tried first
+    priority: integer('priority').default(0).notNull(),  // Lower number = tried first
     enabled: boolean('enabled').default(true).notNull(),
     ...dbBaseModel,
 });
