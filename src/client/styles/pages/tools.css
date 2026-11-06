@@ -740,11 +740,6 @@
     gap: 6px;
 }
 
-.mcp-tools-list-actions .divider {
-    color: var(--color-border);
-    font-size: 12px;
-}
-
 .btn-text-sm {
     background: none;
     border: 1px solid transparent;
@@ -792,19 +787,39 @@
     background: var(--color-bg);
     border: 1px solid var(--color-border-subtle);
     border-radius: var(--radius-sm);
-    transition: opacity 0.15s, border-color 0.15s;
+    transition: border-color 0.15s;
 }
 
 .tool-item.disabled {
-    opacity: 0.5;
     border-color: transparent;
+}
+
+/* The row's button stays at full strength so it does not read as disabled. */
+.tool-item.disabled .tool-toggle,
+.tool-item.disabled .tool-description {
+    opacity: 0.5;
+}
+
+.tool-item-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.tool-only-btn {
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .tool-toggle {
     display: flex;
     align-items: center;
+    flex: 1;
+    min-width: 0;
     gap: 8px;
     cursor: pointer;
+    transition: opacity 0.15s;
 }
 
 .tool-toggle input[type="checkbox"] {
@@ -820,6 +835,7 @@
     font-weight: 500;
     color: var(--color-accent);
     margin-bottom: 0;
+    overflow-wrap: anywhere;
 }
 
 .tool-description {
@@ -827,6 +843,8 @@
     color: var(--color-text-muted);
     margin: 0;
     line-height: 1.4;
+    overflow-wrap: anywhere;
+    transition: opacity 0.15s;
 }
 
 .mcp-tools-loading {

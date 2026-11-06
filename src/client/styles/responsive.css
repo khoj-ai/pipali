@@ -156,4 +156,14 @@
     .input-toolbar-left { gap: 6px; }
     /* Wide enough that the send button's overlay stops short of its neighbour. */
     .input-toolbar-right { gap: 8px; }
+
+    /* The tool picker's text buttons and each row's checkbox label. */
+    .btn-text-sm,
+    .tool-toggle {
+        min-height: var(--touch-target-min);
+    }
+
+    .btn-text-sm {
+        padding: 0 12px;
+    }
 }

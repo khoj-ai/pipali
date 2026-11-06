@@ -9,7 +9,8 @@
  * - Testing connections
  */
 
-import { test, expect } from '@playwright/test';
+import { fileURLToPath } from 'url';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 import { McpToolsPage } from '../helpers/page-objects';
 
 test.describe('MCP Tools Page', () => {
@@ -273,6 +274,95 @@ test.describe('MCP Tools Page', () => {
             await mcpToolsPage.openServerDetail(testServerName);
             const descValue = await mcpToolsPage.detailDescriptionInput.inputValue();
             expect(descValue).toBe('New updated description');
+        });
+    });
+
+    test.describe('Tool Selection', () => {
+        const serverName = `tool-select-${Date.now()}`;
+        let serverId: number;
+
+        test.beforeEach(async ({ request }) => {
+            // enabled stays false so the manager does not also connect; the detail modal tests the server itself
+            const response = await request.post('/api/mcp/servers', {
+                data: {
+                    name: serverName,
+                    transportType: 'stdio',
+                    path: fileURLToPath(new URL('../../fixtures/mcp-tools-server.ts', import.meta.url)),
+                    enabled: false,
+                },
+            });
+            serverId = (await response.json()).server.id;
+            createdServerIds.push(serverId);
+            await mcpToolsPage.goto();
+        });
+
+        const savedEnabledTools = async (request: APIRequestContext): Promise<string[] | null> => {
+            const { servers } = await (await request.get('/api/mcp/servers')).json();
+            return servers.find((s: { id: number }) => s.id === serverId).enabledTools;
+        };
+
+        const openTools = async () => {
+            await mcpToolsPage.openServerDetail(serverName);
+            await mcpToolsPage.testConnection();
+            await expect(mcpToolsPage.toolItems).toHaveCount(3);
+        };
+
+        const checkbox = (tool: string) => mcpToolsPage.toolItems.filter({ hasText: tool }).getByRole('checkbox');
+
+        test('should show every tool checked when none are restricted', async () => {
+            await openTools();
+            for (const tool of ['read_note', 'write_note', 'delete_note']) {
+                await expect(checkbox(tool)).toBeChecked();
+            }
+        });
+
+        test('should save only the remaining tools when one is disabled, and clear the list when it is re-enabled', async ({ request }) => {
+            await openTools();
+            await checkbox('delete_note').uncheck();
+            await mcpToolsPage.saveChanges();
+            expect((await savedEnabledTools(request))?.sort()).toEqual(['read_note', 'write_note']);
+
+            await openTools();
+            await expect(checkbox('delete_note')).not.toBeChecked();
+            await expect(checkbox('read_note')).toBeChecked();
+            await checkbox('delete_note').check();
+            await mcpToolsPage.saveChanges();
+            expect(await savedEnabledTools(request) ?? []).toEqual([]);
+        });
+
+        const onlyButton = (tool: string) => mcpToolsPage.detailModal.getByRole('button', { name: `Enable only ${tool}` });
+
+        test('should narrow to one tool in a click, then add tools by checking them', async ({ request }) => {
+            await openTools();
+            await onlyButton('write_note').click();
+            await expect(checkbox('write_note')).toBeChecked();
+            await expect(checkbox('read_note')).not.toBeChecked();
+            await expect(checkbox('delete_note')).not.toBeChecked();
+            await expect(checkbox('write_note')).toBeDisabled();
+            await expect(onlyButton('write_note')).toBeDisabled();
+
+            await checkbox('delete_note').check();
+            await mcpToolsPage.saveChanges();
+            expect((await savedEnabledTools(request))?.sort()).toEqual(['delete_note', 'write_note']);
+        });
+
+        test.describe('on a touch screen', () => {
+            // The default sidebar-open state would cover a phone-width page
+            test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, storageState: { cookies: [], origins: [] } });
+
+            test('should narrow by tapping a finger-sized button that stays within the list', async ({ page }) => {
+                expect(await page.evaluate(() => matchMedia('(pointer: coarse)').matches)).toBe(true);
+                await openTools();
+
+                const only = onlyButton('write_note');
+                expect((await only.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+                await only.tap();
+                await expect(checkbox('write_note')).toBeChecked();
+                await expect(checkbox('read_note')).not.toBeChecked();
+
+                const overflows = await page.locator('.tools-list').evaluate(el => el.scrollWidth > el.clientWidth);
+                expect(overflows).toBe(false);
+            });
         });
     });
 

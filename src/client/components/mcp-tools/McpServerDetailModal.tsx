@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { X, Loader2, Trash2, Save, Play, Terminal, Globe, Plus, AlertCircle, CheckCircle, KeyRound, ShieldCheck, CircleSlash } from 'lucide-react';
 import type { McpServerInfo, McpTransportType, McpConfirmationMode, McpAuthType, McpToolInfo, UpdateMcpServerInput } from '../../types/mcp';
 import { apiFetch } from '../../utils/api';
+import { countEnabledTools, isToolEnabled, selectOnly, toggleTool } from '../../utils/mcp-tools';
 import { useTranslation } from 'react-i18next';
 import { McpOAuthAdvancedSettings, isGoogleApisUrl, parseOAuthScopes } from './McpOAuthAdvancedSettings';
 
@@ -123,23 +124,8 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
         }
     };
 
-    const handleToggleTool = (toolName: string) => {
-        const newSet = new Set(enabledToolsSet);
-        if (newSet.has(toolName)) {
-            newSet.delete(toolName);
-        } else {
-            newSet.add(toolName);
-        }
-        setEnabledToolsSet(newSet);
-    };
-
-    const handleToggleAllTools = (enable: boolean) => {
-        if (enable) {
-            setEnabledToolsSet(new Set(tools.map(t => t.name)));
-        } else {
-            setEnabledToolsSet(new Set());
-        }
-    };
+    const toolNames = tools.map(t => t.name);
+    const enabledToolCount = countEnabledTools(enabledToolsSet, toolNames);
 
     const handleSave = async () => {
         if (!hasChanges) return;
@@ -163,7 +149,7 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
             oauthScopes: transportType === 'http' ? parseOAuthScopes(oauthScopesText) : undefined,
             env: Object.keys(env).length > 0 ? env : undefined,
             confirmationMode,
-            enabledTools: enabledToolsSet.size > 0 ? Array.from(enabledToolsSet) : undefined,
+            enabledTools: Array.from(enabledToolsSet),
         };
 
         try {
@@ -556,44 +542,48 @@ export function McpServerDetailModal({ server, onClose, onUpdated, onDeleted }: 
                                     <div className="mcp-tools-list-actions">
                                         <button
                                             type="button"
-                                            onClick={() => handleToggleAllTools(true)}
+                                            onClick={() => setEnabledToolsSet(new Set())}
                                             className="btn-text-sm"
-                                            disabled={enabledToolsSet.size === tools.length}
+                                            disabled={enabledToolCount === tools.length}
                                         >
                                             {t('mcpTools.enableAll')}
-                                        </button>
-                                        <span className="divider">|</span>
-                                        <button
-                                            type="button"
-                                            onClick={() => handleToggleAllTools(false)}
-                                            className="btn-text-sm"
-                                            disabled={enabledToolsSet.size === 0}
-                                        >
-                                            {t('mcpTools.disableAll')}
                                         </button>
                                     </div>
                                 </div>
                                 <p className="mcp-tools-help">
                                     {enabledToolsSet.size === 0
                                         ? t('mcpTools.allToolsEnabled')
-                                        : t('mcpTools.toolsEnabledCount', { enabled: enabledToolsSet.size, total: tools.length })}
+                                        : t('mcpTools.toolsEnabledCount', { enabled: enabledToolCount, total: tools.length })}
                                 </p>
                                 <div className="tools-list">
                                     {tools.map((tool) => {
-                                        const isEnabled = enabledToolsSet.size === 0 || enabledToolsSet.has(tool.name);
+                                        const isEnabled = isToolEnabled(enabledToolsSet, tool.name);
+                                        const isLastEnabled = isEnabled && enabledToolCount === 1;
                                         return (
                                             <div
                                                 key={tool.namespacedName}
                                                 className={`tool-item ${isEnabled ? 'enabled' : 'disabled'}`}
                                             >
-                                                <label className="tool-toggle">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={enabledToolsSet.has(tool.name)}
-                                                        onChange={() => handleToggleTool(tool.name)}
-                                                    />
-                                                    <code className="tool-name">{tool.name}</code>
-                                                </label>
+                                                <div className="tool-item-header">
+                                                    <label className="tool-toggle">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={isEnabled}
+                                                            disabled={isLastEnabled}
+                                                            onChange={() => setEnabledToolsSet(toggleTool(enabledToolsSet, toolNames, tool.name))}
+                                                        />
+                                                        <code className="tool-name">{tool.name}</code>
+                                                    </label>
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setEnabledToolsSet(selectOnly(toolNames, tool.name))}
+                                                        className="btn-text-sm tool-only-btn"
+                                                        disabled={isLastEnabled}
+                                                        aria-label={t('mcpTools.enableOnlyTool', { name: tool.name })}
+                                                    >
+                                                        {t('mcpTools.enableOnly')}
+                                                    </button>
+                                                </div>
                                                 <p className="tool-description">{tool.description}</p>
                                             </div>
                                         );
