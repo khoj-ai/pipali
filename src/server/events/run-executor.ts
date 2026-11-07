@@ -83,6 +83,14 @@ function ensureUniqueRunId(
     return { runId: regenerated, suggestedRunId: runHandle.runId };
 }
 
+function isGpt54OrLater(modelName: string): boolean {
+    const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(modelName);
+    if (!match) return false;
+    const major = Number(match[1]);
+    const minor = Number(match[2] ?? 0);
+    return major > 5 || (major === 5 && minor >= 4);
+}
+
 async function ensureSystemPromptPersisted(
     conversationId: string,
     userId: number,
@@ -97,7 +105,7 @@ async function ensureSystemPromptPersisted(
         || (await atifConversationService.countUserConversations(userId)) <= 1;
 
     const modelName = conversation?.trajectory.agent.model_name.toLowerCase() || '';
-    const provideUpdatesPreamble = /^gpt-5\.[4-9]/.test(modelName)
+    const provideUpdatesPreamble = isGpt54OrLater(modelName)
         ? "Provide frequent, user-visible intermediary updates to communicate progress and new information to the user as you work. Tone of your updates must match your personality."
         : undefined;
 
