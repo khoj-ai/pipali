@@ -1,6 +1,7 @@
 import { test, expect, describe } from 'bun:test';
 import { Glob } from 'bun';
 import path from 'path';
+import { REFUSAL_CATEGORIES } from '../../src/shared';
 
 /**
  * Extract all leaf key paths from a nested object.
@@ -33,6 +34,13 @@ const enKeys = flatKeys(locales.en!);
 describe('i18n locale files', () => {
     test('en.json has keys', () => {
         expect(enKeys.length).toBeGreaterThan(0);
+    });
+
+    test('en.json explains every refusal category, and the case with none', () => {
+        const refusal = (locales.en as { refusal: Record<string, string> }).refusal;
+        for (const key of [...REFUSAL_CATEGORIES, 'generic']) {
+            expect(refusal[key], `refusal.${key}`).toBeTruthy();
+        }
     });
 
     for (const [code, data] of Object.entries(locales)) {

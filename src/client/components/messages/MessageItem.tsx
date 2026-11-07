@@ -105,6 +105,7 @@ export const MessageItem = memo(function MessageItem({ message, platformFrontend
             <div className="message assistant-message">
                 <RunErrorMessage
                     message={message.runErrorInfo.message}
+                    refusal={message.runErrorInfo.refusal}
                     onDismiss={onRunErrorDismiss ? () => onRunErrorDismiss(message.id) : undefined}
                 />
             </div>

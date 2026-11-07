@@ -13,7 +13,7 @@ import { runResearchWithConversation, ResearchPausedError } from '../processor/r
 import { PlatformBillingError } from '../http/billing-errors';
 import { PlatformAuthError } from '../http/platform-fetch';
 import { atifConversationService, type ConversationRole } from '../processor/conversation/atif/atif.service';
-import { buildSystemPrompt } from '../processor/director';
+import { buildSystemPrompt, ModelRefusalError } from '../processor/director';
 import { loadUserContext } from '../user-context';
 import { loadMemorySettings } from '../memory/settings';
 import { loadCatalogue } from '../memory';
@@ -461,13 +461,16 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
                 return;
             }
 
-            log.error({ err: error, conversationId }, 'Run error');
+            const refusal = error instanceof ModelRefusalError ? error.refusal : undefined;
+            if (refusal) log.warn({ conversationId, refusal }, 'Model declined the request');
+            else log.error({ err: error, conversationId }, 'Run error');
             bus.publish({
                 type: 'run_stopped',
                 conversationId,
                 runId: runIdAuthoritative,
                 reason: 'error',
                 error: sanitizeErrorForClient(error),
+                ...(refusal && { refusal }),
             });
 
             setSessionInactive(conversationId);

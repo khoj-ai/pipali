@@ -1,5 +1,7 @@
 // Message and Thought types for chat messages
 
+import type { RefusalInfo } from '../../shared';
+
 export type Message = {
     id: string;
     stableId: string; // Never changes, used as React key to prevent remounting
@@ -18,6 +20,7 @@ export type Message = {
     };
     runErrorInfo?: {
         message: string;
+        refusal?: RefusalInfo;
     };
     /** Paths of files attached by the user (extracted from <attached_files> block) */
     attachedFiles?: string[];

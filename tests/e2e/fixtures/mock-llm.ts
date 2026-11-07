@@ -6,6 +6,7 @@
  */
 
 import type { BillingErrorDetails } from '../../../src/server/http/billing-errors';
+import type { RefusalInfo } from '../../../src/shared';
 
 export interface MockToolCall {
     function_name: string;
@@ -39,6 +40,8 @@ export interface MockScenario {
     resumedResponse?: string;
     // Refuse the turn as the platform does when the account can't pay for it
     billingError?: BillingErrorDetails;
+    // Decline the turn as a model does when its provider's safety policy stops it
+    refusal?: RefusalInfo;
 }
 
 /**
@@ -1100,6 +1103,19 @@ export function outOfFreeCreditsScenario(): MockScenario {
 }
 
 /**
+ * A model declining to respond to a message, with the reason its provider gave
+ */
+export function refusalScenario(): MockScenario {
+    return {
+        name: 'refusal',
+        queryPattern: '^decline with a reason$',
+        iterations: [],
+        finalResponse: '',
+        refusal: { category: 'reasoning_extraction', explanation: 'Asked to reproduce its reasoning' },
+    };
+}
+
+/**
  * Default scenarios used in tests
  */
 export const defaultMockScenarios: MockScenario[] = [
@@ -1136,6 +1152,7 @@ export const defaultMockScenarios: MockScenario[] = [
     delegateAndStopScenario(),
     sandboxPermissionScenario(),
     outOfFreeCreditsScenario(),
+    refusalScenario(),
     memoryRecallUserScenario(),
     // Selectors last, so their queries match here before the user-message scenario,
     // whose pattern also appears inside the selector query. The slow one goes after

@@ -275,6 +275,17 @@
             "action": "Sign in again"
         }
     },
+    "refusal": {
+        "title": "The model declined this request",
+        "generic": "The model wouldn't respond to this message. Change your message and send it again, or retry with a different model.",
+        "cyber": "The model's safety checks flagged this as possible cybersecurity harm, like writing malware or exploits. Reviewing code for vulnerabilities is usually fine, so try narrowing the request to the defensive part, or retry with a different model.",
+        "bio": "The model's safety checks flagged this as possible biological harm. Everyday health and educational questions are usually fine, so try narrowing the request to the general-knowledge part, or retry with a different model.",
+        "frontier_llm": "The model's safety checks flagged this as possibly helping to build competing AI models. Try rephrasing or leaving that part out, or retry with a different model.",
+        "reasoning_extraction": "The model won't write out its internal reasoning. Ask for a short explanation of the answer, or a summary of what it did, and send it again.",
+        "general_harms": "The model's safety policy blocked this request. Harmless requests can trip it by accident, so try rephrasing your message, or retry with a different model.",
+        "recitation": "The model stopped because its answer would repeat existing text, like copyrighted material, word for word. Ask for a summary or a paraphrase instead.",
+        "sensitive_personal_info": "The model stopped because the request involves sensitive personal information. Remove or anonymize the personal details and send it again, or retry with a different model."
+    },
     "confirmation": {
         "titles": {
             "edit_file": "Confirm File Edit",

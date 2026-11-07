@@ -28,6 +28,27 @@ export const PARENT_INBOX_KINDS = ['delegated_task_update', 'background_command_
 export type ParentInboxKind = typeof PARENT_INBOX_KINDS[number];
 
 /**
+ * Policy categories a model's refusal can name, whichever provider declined. The chat has
+ * a message for each; a refusal with no category, or one not listed, gets a general one.
+ */
+export const REFUSAL_CATEGORIES = [
+    'cyber',
+    'bio',
+    'frontier_llm',
+    'reasoning_extraction',
+    'general_harms',
+    'recitation',
+    'sensitive_personal_info',
+] as const;
+export type RefusalCategory = typeof REFUSAL_CATEGORIES[number];
+
+export interface RefusalInfo {
+    category?: RefusalCategory;
+    /** The provider's own words, in whatever language it wrote them */
+    explanation?: string;
+}
+
+/**
  * A run records one agent step without tool calls, its answer, last. That ends a reply
  * even with no user message after it, as when background work reporting in wakes the
  * conversation. The chat groups steps into replies by it, and deleting one removes the

@@ -229,6 +229,17 @@
             "action": "Se reconnecter"
         }
     },
+    "refusal": {
+        "title": "Le modèle a refusé cette demande",
+        "generic": "Le modèle n'a pas voulu répondre à ce message. Modifie ton message et renvoie-le, ou réessaie avec un autre modèle.",
+        "cyber": "Les contrôles de sécurité du modèle ont signalé un risque possible pour la cybersécurité, comme l'écriture de malwares ou d'exploits. L'analyse de code à la recherche de vulnérabilités ne pose généralement pas de problème : essaie de limiter la demande à la partie défensive, ou réessaie avec un autre modèle.",
+        "bio": "Les contrôles de sécurité du modèle ont signalé un risque biologique possible. Les questions courantes de santé ou d'éducation ne posent généralement pas de problème : essaie de limiter la demande à la partie de culture générale, ou réessaie avec un autre modèle.",
+        "frontier_llm": "Les contrôles de sécurité du modèle ont signalé que la demande pourrait aider à créer des modèles d'IA concurrents. Essaie de la reformuler ou d'en retirer cette partie, ou réessaie avec un autre modèle.",
+        "reasoning_extraction": "Le modèle ne détaille pas son raisonnement interne. Demande plutôt une courte explication de la réponse ou un résumé de ce qu'il a fait, puis renvoie ton message.",
+        "general_harms": "La politique de sécurité du modèle a bloqué cette demande. Une demande anodine peut la déclencher par erreur : essaie de reformuler ton message, ou réessaie avec un autre modèle.",
+        "recitation": "Le modèle s'est arrêté parce que sa réponse aurait repris mot pour mot un texte existant, comme un contenu protégé par le droit d'auteur. Demande plutôt un résumé ou une reformulation.",
+        "sensitive_personal_info": "Le modèle s'est arrêté parce que la demande contient des informations personnelles sensibles. Retire ou anonymise ces données personnelles et renvoie ton message, ou réessaie avec un autre modèle."
+    },
     "confirmation": {
         "titles": {
             "edit_file": "Confirmer la modification du fichier",

@@ -1,13 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { AlertTriangle, Check, ChevronDown, ChevronRight, Copy, X } from 'lucide-react';
+import type { RefusalInfo } from '../../../shared';
 
 interface RunErrorMessageProps {
     message: string;
+    refusal?: RefusalInfo;
     onDismiss?: () => void;
 }
 
-export function RunErrorMessage({ message, onDismiss }: RunErrorMessageProps) {
+export function RunErrorMessage({ message, refusal, onDismiss }: RunErrorMessageProps) {
     const { t } = useTranslation();
     const [copied, setCopied] = useState(false);
     const [showDetails, setShowDetails] = useState(false);
@@ -25,7 +27,7 @@ export function RunErrorMessage({ message, onDismiss }: RunErrorMessageProps) {
                     <AlertTriangle size={18} />
                 </span>
                 <span className="run-error-message-title">
-                    {t('runError.title', 'This run stopped')}
+                    {refusal ? t('refusal.title') : t('runError.title', 'This run stopped')}
                 </span>
                 {onDismiss && (
                     <button className="run-error-message-icon-button" onClick={onDismiss} title={t('common.dismiss')}>
@@ -34,7 +36,9 @@ export function RunErrorMessage({ message, onDismiss }: RunErrorMessageProps) {
                 )}
             </div>
             <p className="run-error-message-text">
-                {t('runError.message', 'Pipali hit a model provider error and stopped before completing this response.')}
+                {refusal
+                    ? t(`refusal.${refusal.category ?? 'generic'}`)
+                    : t('runError.message', 'Pipali hit a model provider error and stopped before completing this response.')}
             </p>
             <div className="run-error-message-actions">
                 <button className="run-error-message-action" onClick={copyDetails} type="button">

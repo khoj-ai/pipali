@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import type { Responses } from 'openai/resources/responses/responses';
 import type { ChatMessage, LlmStreamEvent, ResponseWithThought, ToolDefinition, UsageMetrics } from '../conversation';
-import { toOpenaiTools, getReasoningText, getFunctionCallName } from './utils';
+import { toOpenaiTools, getReasoningText, getFunctionCallName, getRefusal } from './utils';
 import { calculateCost, type PricingConfig } from '../costs';
 import { createChildLogger } from '../../../logger';
 import { getClientHeaders } from '../../../http/client-info';
@@ -130,5 +130,5 @@ export async function sendMessageToGpt(
         log.info('Context was compacted by platform');
     }
 
-    return { thought, message: outputText?.trim(), raw: response.output, usage, compactionSummary };
+    return { thought, message: outputText?.trim(), raw: response.output, usage, compactionSummary, refusal: getRefusal(response) };
 }

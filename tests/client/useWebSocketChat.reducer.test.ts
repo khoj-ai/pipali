@@ -488,6 +488,37 @@ test('RUN_STOPPED (error) replaces an empty streaming placeholder with a run err
     expect(next.messages[1]?.runErrorInfo?.message).toContain('provider failed');
 });
 
+test('RUN_STOPPED (error) carries the model refusal into the run error card', () => {
+    const runId = 'run-1';
+    const messages: Message[] = [
+        { id: 'cm-1', stableId: 'cm-1', role: 'user', content: 'hi' },
+        { id: runId, stableId: runId, role: 'assistant', content: '', isStreaming: true },
+    ];
+    const state: ChatState = {
+        ...makeState({
+            conversationId: 'c1',
+            messages,
+            conversationState: { isProcessing: true, isStopped: false, isCompleted: false, messages },
+        }),
+        runStatus: 'running',
+        currentRunId: runId,
+    };
+
+    const next = __test__.chatReducer(state, {
+        type: 'RUN_STOPPED',
+        conversationId: 'c1',
+        runId,
+        reason: 'error',
+        error: 'The model declined to respond (category: cyber)',
+        refusal: { category: 'cyber' },
+    });
+
+    expect(next.messages[1]?.runErrorInfo).toEqual({
+        message: 'The model declined to respond (category: cyber)',
+        refusal: { category: 'cyber' },
+    });
+});
+
 test('STEP_START replaces streamed reasoning and tool call previews', () => {
     const conversationId = 'c1';
     const runId = 'run-1';

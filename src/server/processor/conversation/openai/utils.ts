@@ -1,5 +1,6 @@
 import type { ToolDefinition } from "../conversation";
 import type { Responses } from 'openai/resources/responses/responses';
+import { REFUSAL_CATEGORIES, type RefusalInfo } from '../../../../shared';
 
 export function toOpenaiTools(tools?: ToolDefinition[]): Responses.Tool[] | undefined {
     if (!tools) return undefined;
@@ -40,6 +41,28 @@ export function toOpenaiTools(tools?: ToolDefinition[]): Responses.Tool[] | unde
  */
 export function getFunctionCallName(call: { name: string; namespace?: string | null }): string {
     return call.namespace ? `${call.namespace}__${call.name}` : call.name;
+}
+
+/**
+ * Whether the model declined to respond, and why. A provider's policy stop is an
+ * incomplete response with reason content_filter, its category and explanation in
+ * metadata. A model's own refusal, as OpenAI reports it, is a refusal part of a message.
+ */
+export function getRefusal(response: Responses.Response): RefusalInfo | undefined {
+    const refusalText = (response.output as Responses.ResponseOutputItem[])
+        .filter((item): item is Responses.ResponseOutputMessage => item.type === 'message')
+        .flatMap(item => item.content)
+        .filter((part): part is Responses.ResponseOutputRefusal => part.type === 'refusal')
+        .map(part => part.refusal)
+        .join(' ')
+        .trim();
+    const filtered = response.status === 'incomplete' && response.incomplete_details?.reason === 'content_filter';
+    if (!filtered && !refusalText) return undefined;
+
+    const metadata = response.metadata ?? {};
+    const category = REFUSAL_CATEGORIES.find(known => known === metadata.refusal_category);
+    const explanation = metadata.refusal_explanation || refusalText || undefined;
+    return { ...(category && { category }), ...(explanation && { explanation }) };
 }
 
 /**

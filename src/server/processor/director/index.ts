@@ -41,6 +41,7 @@ import { SANDBOX_TEMP_DIR } from '../../sandbox';
 import { PlatformBillingError } from '../../http/billing-errors';
 import { PlatformAuthError } from '../../http/platform-fetch';
 import { createChildLogger } from '../../logger';
+import type { RefusalInfo } from '../../../shared';
 
 const log = createChildLogger({ component: 'director' });
 
@@ -817,6 +818,11 @@ async function pickNextTool(
             config.abortSignal,
         );
 
+        // Tools in a refused response are never run, and the same context would be refused again
+        if (response?.refusal) {
+            throw new ModelRefusalError(response.refusal);
+        }
+
         // Check if response is valid
         if (!response || (!response.message && !response.raw)) {
             throw new Error('No response from model');
@@ -910,7 +916,7 @@ async function pickNextTool(
     } catch (error) {
         if (config.abortSignal?.aborted) throw new ResearchPausedError();
         // Re-throw platform errors that should be handled by the caller instead of fed back to the model.
-        if (error instanceof PlatformBillingError || error instanceof PlatformAuthError || isNonRecoverablePlatformModelError(error)) {
+        if (error instanceof PlatformBillingError || error instanceof PlatformAuthError || error instanceof ModelRefusalError || isNonRecoverablePlatformModelError(error)) {
             throw error;
         }
         log.error({ err: error }, 'Failed to pick next tool');
@@ -1182,6 +1188,16 @@ export class ResearchPausedError extends Error {
     constructor() {
         super('Research paused');
         this.name = 'ResearchPausedError';
+    }
+}
+
+/** The model declined to respond. The message states what the provider reported, for whoever reads the run's error. */
+export class ModelRefusalError extends Error {
+    constructor(readonly refusal: RefusalInfo) {
+        const category = refusal.category ? ` (category: ${refusal.category})` : '';
+        const explanation = refusal.explanation ? `: ${refusal.explanation}` : '';
+        super(`The model declined to respond${category}${explanation}`);
+        this.name = 'ModelRefusalError';
     }
 }
 

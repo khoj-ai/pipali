@@ -170,6 +170,7 @@ function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought | Pr
 
     console.log(`[MockLLM] Matched scenario: ${scenario.name} for query: "${query}"`);
     if (scenario.billingError) throw new PlatformBillingError(scenario.billingError);
+    if (scenario.refusal) return { raw: [], refusal: scenario.refusal };
 
     const key = getStateKey(query, scenario.name, ctx);
     const sessionId = ctx?.sessionId;

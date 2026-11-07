@@ -229,6 +229,17 @@
             "action": "Erneut anmelden"
         }
     },
+    "refusal": {
+        "title": "Das Modell hat diese Anfrage abgelehnt",
+        "generic": "Das Modell wollte auf diese Nachricht nicht antworten. Ändere deine Nachricht und sende sie erneut, oder versuche es mit einem anderen Modell.",
+        "cyber": "Die Sicherheitsprüfung des Modells hat dies als möglichen Cybersicherheitsschaden eingestuft, etwa das Schreiben von Malware oder Exploits. Code auf Schwachstellen zu prüfen ist meist unproblematisch – beschränke die Anfrage deshalb auf den defensiven Teil, oder versuche es mit einem anderen Modell.",
+        "bio": "Die Sicherheitsprüfung des Modells hat dies als möglichen biologischen Schaden eingestuft. Alltägliche Gesundheits- und Bildungsfragen sind meist unproblematisch – beschränke die Anfrage deshalb auf den allgemeinen Wissensteil, oder versuche es mit einem anderen Modell.",
+        "frontier_llm": "Die Sicherheitsprüfung des Modells hat dies als mögliche Hilfe beim Bau konkurrierender KI-Modelle eingestuft. Formuliere die Anfrage um oder lass diesen Teil weg, oder versuche es mit einem anderen Modell.",
+        "reasoning_extraction": "Das Modell schreibt seine interne Argumentation nicht aus. Bitte stattdessen um eine kurze Erklärung der Antwort oder eine Zusammenfassung dessen, was es getan hat, und sende die Nachricht erneut.",
+        "general_harms": "Die Sicherheitsrichtlinie des Modells hat diese Anfrage blockiert. Harmlose Anfragen können sie versehentlich auslösen – formuliere deine Nachricht um, oder versuche es mit einem anderen Modell.",
+        "recitation": "Das Modell hat gestoppt, weil seine Antwort vorhandenen Text, etwa urheberrechtlich geschütztes Material, wörtlich wiedergegeben hätte. Bitte stattdessen um eine Zusammenfassung oder Umformulierung.",
+        "sensitive_personal_info": "Das Modell hat gestoppt, weil die Anfrage sensible personenbezogene Daten enthält. Entferne oder anonymisiere die persönlichen Angaben und sende die Nachricht erneut, oder versuche es mit einem anderen Modell."
+    },
     "confirmation": {
         "titles": {
             "edit_file": "Dateibearbeitung bestätigen",

@@ -18,6 +18,7 @@
 
 import { useReducer, useRef, useCallback, useEffect } from 'react';
 import type { Message, Thought, ConversationState, ConfirmationRequest, ConfirmationResponseAttachment, BillingError, AuthError } from '../types';
+import type { RefusalInfo } from '../../shared';
 import { preventIdleSleep, releaseIdleSleep } from '../utils/wake-lock';
 import { formatToolCallsForSidebar, generateUUID, generateDeterministicId } from '../utils/formatting';
 import { dropUnansweredReply, mergeHistoryWithLive, type ChatHistory } from '../utils/chat-messages';
@@ -58,7 +59,7 @@ export type ChatAction =
     | { type: 'OPTIMISTIC_RUN_STARTED'; conversationId?: string; runId: string; clientMessageId: string }
     | { type: 'CONVERSATION_CREATED'; conversationId: string; history?: any[]; activate: boolean }
     | { type: 'RUN_STARTED'; conversationId: string; runId: string; clientMessageId: string; suggestedRunId?: string }
-    | { type: 'RUN_STOPPED'; conversationId: string; runId: string; reason: StopReason; error?: string }
+    | { type: 'RUN_STOPPED'; conversationId: string; runId: string; reason: StopReason; error?: string; refusal?: RefusalInfo }
     | { type: 'RUN_COMPLETE'; conversationId: string; runId: string; response: string; stepId: number }
     | { type: 'TEXT_DELTA'; conversationId: string; runId: string; delta: string }
     | { type: 'REASONING_DELTA'; conversationId: string; runId: string; delta: string }
@@ -350,7 +351,7 @@ function dropEmptyStreamingPlaceholders(messages: Message[], keepRunId?: string)
     return next.length === messages.length ? messages : next;
 }
 
-function appendRunErrorMessage(messages: Message[], runId: string, error: string): Message[] {
+function appendRunErrorMessage(messages: Message[], runId: string, error: string, refusal?: RefusalInfo): Message[] {
     const messageId = `run-error-${runId}`;
     if (messages.some(m => m.stableId === messageId)) return messages;
 
@@ -361,7 +362,7 @@ function appendRunErrorMessage(messages: Message[], runId: string, error: string
             stableId: messageId,
             role: 'assistant' as const,
             content: '',
-            runErrorInfo: { message: error },
+            runErrorInfo: { message: error, refusal },
         },
     ];
 }
@@ -705,7 +706,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
         }
 
         case 'RUN_STOPPED': {
-            const { conversationId, runId, reason, error } = action;
+            const { conversationId, runId, reason, error, refusal } = action;
             const isCurrentConversation = conversationId === state.conversationId;
 
             // Mark pending tool calls as interrupted
@@ -757,7 +758,7 @@ function chatReducer(state: ChatState, action: ChatAction): ChatState {
             const finalizeRunError = (msgs: Message[]): Message[] => {
                 if (reason !== 'error' || !error) return finalizeStopped(msgs);
                 const finalized = dropEmptyAssistantForRun(finalizeStopped(msgs), runId);
-                return appendRunErrorMessage(finalized, runId, error);
+                return appendRunErrorMessage(finalized, runId, error, refusal);
             };
 
             const conversationStates = new Map(state.conversationStates);
@@ -1757,6 +1758,7 @@ export function useWebSocketChat(options: UseWebSocketChatOptions) {
                     runId,
                     reason: message.reason,
                     error: message.error,
+                    refusal: message.refusal,
                 });
                 releaseIdleSleep();
                 if (message.reason === 'error' && message.error) {

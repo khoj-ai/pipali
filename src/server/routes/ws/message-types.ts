@@ -8,6 +8,7 @@
 
 import type { ATIFToolCall, ATIFObservationResult, ATIFMetrics, ATIFStep } from '../../processor/conversation/atif/atif.types';
 import type { ConfirmationRequest, ConfirmationResponse } from '../../processor/confirmation';
+import type { RefusalInfo } from '../../../shared';
 
 // ============================================================================
 // Client → Server Messages
@@ -104,6 +105,7 @@ export interface RunStoppedMessage {
     runId: string;
     reason: StopReason;
     error?: string;  // Present when reason is 'error'
+    refusal?: RefusalInfo;  // Present when the error is the model declining to respond
 }
 
 export type StopReason = 'user_stop' | 'soft_interrupt' | 'disconnect' | 'error';

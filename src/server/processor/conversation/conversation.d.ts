@@ -1,4 +1,5 @@
 import type { Responses } from 'openai/resources/responses/responses';
+import type { RefusalInfo } from '../../../shared';
 
 // OpenAI Responses API message types
 export type ChatMessage = Responses.EasyInputMessage | Responses.ResponseInputItem;
@@ -28,6 +29,8 @@ export interface ResponseWithThought {
     usage?: UsageMetrics;
     /** Compaction summary if context was compacted by platform */
     compactionSummary?: string;
+    /** Set when the model declined to respond; its other fields hold whatever came before */
+    refusal?: RefusalInfo;
 }
 
 export interface ToolDefinition {

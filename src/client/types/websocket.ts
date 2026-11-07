@@ -1,6 +1,7 @@
 // WebSocket protocol types (run-based model)
 
 import type { ConfirmationRequest } from './confirmation';
+import type { RefusalInfo } from '../../shared';
 
 export type BillingErrorCode = 'insufficient_credits' | 'spend_limit_reached';
 
@@ -132,6 +133,7 @@ export type RunStoppedMessage = {
     runId: string;
     reason: StopReason;
     error?: string;
+    refusal?: RefusalInfo;
 };
 
 export type RunCompleteMessage = {

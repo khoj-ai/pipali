@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research, stepLimitWarningThreshold, ResearchPausedError } from '../../src/server/processor/director';
+import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research, stepLimitWarningThreshold, ResearchPausedError, ModelRefusalError } from '../../src/server/processor/director';
 import { isFirstRunEasterEgg } from '../../src/server/utils';
 import { MEMORY_RECALL_KIND } from '../../src/server/memory';
 import type { ATIFTrajectory, ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
@@ -310,6 +310,60 @@ describe('research stopped during a model call', () => {
             globalThis.__pipaliMockLLM = previousMock;
         }
         expect(yielded).toEqual([]);
+    });
+});
+
+describe('research when the model refuses', () => {
+    const refusal = { category: 'cyber' as const, explanation: 'Looks like exploit development' };
+
+    const runResearch = async (respond: () => unknown) => {
+        const previousMock = globalThis.__pipaliMockLLM;
+        let modelCalls = 0;
+        globalThis.__pipaliMockLLM = () => {
+            modelCalls++;
+            return respond() as never;
+        };
+        const yielded: unknown[] = [];
+        let failure: unknown;
+        try {
+            for await (const iteration of research({
+                chatHistory: trajectory([{ source: 'user', message: 'hi' }]),
+                maxIterations: 5,
+            })) yielded.push(iteration);
+        } catch (error) {
+            failure = error;
+        } finally {
+            globalThis.__pipaliMockLLM = previousMock;
+        }
+        return { modelCalls, yielded, failure };
+    };
+
+    test('stops at the refusal instead of asking the model again with the same context', async () => {
+        const { modelCalls, yielded, failure } = await runResearch(() => ({ raw: [], refusal }));
+
+        expect(modelCalls).toBe(1);
+        expect(yielded).toEqual([]);
+        expect(failure).toBeInstanceOf(ModelRefusalError);
+        expect((failure as ModelRefusalError).refusal).toEqual(refusal);
+        expect((failure as ModelRefusalError).message)
+            .toBe('The model declined to respond (category: cyber): Looks like exploit development');
+    });
+
+    test('runs no tool that the refused response called', async () => {
+        const { yielded, failure } = await runResearch(() => ({
+            raw: [{ type: 'function_call', id: 'fc-1', call_id: 'call-1', name: 'list_files', arguments: '{}' }],
+            refusal: {},
+        }));
+
+        expect(yielded).toEqual([]);
+        expect(failure).toBeInstanceOf(ModelRefusalError);
+    });
+
+    test('still retries a response with no message, tool call or refusal, then ends without failing', async () => {
+        const { modelCalls, failure } = await runResearch(() => ({ raw: [] }));
+
+        expect(modelCalls).toBe(3);
+        expect(failure).toBeUndefined();
     });
 });
 
