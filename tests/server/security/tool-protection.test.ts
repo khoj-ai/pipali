@@ -419,6 +419,45 @@ describe('Tool Protection - Links and case', () => {
             expect(requests).toHaveLength(1);
             expect(await fs.readFile(path.join(home, '.zshrc'), 'utf8')).toBe('original');
         });
+
+        // Windows also names a folder by its 8.3 short name, as %TEMP% often is
+        describe.if(process.platform === 'win32')('named by its short name', () => {
+            let long: string;
+            let short: string;
+
+            beforeAll(async () => {
+                long = path.join(root, 'Long Folder Name');
+                await fs.mkdir(long);
+                const { stdout } = Bun.spawnSync(
+                    ['powershell', '-NoProfile', '-NonInteractive', '-Command', '(New-Object -ComObject Scripting.FileSystemObject).GetFolder($env:FOLDER).ShortPath'],
+                    { env: { ...process.env, FOLDER: long } },
+                );
+                short = stdout.toString().trim();
+                // Needs 8.3 names on for the temp folder's volume, as they are by default for C:
+                expect(short).toMatch(/~\d/);
+            });
+
+            test('writes without asking in a write folder named short, by either name', async () => {
+                await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [short] });
+
+                for (const folder of [long, short]) {
+                    const file = path.join(folder, 'notes.txt');
+                    const { requests } = await asDeniedBy(context => writeFile({ file_path: file, content: folder }, { confirmationContext: context }));
+                    expect(requests).toHaveLength(0);
+                    expect(await fs.readFile(file, 'utf8')).toBe(folder);
+                }
+            });
+
+            test('asks before reading a protected folder named short, by its long name', async () => {
+                await fs.writeFile(path.join(long, 'token.txt'), 'FAKE_TOKEN');
+                const deniedReadPaths = [...getDefaultConfig().deniedReadPaths, short];
+                await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, deniedReadPaths });
+
+                const { requests, output } = await asDeniedBy(context => readFile({ path: path.join(long, 'token.txt') }, { confirmationContext: context }));
+                expect(requests).toHaveLength(1);
+                expect(output).not.toContain('FAKE_TOKEN');
+            });
+        });
     });
 });
 

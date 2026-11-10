@@ -600,7 +600,7 @@ function expandHome(p: string, style: PathStyle): string {
  * Whether a path in match form falls under a rule, as written or where the rule led once
  * links resolved when its config was applied. File tools also judge the file a path
  * resolves to, and that path is spelled the resolved way: /tmp is /private/tmp on macOS,
- * and Windows' temp folder can be spelled short.
+ * and a Windows temp folder spelled short, C:\Users\ADMINI~1\..., resolves long.
  */
 function isWithinRule(matchPath: string, rule: string, style: PathStyle): boolean {
     if (isPathWithinDirectory(matchPath, toMatchForm(rule, style))) return true;
@@ -620,7 +620,9 @@ function resolveRules(config: SandboxConfig): Map<string, string> {
             const expanded = expandHome(rule, style);
             // Resolving opens the path, which blocks on a pipe
             const stats = fs.statSync(expanded);
-            if (stats.isDirectory() || stats.isFile()) resolved.set(rule, fs.realpathSync(expanded));
+            // Natively, as file tools resolve the files they judge, so the two are spelled
+            // alike. The JS resolver keeps Windows' 8.3 short names.
+            if (stats.isDirectory() || stats.isFile()) resolved.set(rule, fs.realpathSync.native(expanded));
         } catch {
             // Not there, so matched as written
         }
