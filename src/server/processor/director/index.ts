@@ -378,8 +378,8 @@ REQUIRED:
                 command: {
                     type: 'string',
                     description: process.platform === 'win32'
-                        ? 'The PowerShell command to execute. Escape literal `$` to prevent expansion.'
-                        : 'The bash command to execute. Escape literal `$` to prevent expansion.',
+                        ? 'The PowerShell command to execute. Text embedded in it, like a commit message or file contents, is parsed as PowerShell too.'
+                        : 'The bash command to execute. Text embedded in it, like a commit message or file contents, is parsed as bash too.',
                 },
                 operation_type: {
                     type: 'string',
