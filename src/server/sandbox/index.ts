@@ -609,25 +609,40 @@ function isWithinRule(matchPath: string, rule: string, style: PathStyle): boolea
     return resolved !== undefined && isPathWithinDirectory(matchPath, toMatchForm(resolved, style));
 }
 
-/** Where a config's ~ and absolute path rules lead once links resolve, for those that exist. */
+/**
+ * Where a config's ~ and absolute path rules lead once links resolve. A rule not there yet
+ * resolves as file tools resolve a file they are about to create: its nearest existing
+ * folder resolved, with the rest appended. Windows' scratch folder is made only as the
+ * runtime starts, after its settings apply.
+ */
 function resolveRules(config: SandboxConfig): Map<string, string> {
     const style = hostPathStyle();
     const rules = [...config.allowedWritePaths, ...config.deniedWritePaths, ...config.deniedReadPaths, ...DEFAULT_ALLOWED_READ_PATHS];
     const resolved = new Map<string, string>();
     for (const rule of rules) {
-        if (!rule.startsWith('~') && !style.path.isAbsolute(rule)) continue;
+        const expanded = expandHome(rule, style);
+        if (!style.path.isAbsolute(expanded)) continue;
         try {
-            const expanded = expandHome(rule, style);
-            // Resolving opens the path, which blocks on a pipe
-            const stats = fs.statSync(expanded);
-            // Natively, as file tools resolve the files they judge, so the two are spelled
-            // alike. The JS resolver keeps Windows' 8.3 short names.
-            if (stats.isDirectory() || stats.isFile()) resolved.set(rule, fs.realpathSync.native(expanded));
+            const leadsTo = resolveRule(expanded);
+            if (leadsTo) resolved.set(rule, leadsTo);
         } catch {
-            // Not there, so matched as written
+            // Unresolvable, so matched as written
         }
     }
     return resolved;
+}
+
+function resolveRule(rulePath: string, missing: string[] = []): string | undefined {
+    const stats = fs.statSync(rulePath, { throwIfNoEntry: false });
+    if (!stats) {
+        const parent = path.dirname(rulePath);
+        return parent === rulePath ? undefined : resolveRule(parent, [path.basename(rulePath), ...missing]);
+    }
+    // Resolving opens the path, which blocks on a pipe
+    if (!stats.isDirectory() && !stats.isFile()) return undefined;
+    // Natively, as file tools resolve the files they judge, so the two are spelled
+    // alike. The JS resolver keeps Windows' 8.3 short names.
+    return path.join(fs.realpathSync.native(rulePath), ...missing);
 }
 
 /**

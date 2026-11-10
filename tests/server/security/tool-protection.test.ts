@@ -420,6 +420,26 @@ describe('Tool Protection - Links and case', () => {
             expect(await fs.readFile(path.join(home, '.zshrc'), 'utf8')).toBe('original');
         });
 
+        test('writes without asking in a write folder made after its settings applied, spelled through a link', async () => {
+            const later = path.join(allowed, 'out', 'made-later');
+            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [later] });
+            await fs.mkdir(later);
+
+            const { requests } = await asDeniedBy(context => writeFile({ file_path: path.join(later, 'notes.txt'), content: 'later' }, { confirmationContext: context }));
+            expect(requests).toHaveLength(0);
+            expect(await fs.readFile(path.join(outside, 'made-later', 'notes.txt'), 'utf8')).toBe('later');
+        });
+
+        test('asks before writing outside a write folder made a link after its settings applied', async () => {
+            const later = path.join(root, 'planted');
+            await initializeSandboxWithConfig({ ...getDefaultConfig(), enabled: false, allowedWritePaths: [later] });
+            await fs.symlink(outside, later);
+
+            const { requests } = await asDeniedBy(context => writeFile({ file_path: path.join(later, 'rc'), content: 'replaced' }, { confirmationContext: context }));
+            expect(requests).toHaveLength(1);
+            expect(await fs.readFile(path.join(outside, 'rc'), 'utf8')).toBe('original');
+        });
+
         // Windows also names a folder by its 8.3 short name, as %TEMP% often is
         describe.if(process.platform === 'win32')('named by its short name', () => {
             let long: string;
