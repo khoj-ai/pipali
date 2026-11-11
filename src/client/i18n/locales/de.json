@@ -255,6 +255,7 @@
         "options": {
             "yes": "Ja",
             "yes_dont_ask": "Ja, nicht mehr fragen",
+            "yes_dont_ask_in_folder": "Ja, in diesem Ordner nicht mehr fragen",
             "no": "Nein"
         },
         "question": "Frage",

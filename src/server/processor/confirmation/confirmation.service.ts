@@ -5,6 +5,9 @@
  * Works with any frontend (web, TUI) through a callback-based system.
  */
 
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
     type ConfirmationRequest,
     type ConfirmationResponse,
@@ -148,7 +151,7 @@ export function createFileOperationConfirmation(
             commandInfo: details.commandInfo,
         },
         diff: details.diff,
-        options: createStandardConfirmationOptions(),
+        options: createStandardConfirmationOptions(operation),
         defaultOptionId: CONFIRMATION_OPTIONS.NO,
         timeoutMs: 0, // No timeout - wait for user
     };
@@ -197,14 +200,59 @@ export function createPermissionChangeConfirmation(changes: string[]): Confirmat
 }
 
 /**
- * Check if an operation requires confirmation
- * @param operationKey - Either a ConfirmableOperation or a composite key like "execute_command:read-only"
+ * The grant a "don't ask again" answer to this request is stored as, e.g. "edit_file" or
+ * "mcp_tool_call:github:unsafe". A shell command grant names its operation type and working
+ * directory, e.g. "execute_command:read-write:/home/me/project".
  */
+export function getConfirmationKey(request: ConfirmationRequest): string {
+    const { operation, context } = request;
+    const key = context?.operationType ? `${operation}:${context.operationType}` : operation;
+    return operation === 'execute_command' ? `${key}:${context?.commandInfo?.workdir}` : key;
+}
+
+/**
+ * Whether a grant answers this request. A command's grant also answers commands of its
+ * operation type in its subfolders.
+ */
+export function grantCovers(grant: string, request: ConfirmationRequest): boolean {
+    const key = getConfirmationKey(request);
+    if (grant === key) return true;
+
+    const workdir = request.context?.commandInfo?.workdir;
+    if (request.operation !== 'execute_command' || !workdir) return false;
+    const prefix = key.slice(0, -workdir.length);
+    return grant.startsWith(prefix) && coversSubfolder(grant.slice(prefix.length), workdir);
+}
+
+/**
+ * A filesystem root, or a folder holding the home folder, covers itself alone: its
+ * subfolders are nearly everything. Judged by real path, so no spelling of home slips by.
+ */
+function coversSubfolder(folder: string, subfolder: string): boolean {
+    if (!isInside(folder, subfolder)) return false;
+    try {
+        const real = fs.realpathSync.native(folder);
+        const home = fs.realpathSync.native(os.homedir());
+        return path.parse(real).root !== real && real !== home && !isInside(real, home);
+    } catch {
+        return false;
+    }
+}
+
+function isInside(folder: string, target: string): boolean {
+    const relative = path.relative(folder, target);
+    return relative !== '' && relative.split(path.sep)[0] !== '..' && !path.isAbsolute(relative);
+}
+
+/** Check if an operation requires confirmation, given the grants the user has made */
 export function requiresConfirmation(
-    operationKey: string,
+    request: ConfirmationRequest,
     preferences: ConfirmationPreferences
 ): boolean {
-    return !preferences.skipConfirmationFor.has(operationKey);
+    for (const grant of preferences.skipConfirmationFor) {
+        if (grantCovers(grant, request)) return false;
+    }
+    return true;
 }
 
 export function formatConfirmationAttachmentBlock(attachments?: ConfirmationResponseAttachment[]): string {
@@ -274,14 +322,9 @@ export async function requestOperationConfirmation(
         commandInfo?: CommandExecutionInfo;
     }
 ): Promise<ConfirmationResult> {
-    // Build the confirmation key - includes sub-type if provided for finer-grained tracking
-    // e.g., "execute_command:read-only" vs "execute_command:read-write"
-    const confirmationKey = details.operationSubType
-        ? `${operation}:${details.operationSubType}`
-        : operation;
+    const request = createFileOperationConfirmation(operation, filePath, details);
 
-    // Check if user has opted to skip confirmations for this operation (or operation+subtype combo)
-    if (!requiresConfirmation(confirmationKey, context.preferences)) {
+    if (!requiresConfirmation(request, context.preferences)) {
         return {
             approved: true,
             selectedOption: CONFIRMATION_OPTIONS.YES_DONT_ASK,
@@ -289,19 +332,14 @@ export async function requestOperationConfirmation(
         };
     }
 
-    // Create the confirmation request
-    const request = createFileOperationConfirmation(operation, filePath, details);
-
     // Request confirmation from user via callback
     const response = await context.requestConfirmation(request);
 
     // Process the response
     const result = processConfirmationResponse(response);
 
-    // Update preferences if user chose "don't ask again"
-    // Store with the full key (including sub-type) for granular control
     if (result.skipFutureConfirmations) {
-        context.preferences.skipConfirmationFor.add(confirmationKey);
+        context.preferences.skipConfirmationFor.add(getConfirmationKey(request));
     }
 
     return result;

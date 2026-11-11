@@ -301,6 +301,7 @@
         "options": {
             "yes": "Yes",
             "yes_dont_ask": "Yes, don't ask again",
+            "yes_dont_ask_in_folder": "Yes, don't ask again in this folder",
             "no": "No"
         },
         "question": "Question",

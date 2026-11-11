@@ -17,21 +17,14 @@ import {
     type ConfirmationPersistence,
     CONFIRMATION_OPTIONS,
     CONFIRMATION_TIMEOUT_MS,
+    getConfirmationKey,
+    grantCovers,
 } from '../../processor/confirmation';
 import type { PendingConfirmation } from './message-types';
 import { createChildLogger } from '../../logger';
 import { pushConfirmationRequest } from '../../push';
 
 const log = createChildLogger({ component: 'confirmation-manager' });
-
-/**
- * Get the confirmation key for a request.
- * Format: "operation" or "operation:operationType"
- */
-function getConfirmationKey(request: ConfirmationRequest): string {
-    const operationType = request.context?.operationType;
-    return operationType ? `${request.operation}:${operationType}` : request.operation;
-}
 
 /**
  * Create a confirmation callback that publishes requests to the bus.
@@ -166,7 +159,7 @@ export function handleConfirmationResponse(
         const toAutoApprove: PendingConfirmation[] = [];
 
         for (const [, otherPending] of runHandle.pendingConfirmations) {
-            if (getConfirmationKey(otherPending.request) === sourceKey) {
+            if (grantCovers(sourceKey, otherPending.request)) {
                 toAutoApprove.push(otherPending);
             }
         }

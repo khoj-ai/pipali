@@ -131,7 +131,8 @@ test.describe('Confirmation Dialogs', () => {
         // Wait for confirmation dialog
         await chatPage.waitForConfirmationDialog();
 
-        // Click "Yes, don't ask again"
+        // A command's grant holds only in its working directory, and the button says so
+        await expect(chatPage.confirmationBtnSecondary).toHaveText(/don't ask again in this folder/);
         await chatPage.clickConfirmationButton('yes_dont_ask');
 
         // Wait for task to complete

@@ -149,7 +149,8 @@ export const CONFIRMATION_OPTIONS = {
 /**
  * Create standard 3-option confirmation (Yes, Yes and don't ask again, No)
  */
-export function createStandardConfirmationOptions(): ConfirmationOption[] {
+export function createStandardConfirmationOptions(operation?: string): ConfirmationOption[] {
+    const inFolder = operation === 'execute_command' ? ' in this folder' : '';
     return [
         {
             id: CONFIRMATION_OPTIONS.YES,
@@ -159,8 +160,8 @@ export function createStandardConfirmationOptions(): ConfirmationOption[] {
         },
         {
             id: CONFIRMATION_OPTIONS.YES_DONT_ASK,
-            label: "Yes, don't ask again",
-            description: 'Proceed and skip future confirmations for this operation type',
+            label: `Yes, don't ask again${inFolder}`,
+            description: `Proceed and skip future confirmations for this operation type${inFolder}`,
             style: 'secondary',
             persistPreference: true,
         },

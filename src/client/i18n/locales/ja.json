@@ -255,6 +255,7 @@
         "options": {
             "yes": "はい",
             "yes_dont_ask": "はい、今後は確認しない",
+            "yes_dont_ask_in_folder": "はい、このフォルダでは今後確認しない",
             "no": "いいえ"
         },
         "question": "質問",

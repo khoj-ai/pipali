@@ -144,17 +144,11 @@ export async function shellCommand(
     }
     const operationType: ShellOperationType = args.read_only ? 'read-only' : 'read-write';
 
-    // Resolve working directory
-    let workingDir: string;
-    if (cwd) {
-        workingDir = path.isAbsolute(cwd)
-            ? cwd
-            : cwd.startsWith('~')
-                ? path.join(os.homedir(), cwd.slice(1))
-                : path.resolve(os.homedir(), cwd);
-    } else {
-        workingDir = os.homedir();
-    }
+    // Normalized, as "don't ask again" grants match folders by how they are spelled
+    const workingDir = path.resolve(
+        os.homedir(),
+        cwd?.startsWith('~') ? path.join(os.homedir(), cwd.slice(1)) : cwd || '.',
+    );
 
     // Validate working directory exists using cross-platform fs.stat
     try {

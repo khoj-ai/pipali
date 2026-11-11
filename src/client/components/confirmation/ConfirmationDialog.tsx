@@ -7,7 +7,7 @@ import { MessageCircleQuestion } from 'lucide-react';
 import type { ConfirmationRequest, ConfirmationOption } from '../../types';
 import { DiffView } from '../tool-views/DiffView';
 import { shortenHomePath, parseMcpToolName, cleanOperationType } from '../../utils/formatting';
-import { getOperationTypePillClass, HIDDEN_MCP_ARGS, formatArgValue } from './utils';
+import { getOperationTypePillClass, getOptionLabelKey, HIDDEN_MCP_ARGS, formatArgValue } from './utils';
 
 import { ALT_KEY } from '../../utils/platform';
 import { useTranslation } from 'react-i18next';
@@ -164,7 +164,7 @@ export function ConfirmationDialog({ request, onRespond }: ConfirmationDialogPro
                             title={`${option.description || option.label} (${ALT_KEY}${index + 1})`}
                         >
                             <span className="btn-shortcut">{index + 1}</span>
-                            {t(`confirmation.options.${option.id}`, { defaultValue: option.label })}
+                            {t(getOptionLabelKey(request, option.id), { defaultValue: option.label })}
                         </button>
                     ))}
                 </div>

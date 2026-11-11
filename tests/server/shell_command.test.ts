@@ -1,4 +1,4 @@
-import { test, expect, describe, afterEach } from 'bun:test';
+import { test, expect, describe, afterEach, beforeAll, afterAll } from 'bun:test';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,9 +7,14 @@ import { shellCommand, type ShellCommandArgs } from '../../src/server/processor/
 import {
     CONFIRMATION_OPTIONS,
     createEmptyPreferences,
+    createFileOperationConfirmation,
+    getConfirmationKey,
+    grantCovers,
     type ConfirmationContext,
     type ConfirmationRequest,
 } from '../../src/server/processor/confirmation';
+import { createRunHandle, getOrCreateBus, removeBus, type ConversationEvent } from '../../src/server/events/conversation-event-bus';
+import { createConfirmationCallback, handleConfirmationResponse } from '../../src/server/routes/ws/confirmation-manager';
 
 describe('isShellFindCommand', () => {
     test('detects find as standalone command or after chain operators', () => {
@@ -217,6 +222,142 @@ describe('shell command read_only', () => {
         } finally {
             if (fs.existsSync(marker)) fs.unlinkSync(marker);
             fs.rmdirSync(dir);
+        }
+    });
+});
+
+/**
+ * "Yes, don't ask again" to a direct-mode command covers later commands of its operation
+ * type in its working directory and that directory's subfolders.
+ */
+describe('direct-mode command grants', () => {
+    let root: string;
+    let project: string;
+    let nested: string;
+    let prefixTwin: string;
+
+    function command(cwd: string, readOnly: boolean, context: ConfirmationContext) {
+        return shellCommand(
+            { justification: 'test', command: 'echo ok', read_only: readOnly, execution_mode: 'direct', cwd },
+            { confirmationContext: context },
+        );
+    }
+
+    function grantingContext(asked: ConfirmationRequest[]): ConfirmationContext {
+        return {
+            preferences: createEmptyPreferences(),
+            requestConfirmation: async request => {
+                asked.push(request);
+                return { requestId: request.requestId, selectedOptionId: CONFIRMATION_OPTIONS.YES_DONT_ASK, timestamp: new Date().toISOString() };
+            },
+        };
+    }
+
+    function commandRequest(workdir: string): ConfirmationRequest {
+        return createFileOperationConfirmation('execute_command', workdir, {
+            toolName: 'shell_command',
+            toolArgs: {},
+            operationSubType: 'read-write',
+            commandInfo: { command: 'echo ok', reason: 'test', workdir },
+        });
+    }
+
+    beforeAll(() => {
+        root = fs.mkdtempSync(path.join(os.tmpdir(), 'pipali-grants-'));
+        project = path.join(root, 'project');
+        nested = path.join(project, 'nested');
+        prefixTwin = path.join(root, 'project-old');
+        fs.mkdirSync(nested, { recursive: true });
+        fs.mkdirSync(prefixTwin);
+    });
+
+    afterAll(() => {
+        fs.rmdirSync(nested);
+        fs.rmdirSync(project);
+        fs.rmdirSync(prefixTwin);
+        fs.rmdirSync(root);
+    });
+
+    test('a grant holds in its folder and subfolders, for its operation type alone', async () => {
+        const asked: ConfirmationRequest[] = [];
+        const context = grantingContext(asked);
+
+        expect((await command(project, false, context)).compiled).toBe('ok');
+        expect((await command(nested, false, context)).compiled).toBe('ok');
+        expect((await command(path.join(nested, '..') + path.sep, false, context)).compiled).toBe('ok');
+        expect(asked.map(r => r.context?.commandInfo?.workdir)).toEqual([project]);
+
+        await command(prefixTwin, false, context);
+        await command(project, true, context);
+        await command(root, false, context);
+        expect(asked.map(r => [r.context?.commandInfo?.workdir, r.context?.operationType])).toEqual([
+            [project, 'read-write'],
+            [prefixTwin, 'read-write'],
+            [project, 'read-only'],
+            [root, 'read-write'],
+        ]);
+    });
+
+    test('a grant in the home folder, a folder holding it or a filesystem root covers that folder alone', () => {
+        const home = os.homedir();
+        const homeLink = path.join(root, 'home-link');
+        fs.symlinkSync(home, homeLink, 'junction');
+
+        try {
+            for (const folder of [home, path.dirname(home), path.parse(home).root, homeLink]) {
+                const grant = getConfirmationKey(commandRequest(folder));
+                expect(grantCovers(grant, commandRequest(folder))).toBe(true);
+                expect(grantCovers(grant, commandRequest(path.join(folder, 'Documents')))).toBe(false);
+            }
+            expect(grantCovers(getConfirmationKey(commandRequest(project)), commandRequest(nested))).toBe(true);
+        } finally {
+            fs.unlinkSync(homeLink);
+        }
+    });
+
+    test('a grant answers commands already waiting in its folder tree, and leaves the rest waiting', async () => {
+        const conversationId = crypto.randomUUID();
+        const bus = getOrCreateBus(conversationId);
+        const runHandle = createRunHandle('run-1', 'client-message-1', conversationId);
+        bus.activeRun = runHandle;
+        const raised: ConfirmationRequest[] = [];
+        const unsubscribe = bus.subscribe((event: ConversationEvent) => {
+            if (event.type === 'confirmation_request') raised.push(event.data as ConfirmationRequest);
+        });
+        const context: ConfirmationContext = {
+            preferences: createEmptyPreferences(),
+            requestConfirmation: createConfirmationCallback(bus, conversationId, runHandle),
+        };
+        const raisedIn = (folder: string) => raised.find(r => r.context?.commandInfo?.workdir === folder)!;
+
+        try {
+            const runs = [
+                command(project, false, context),
+                command(prefixTwin, false, context),
+                command(nested, false, context),
+            ];
+            while (raised.length < runs.length) await Bun.sleep(10);
+
+            const resolved = handleConfirmationResponse(runHandle, {
+                requestId: raisedIn(project).requestId,
+                selectedOptionId: CONFIRMATION_OPTIONS.YES_DONT_ASK,
+                timestamp: new Date().toISOString(),
+            });
+            expect(resolved).toEqual([raisedIn(project).requestId, raisedIn(nested).requestId]);
+            expect([...runHandle.pendingConfirmations.keys()]).toEqual([raisedIn(prefixTwin).requestId]);
+
+            handleConfirmationResponse(runHandle, {
+                requestId: raisedIn(prefixTwin).requestId,
+                selectedOptionId: CONFIRMATION_OPTIONS.NO,
+                timestamp: new Date().toISOString(),
+            });
+            const outputs = (await Promise.all(runs)).map(result => result.compiled);
+            expect(outputs[0]).toBe('ok');
+            expect(outputs[1]).toContain('cancelled');
+            expect(outputs[2]).toBe('ok');
+        } finally {
+            unsubscribe();
+            removeBus(conversationId);
         }
     });
 });

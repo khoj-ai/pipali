@@ -5,7 +5,7 @@ import { ChevronDown, ChevronUp, X, Bot, Clock, Send, MessageCircleQuestion } fr
 import type { PendingConfirmation } from '../../types/confirmation';
 import { DiffView } from '../tool-views/DiffView';
 import { shortenHomePath, parseMcpToolName, cleanOperationType } from '../../utils/formatting';
-import { getButtonClass, formatTimeRemaining, hasExpandableContent, getMessagePreview, getOperationTypePillClass, HIDDEN_MCP_ARGS, formatArgValue } from './utils';
+import { getButtonClass, formatTimeRemaining, hasExpandableContent, getMessagePreview, getOperationTypePillClass, getOptionLabelKey, HIDDEN_MCP_ARGS, formatArgValue } from './utils';
 import { useTranslation } from 'react-i18next';
 
 interface ConfirmationToastProps {
@@ -206,7 +206,7 @@ export function ConfirmationToast({
                         onClick={() => onRespond(key, option.id)}
                         title={option.description}
                     >
-                        {t(`confirmation.options.${option.id}`, { defaultValue: option.label })}
+                        {t(getOptionLabelKey(request, option.id), { defaultValue: option.label })}
                     </button>
                 ))}
             </div>

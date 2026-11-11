@@ -1,6 +1,7 @@
 // Shared utilities for confirmation components
 
 import type { ConfirmationRequest, ConfirmationOption } from '../../types/confirmation';
+import { CONFIRMATION_OPTIONS } from '../../../server/processor/confirmation/confirmation.types';
 
 /**
  * Get CSS class for button based on option style
@@ -61,6 +62,13 @@ export function getOperationTypePillClass(opType?: string): string {
         default:
             return 'operation-type-pill';
     }
+}
+
+/** A command's "don't ask again" holds in the folder it runs in, so its label names the folder */
+export function getOptionLabelKey(request: ConfirmationRequest, optionId: string): string {
+    return request.operation === 'execute_command' && optionId === CONFIRMATION_OPTIONS.YES_DONT_ASK
+        ? 'confirmation.options.yes_dont_ask_in_folder'
+        : `confirmation.options.${optionId}`;
 }
 
 /**

@@ -255,6 +255,7 @@
         "options": {
             "yes": "是",
             "yes_dont_ask": "是，不再询问",
+            "yes_dont_ask_in_folder": "是，在此文件夹中不再询问",
             "no": "否"
         },
         "question": "问题",
