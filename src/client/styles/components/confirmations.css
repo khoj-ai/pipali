@@ -125,11 +125,6 @@
     color: var(--color-info-text);
 }
 
-.operation-type-pill.write-only {
-    background: var(--color-warning-bg);
-    color: var(--color-warning-text);
-}
-
 .operation-type-pill.read-write,
 .operation-type-pill.unsafe {
     background: #fce7f3;

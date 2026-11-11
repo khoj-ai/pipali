@@ -381,12 +381,9 @@ REQUIRED:
                         ? 'The PowerShell command to execute. Text embedded in it, like a commit message or file contents, is parsed as PowerShell too.'
                         : 'The bash command to execute. Text embedded in it, like a commit message or file contents, is parsed as bash too.',
                 },
-                operation_type: {
-                    type: 'string',
-                    enum: ['read-only', 'write-only', 'read-write'],
-                    description: process.platform === 'win32'
-                        ? 'Whether the command is read-only (no side effects, e.g., Get-ChildItem, Get-Content), write-only (creates new state without reading, e.g., New-Item, Set-Content), or read-write (reads and modifies state, e.g., Move-Item, Remove-Item, Copy-Item).'
-                        : 'Whether the command is read-only (no side effects, e.g., ls, cat, grep), write-only (creates new state without reading, e.g., mkdir, touch, echo > newfile), or read-write (reads and modifies state, e.g., sed -i, mv, rm, apt install).',
+                read_only: {
+                    type: 'boolean',
+                    description: 'true if the command only reads, inspects or computes. false if any part of it is meant to create, change or delete something, here or elsewhere: saving output or a download to a file, making a folder, installing, uploading, stopping a process. When unsure, false.',
                 },
                 execution_mode: {
                     type: 'string',
@@ -410,7 +407,7 @@ REQUIRED:
                     description: 'Set true for work that outlives a tool call: builds, test suites, dev servers. Returns the pid and a log file to tail or grep, and you are told when the command exits. No time limit, so timeout does not apply.',
                 },
             },
-            required: ['justification', 'command', 'operation_type'],
+            required: ['justification', 'command', 'read_only'],
         },
     },
     {

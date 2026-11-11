@@ -24,13 +24,8 @@ import type { User } from '../../db/schema';
 
 const log = createChildLogger({ component: 'shell' });
 
-/**
- * Operation type indicating whether command modifies state
- * - read-only: No side effects (e.g., ls, cat, grep)
- * - write-only: Creates new state without reading (e.g., mkdir, touch, echo > newfile)
- * - read-write: Reads and modifies state (e.g., sed -i, mv, rm)
- */
-export type ShellOperationType = 'read-only' | 'write-only' | 'read-write';
+/** Whether a command changes state, as shown and granted when it asks to run directly */
+export type ShellOperationType = 'read-only' | 'read-write';
 
 /**
  * Execution mode for shell commands
@@ -47,8 +42,8 @@ export interface ShellCommandArgs {
     justification: string;
     /** The shell command to execute (bash on Unix, PowerShell on Windows) */
     command: string;
-    /** Whether the command is read-only (no side effects) or read-write (modifies state) */
-    operation_type: ShellOperationType;
+    /** true if the command only reads, inspects or computes, false if any part of it is meant to change something */
+    read_only: boolean;
     /**
      * Execution mode for the command:
      * - 'sandbox': Run in OS-enforced sandbox (skips confirmation, but restricted access)
@@ -138,6 +133,16 @@ export async function shellCommand(
             compiled: 'Error: command is required and cannot be empty',
         };
     }
+
+    if (typeof args.read_only !== 'boolean') {
+        return {
+            query,
+            file: '',
+            uri: '',
+            compiled: 'Error: read_only is required and must be a boolean, true or false',
+        };
+    }
+    const operationType: ShellOperationType = args.read_only ? 'read-only' : 'read-write';
 
     // Resolve working directory
     let workingDir: string;
@@ -231,9 +236,9 @@ export async function shellCommand(
                     command,
                     cwd: workingDir,
                     timeout: effectiveTimeout,
-                    operation_type: args.operation_type,
+                    read_only: args.read_only,
                 },
-                operationSubType: args.operation_type,
+                operationSubType: operationType,
                 commandInfo: {
                     command,
                     reason: justification,

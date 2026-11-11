@@ -55,8 +55,6 @@ export function getOperationTypePillClass(opType?: string): string {
         case 'read-only':
         case 'safe':
             return 'operation-type-pill safe';
-        case 'write-only':
-            return 'operation-type-pill write-only';
         case 'read-write':
         case 'unsafe':
             return 'operation-type-pill unsafe';

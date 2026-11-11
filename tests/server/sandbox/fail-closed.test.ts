@@ -37,7 +37,7 @@ function decliningUser() {
 
 function runInSandbox(confirmationContext: ConfirmationContext) {
     return shellCommand(
-        { justification: 'test', command: 'echo hi', operation_type: 'read-only', execution_mode: 'sandbox' },
+        { justification: 'test', command: 'echo hi', read_only: true, execution_mode: 'sandbox' },
         { confirmationContext },
     );
 }

@@ -3,7 +3,13 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { isShellFindCommand, extractFindPath, truncateToolOutput } from '../../src/server/processor/director/index';
-import { shellCommand } from '../../src/server/processor/actor/shell_command';
+import { shellCommand, type ShellCommandArgs } from '../../src/server/processor/actor/shell_command';
+import {
+    CONFIRMATION_OPTIONS,
+    createEmptyPreferences,
+    type ConfirmationContext,
+    type ConfirmationRequest,
+} from '../../src/server/processor/confirmation';
 
 describe('isShellFindCommand', () => {
     test('detects find as standalone command or after chain operators', () => {
@@ -65,7 +71,7 @@ describe.skipIf(process.platform === 'win32')('shell command timeouts', () => {
         const { compiled } = await shellCommand({
             justification: 'test',
             command,
-            operation_type: 'read-write',
+            read_only: false,
             execution_mode: 'direct',
             timeout,
         });
@@ -180,5 +186,37 @@ describe.skipIf(process.platform === 'win32')('shell command timeouts', () => {
 
         expect(output).not.toContain('�');
         expect(output.split('\n')).toHaveLength(20_000);
+    });
+});
+
+describe('shell command read_only', () => {
+    test('a command without a boolean read_only is refused before it asks or runs', async () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipali-read-only-'));
+        const marker = path.join(dir, 'ran');
+        const asked: ConfirmationRequest[] = [];
+        const context: ConfirmationContext = {
+            preferences: createEmptyPreferences(),
+            requestConfirmation: async request => {
+                asked.push(request);
+                return { requestId: request.requestId, selectedOptionId: CONFIRMATION_OPTIONS.YES, timestamp: new Date().toISOString() };
+            },
+        };
+        const base = { justification: 'test', command: `echo x > ${marker}`, execution_mode: 'direct', cwd: dir };
+
+        try {
+            for (const args of [
+                base,
+                { ...base, operation_type: 'read-only' },
+                ...[undefined, 'false', 'true', 0, null].map(read_only => ({ ...base, read_only })),
+            ]) {
+                const { compiled } = await shellCommand(args as unknown as ShellCommandArgs, { confirmationContext: context });
+                expect(compiled).toBe('Error: read_only is required and must be a boolean, true or false');
+            }
+            expect(asked).toHaveLength(0);
+            expect(fs.existsSync(marker)).toBe(false);
+        } finally {
+            if (fs.existsSync(marker)) fs.unlinkSync(marker);
+            fs.rmdirSync(dir);
+        }
     });
 });

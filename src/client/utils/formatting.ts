@@ -113,7 +113,7 @@ export function formatToolArgs(toolName: string, args: any): string {
 
         default:
             return Object.entries(args)
-                .filter(([k, v]) => v !== undefined && v !== null && v !== '' && k !== 'operation_type')
+                .filter(([k, v]) => v !== undefined && v !== null && v !== '' && k !== 'operation_type' && k !== 'read_only')
                 .map(([k, v]) => {
                     if (typeof v === 'string' && v.length > 50) {
                         return `${k}: "${v.slice(0, 47)}..."`;

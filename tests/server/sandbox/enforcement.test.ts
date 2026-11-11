@@ -49,7 +49,7 @@ async function run(command: string, timeout?: number) {
         },
     };
     const result = await shellCommand(
-        { justification: 'sandbox test', command, operation_type: 'read-write', execution_mode: 'sandbox', timeout },
+        { justification: 'sandbox test', command, read_only: false, execution_mode: 'sandbox', timeout },
         { confirmationContext },
     );
     return { output: String(result.compiled), asked };

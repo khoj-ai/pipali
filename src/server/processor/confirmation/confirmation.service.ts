@@ -60,20 +60,18 @@ export type ConfirmableOperation =
 
 /**
  * Get risk level based on operation and optional sub-type.
- * For shell commands: read-only = low, write-only = medium, read-write = high
+ * For shell commands: read-only = low, read-write = high
  * For MCP tools: subType format is "serverName:safe" or "serverName:unsafe"
  */
 function getRiskLevel(
     operation: ConfirmableOperation,
     operationSubType?: string
 ): 'low' | 'medium' | 'high' {
-    // For execute_command, risk level depends on operation_type directly
+    // For execute_command, risk level depends on the command's operation type
     if (operation === 'execute_command' && operationSubType) {
         switch (operationSubType) {
             case 'read-only':
                 return 'low';
-            case 'write-only':
-                return 'medium';
             case 'read-write':
                 return 'high';
         }
