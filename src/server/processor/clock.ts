@@ -27,10 +27,18 @@ export function getTimeOfDay(date: Date): string {
     return 'night';
 }
 
+function formatLocalDate(date: Date): string {
+    return `${date.toLocaleDateString('en-US', { weekday: 'long' })}, ${date.toLocaleDateString('en-CA')}`;
+}
+
 /** "Friday, 2026-09-18 afternoon" in this machine's timezone, which is the user's: Pipali runs on their computer */
 export function formatLocalDateTime(date: Date): string {
-    const dayOfWeek = date.toLocaleDateString('en-US', { weekday: 'long' });
-    return `${dayOfWeek}, ${date.toLocaleDateString('en-CA')} ${getTimeOfDay(date)}`;
+    return `${formatLocalDate(date)} ${getTimeOfDay(date)}`;
+}
+
+/** "Friday, 2026-09-18 15:05", for a moment the model needs to the minute */
+export function formatExactLocalDateTime(date: Date): string {
+    return `${formatLocalDate(date)} ${date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
 /** When the persisted system prompt was written. Auxiliary system steps all carry a kind; the prompt is the one that does not. */

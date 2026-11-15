@@ -10,9 +10,12 @@
  * - Notification for automation permission confirmation
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import { mkdir, rm, rmdir, writeFile } from 'fs/promises';
+import path from 'path';
 import { AutomationsPage, ChatPage, HomePage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
+import { carriesUpdate, requestsFor } from '../helpers/mock-requests';
 
 test.describe('Automations Page', () => {
     let automationsPage: AutomationsPage;
@@ -674,16 +677,72 @@ test.describe('Automations Page', () => {
     });
 
     test.describe('Scheduled Automation Trigger', () => {
-        test('should trigger automation manually via API', async () => {
-            const automationId = await automationsPage.createAutomationViaAPI({
-                name: 'Manual Trigger Test',
-                prompt: 'Say hello',
-            });
+        const completes = (page: Page, executionId: string | null) => expect.poll(async () => {
+            const response = await page.request.get(`/api/automations/executions/${executionId}`);
+            return (await response.json()).execution?.status;
+        }, { timeout: 30000 }).toBe('completed');
+
+        type Step = { source: string; message?: string; extra?: Record<string, unknown> };
+
+        /** The routine's conversation, its first prompt step and the step saved right after it */
+        async function firstRun(page: Page, automationId: string) {
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const conversationId = automation.conversationId as string;
+            const { history } = await (await page.request.get(`/api/chat/${conversationId}/history`)).json() as { history: Step[] };
+            const index = history.findIndex(step => step.source === 'user');
+            return { conversationId, promptStep: history[index], triggerStep: history[index + 1] };
+        }
+
+        test('a run shows the prompt as written and tells the model what started it', async ({ page }) => {
+            const prompt = `Say hello from run ${crypto.randomUUID()}`;
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'Manual Trigger Test', prompt });
             testAutomationIds.push(automationId);
 
-            // Trigger the automation
             const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
-            expect(executionId).toBeTruthy();
+            await completes(page, executionId);
+
+            const { conversationId, promptStep, triggerStep } = await firstRun(page, automationId);
+            expect(promptStep).toMatchObject({ message: prompt, extra: { routine_execution_id: executionId } });
+            expect(triggerStep).toMatchObject({ source: 'system', extra: { kind: 'routine_trigger' } });
+            expect(triggerStep?.message).toMatch(/^# Routine run\nTrigger: external, via api\nTrigger time \(in User Local Timezone\): \w+day, \d{4}-\d\d-\d\d \d\d:\d\d$/);
+            expect(carriesUpdate(await requestsFor(prompt), 'Trigger: external, via api')).toBe(true);
+
+            const { conversations } = await (await page.request.get('/api/conversations')).json() as { conversations: Array<{ id: string; preview: string }> };
+            expect(conversations.find(conversation => conversation.id === conversationId)?.preview).toBe(prompt);
+        });
+
+        test('a file change hands the model the file that changed', async ({ page }) => {
+            const watched = `/tmp/pipali/routine-watch-${crypto.randomUUID()}`;
+            const file = path.join(watched, 'report.txt');
+            await mkdir(watched, { recursive: true });
+            try {
+                const prompt = `Summarise the new file ${crypto.randomUUID()}`;
+                const response = await page.request.post('/api/automations', {
+                    data: {
+                        name: 'File Watch Trigger Test',
+                        prompt,
+                        triggerType: 'file_watch',
+                        triggerConfig: { type: 'file_watch', paths: [watched], events: ['create'], debounceMs: 100 },
+                    },
+                });
+                const automationId = (await response.json()).automation.id as string;
+                testAutomationIds.push(automationId);
+
+                await writeFile(file, 'quarterly numbers');
+                await expect.poll(async () => {
+                    const { executions } = await (await page.request.get(`/api/automations/${automationId}/executions`)).json();
+                    return executions[0]?.status;
+                }, { timeout: 30000 }).toBe('completed');
+
+                const { promptStep, triggerStep } = await firstRun(page, automationId);
+                expect(promptStep?.message).toBe(prompt);
+                expect(triggerStep?.message).toContain('Trigger: file created\nFile: ');
+                expect(triggerStep?.message).toContain('report.txt');
+                expect(carriesUpdate(await requestsFor(prompt), 'report.txt')).toBe(true);
+            } finally {
+                await rm(file, { force: true });
+                await rmdir(watched);
+            }
         });
 
         test('waits for a run already going in its conversation to finish', async ({ page }) => {
@@ -693,13 +752,8 @@ test.describe('Automations Page', () => {
             });
             testAutomationIds.push(automationId);
 
-            const completes = (executionId: string | null) => expect.poll(async () => {
-                const response = await page.request.get(`/api/automations/executions/${executionId}`);
-                return (await response.json()).execution?.status;
-            }, { timeout: 30000 }).toBe('completed');
-
             // A first run gives the routine its conversation
-            await completes(await automationsPage.triggerAutomationViaAPI(automationId));
+            await completes(page, await automationsPage.triggerAutomationViaAPI(automationId));
             const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
 
             // The user follows up there, and the routine fires while that run awaits approval
@@ -713,7 +767,7 @@ test.describe('Automations Page', () => {
             // The user's run finishes in view, and only then does the routine's begin
             await expect(page.locator(Selectors.assistantMessage).filter({ hasText: 'The long step is done.' }))
                 .toBeVisible({ timeout: 20000 });
-            await completes(executionId);
+            await completes(page, executionId);
             const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as {
                 history: Array<{ message?: string }>;
             };

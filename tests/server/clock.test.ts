@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { CLOCK_KIND, conversationStartedAt, formatLocalDateTime, resolveClockContext } from '../../src/server/processor/clock';
+import { CLOCK_KIND, conversationStartedAt, formatExactLocalDateTime, formatLocalDateTime, resolveClockContext } from '../../src/server/processor/clock';
 import type { ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
 
 // Built from local components, so the expectations hold in whichever timezone the tests run.
@@ -35,6 +35,11 @@ describe('formatLocalDateTime', () => {
     test('the small hours belong to the new date, not the previous night', () => {
         expect(formatLocalDateTime(at(18, 23))).toBe('Friday, 2026-09-18 night');
         expect(formatLocalDateTime(at(19, 1))).toBe('Saturday, 2026-09-19 after midnight');
+    });
+
+    test('the exact form gives the minute on a 24-hour clock', () => {
+        expect(formatExactLocalDateTime(at(19, 1))).toBe('Saturday, 2026-09-19 01:30');
+        expect(formatExactLocalDateTime(at(18, 15))).toBe('Friday, 2026-09-18 15:30');
     });
 });
 
