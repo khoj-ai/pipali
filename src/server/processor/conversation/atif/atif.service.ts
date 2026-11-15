@@ -425,6 +425,15 @@ export class ATIFConversationService {
     return true;
   }
 
+  /** How many steps a conversation holds */
+  async countSteps(conversationId: string): Promise<number> {
+    const [result] = await db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(ConversationStep)
+      .where(eq(ConversationStep.conversationId, conversationId));
+    return result?.count ?? 0;
+  }
+
   /** The step ids deleteTurn would remove for this user message */
   async turnStepIds(conversationId: string, stepId: number): Promise<number[]> {
     const conversation = await this.getConversation(conversationId);

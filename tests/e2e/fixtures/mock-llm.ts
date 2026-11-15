@@ -23,6 +23,8 @@ export interface MockIteration {
     thought?: string;
     toolCalls: MockToolCall[];
     toolResults?: MockToolResult[];
+    // Summary of the context the platform compacted to answer, as its response reports one
+    compactionSummary?: string;
 }
 
 export interface MockScenario {
@@ -1153,6 +1155,7 @@ export const defaultMockScenarios: MockScenario[] = [
     sandboxPermissionScenario(),
     outOfFreeCreditsScenario(),
     refusalScenario(),
+    compactingRoutineScenario(),
     memoryRecallUserScenario(),
     // Selectors last, so their queries match here before the user-message scenario,
     // whose pattern also appears inside the selector query. The slow one goes after
@@ -1160,6 +1163,19 @@ export const defaultMockScenarios: MockScenario[] = [
     memoryRecallSelectorScenario(),
     slowMemoryRecallSelectorScenario(),
 ];
+
+/** A routine run whose context the platform compacts on its first step, which the run then continues from */
+export function compactingRoutineScenario(): MockScenario {
+    return {
+        name: 'compacting-routine',
+        queryPattern: '^Compact mid-run',
+        iterations: [{
+            toolCalls: [{ function_name: 'read_file', arguments: { path: '/tmp/pipali/no-such-note.txt' }, tool_call_id: 'tc-compact-1' }],
+            compactionSummary: 'Mock compaction of the routine so far.',
+        }],
+        finalResponse: 'Done after the compaction.',
+    };
+}
 
 /**
  * Find matching scenario for a query

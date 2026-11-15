@@ -22,15 +22,17 @@ import { addStepToTrajectory } from './conversation/atif/atif.utils';
 import { maxIterations as defaultMaxIterations } from '../utils';
 import { loadUserContext } from '../user-context';
 import { loadMemorySettings } from '../memory/settings';
-import { memoryPathsExtra, resolveMemoryContext, surfacedMemories, MEMORY_RECALL_KIND } from '../memory';
+import { loadCatalogue, memoryPathsExtra, resolveMemoryContext, surfacedMemories, MEMORY_RECALL_KIND } from '../memory';
 import { recallMemories } from '../memory/recall';
 import { resolveMcpInventoryContext } from './actor/search_tools';
 import { conversationStartedAt, resolveClockContext } from './clock';
 import { getMcpToolDefinitions } from './mcp';
 import type { ResearchIteration } from './director/types';
 import type { ATIFStep } from './conversation/atif/atif.types';
+import { COMPACTION_SOURCE_STEPS_KEY } from './conversation/utils';
 import type { ConfirmationContext } from './confirmation';
 import { createChildLogger } from '../logger';
+import { routineHistoryPolicy, routineHistoryView } from '../automation/history';
 
 const log = createChildLogger({ component: 'research-runner' });
 
@@ -140,6 +142,14 @@ export async function* runResearchWithConversation(
     }
 
     const trajectory = conversation.trajectory;
+    // Memories recalled anywhere in the conversation stay recalled, in context or not
+    const recalledBefore = surfacedMemories(trajectory.steps);
+
+    // A routine's run is given only the history its routine keeps. Everything from here
+    // on reads and extends that view, while new steps still land in the whole conversation.
+    const historyPolicy = await routineHistoryPolicy(conversationId);
+    const history = historyPolicy ? routineHistoryView(trajectory.steps, historyPolicy, trajectory.extra) : undefined;
+    if (history) trajectory.steps = history.steps;
 
     // Check if this is a new conversation (no system prompt yet) or existing
     const isNewConversation = !trajectory.steps.some(s => s.source === 'system');
@@ -150,6 +160,7 @@ export async function* runResearchWithConversation(
         steps: trajectory.steps,
         memoriesEnabled,
         isNewConversation,
+        freshBaseline: history?.freshCatalogue,
     });
 
     // Tool schemas are rebuilt every iteration but the inventory naming them is
@@ -181,6 +192,18 @@ export async function* runResearchWithConversation(
             );
             trajectory.steps.push(persistedStep);
         }
+    };
+
+    // A compaction summarizes every step before it, so it records how many there were: a
+    // later deletion among them leaves it describing history that is gone
+    const persistCompaction = async (summary: string) => {
+        log.info({ conversationId }, 'Inserting compaction step');
+        const compactionStep = await atifConversationService.addStep(
+            conversationId, 'user', summary,
+            undefined, undefined, undefined, undefined, undefined,
+            { is_compaction: true, [COMPACTION_SOURCE_STEPS_KEY]: await atifConversationService.countSteps(conversationId) },
+        );
+        trajectory.steps.push(compactionStep);
     };
 
     // The clock goes first, so what follows reads as announced at that time
@@ -219,7 +242,7 @@ export async function* runResearchWithConversation(
         const lastUserMessage = trajectory.steps.findLast(
             s => s.source === 'user' && s.extra?.is_compaction !== true)?.message;
         if (lastUserMessage) {
-            const recall = await recallMemories(lastUserMessage, surfacedMemories(trajectory.steps));
+            const recall = await recallMemories(lastUserMessage, recalledBefore);
             if (recall && isNewConversation) {
                 // The system prompt is not persisted yet; a recall step persisted now
                 // would precede it and read as part of the base prompt on later turns.
@@ -269,6 +292,8 @@ export async function* runResearchWithConversation(
         location: userContext.location,
         userContext: userContext.instructions,
         memoryCatalogue,
+        // Behind a routine's compaction boundary the catalogue is listed as it is now
+        currentMemoryCatalogue: historyPolicy && memoriesEnabled ? loadCatalogue : undefined,
         memoriesEnabled,
         user,
         systemPrompt,
@@ -353,21 +378,7 @@ export async function* runResearchWithConversation(
         // Check for final response (no tool calls means model is done)
         if (iteration.toolCalls.length === 0) {
             // If context was compacted on final response, insert a compaction step
-            if (iteration.compactionSummary) {
-                log.info({ conversationId }, 'Inserting compaction step (final response)');
-                const compactionStep = await atifConversationService.addStep(
-                    conversationId,
-                    'user',
-                    iteration.compactionSummary,
-                    undefined, // no metrics
-                    undefined, // no tool calls
-                    undefined, // no observation
-                    undefined, // no reasoning
-                    undefined, // no raw
-                    { is_compaction: true }
-                );
-                trajectory.steps.push(compactionStep);
-            }
+            if (iteration.compactionSummary) await persistCompaction(iteration.compactionSummary);
 
             finalResponse = iteration.message || '';
             finalThought = iteration.thought;
@@ -390,21 +401,7 @@ export async function* runResearchWithConversation(
         } else if (iteration.toolResults) {
             // If context was compacted, insert a compaction step before the agent step
             // This marks the boundary - only messages from this point forward will be sent to the model
-            if (iteration.compactionSummary) {
-                log.info({ conversationId }, 'Inserting compaction step');
-                const compactionStep = await atifConversationService.addStep(
-                    conversationId,
-                    'user',
-                    iteration.compactionSummary,
-                    undefined, // no metrics
-                    undefined, // no tool calls
-                    undefined, // no observation
-                    undefined, // no reasoning
-                    undefined, // no raw
-                    { is_compaction: true }
-                );
-                trajectory.steps.push(compactionStep);
-            }
+            if (iteration.compactionSummary) await persistCompaction(iteration.compactionSummary);
 
             // Persist to DB and update in-memory trajectory so the director sees it in the next iteration
             const agentStep = await atifConversationService.addStep(

@@ -126,6 +126,11 @@ interface ResearchConfig {
     userContext?: string;
     /** Catalogue the conversation's system prompt lists, frozen at conversation start */
     memoryCatalogue?: string;
+    /**
+     * The catalogue as it is now, listed in place of memoryCatalogue once the provider has
+     * compacted this run's context, which drops the announcements made against the old one
+     */
+    currentMemoryCatalogue?: () => Promise<string>;
     /** Whether persistent memories may be exposed to this run. */
     memoriesEnabled?: boolean;
     user?: typeof User.$inferSelect;
@@ -1212,6 +1217,7 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
     let lastWarning = '';
     // Persists across iterations so one-time reminders only fire once per research run
     const shownReminders = new Set<string>();
+    let memoryCatalogue = config.memoryCatalogue;
 
     // Models with provider tool search defer MCP tools provider-side; others use
     // the app-side search_tools actor. Resolved once — model is fixed per run.
@@ -1250,9 +1256,12 @@ export async function* research(config: ResearchConfig): AsyncGenerator<Research
             thresholdStepCount = config.chatHistory.steps.length;
         }
 
-        const iteration = await pickNextTool({ ...config, currentIteration: i, thresholdStepCount, loadedMcpTools, providerToolSearch });
+        const iteration = await pickNextTool({ ...config, memoryCatalogue, currentIteration: i, thresholdStepCount, loadedMcpTools, providerToolSearch });
         // A stop landing as the call completes drops its answer too
         if (config.abortSignal?.aborted) throw new ResearchPausedError();
+        if (iteration.compactionSummary && config.currentMemoryCatalogue) {
+            memoryCatalogue = await config.currentMemoryCatalogue();
+        }
 
         // Handle warnings (e.g., invalid JSON in tool arguments, API errors) - feed back to model for retry
         // Must check before empty tool calls check, since warnings with no valid tool calls should continue loop

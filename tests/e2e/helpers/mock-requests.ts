@@ -6,6 +6,8 @@ export type RequestRecord = {
     sessionId?: string;
     runId?: string;
     tail: { type?: string | null; role?: string; text: string };
+    catalogue: string | null;
+    userTurns: string[];
     systemUpdates: string[];
 };
 

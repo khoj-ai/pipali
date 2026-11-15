@@ -18,6 +18,7 @@ import { stopConversationRun } from '../../events/conversation-runs';
 import { resolveConfirmationOnBus } from '../../routes/ws/confirmation-manager';
 import { executeRun } from '../../events/run-executor';
 import { formatExactLocalDateTime } from '../../processor/clock';
+import { ROUTINE_EXECUTION_KEY } from '../history';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'automation' });
@@ -439,7 +440,7 @@ async function runExecution(
                 userMessage: automation.prompt,
                 userMessageContext: {
                     // Marks where each of the routine's runs starts in its conversation
-                    extra: { routine_execution_id: executionId },
+                    extra: { [ROUTINE_EXECUTION_KEY]: executionId },
                     systemStep: describeTrigger(triggerData),
                 },
             }),

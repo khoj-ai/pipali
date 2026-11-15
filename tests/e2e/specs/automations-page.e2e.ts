@@ -1286,6 +1286,54 @@ test.describe('Automations Page', () => {
             return { mode: automation.historyMode, runs: automation.historyRuns };
         }
 
+        test('a platform compaction mid-run: the run continues on the current catalogue, and is not trusted once history before it goes', async ({ page }) => {
+            const id = crypto.randomUUID();
+            const prompt = `Brief me ${id}`;
+            const compacting = `Compact mid-run ${id}`;
+            const compaction = 'Mock compaction of the routine so far.';
+            const memoryFile = `routine-${id}.md`;
+            const memoryPath = path.join(process.env.TEST_MEMORY_DIR!, memoryFile);
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Compaction', prompt });
+            testAutomationIds.push(automationId);
+            const update = (data: object) => page.request.put(`/api/automations/${automationId}`, { data });
+            const run = async () => {
+                const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
+                await expect.poll(async () => (await (await page.request.get(`/api/automations/executions/${executionId}`)).json()).execution?.status,
+                    { timeout: 30000 }).toBe('completed');
+            };
+            await update({ historyMode: 'all' });
+
+            // The conversation starts on a catalogue without the memory, which is saved after
+            await run();
+            await mkdir(path.dirname(memoryPath), { recursive: true });
+            await writeFile(memoryPath, '---\ndescription: Reads email at 7am, wants briefs before then\n---\nThe user reads email at 7am.\n');
+            try {
+                await update({ prompt: compacting });
+                await run();
+                const first = (await requestsFor(compacting)).at(-1)!;
+                const continued = (await requestsFor(compaction)).at(-1)!;
+                expect(first.catalogue ?? '').not.toContain(memoryFile);
+                expect(first.systemUpdates.some(update => update.includes(memoryFile))).toBe(true);
+                expect(continued.catalogue).toContain(memoryFile);
+                expect(continued.systemUpdates.some(update => update.startsWith('# Memory recalled'))).toBe(false);
+            } finally {
+                await rm(memoryPath, { force: true });
+            }
+
+            // The next run starts from the compaction, until a step before it is deleted
+            await update({ prompt });
+            await run();
+            expect((await requestsFor(prompt)).at(-1)!.userTurns[0]).toBe(compaction);
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as { history: Array<{ step_id: number; source: string }> };
+            const firstPrompt = history.find(step => step.source === 'user')!;
+            expect((await page.request.delete(`/api/conversations/${automation.conversationId}/messages/${firstPrompt.step_id}?role=user`)).ok()).toBe(true);
+            await run();
+            const sent = (await requestsFor(prompt)).at(-1)!.userTurns;
+            expect(sent).not.toContain(compaction);
+            expect(sent).toContain(compacting);
+        });
+
         test('a new routine keeps a summary and three runs, and its count outlasts other modes', async ({ page }) => {
             const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Defaults', prompt: 'Say hello' });
             testAutomationIds.push(automationId);
@@ -1298,6 +1346,45 @@ test.describe('Automations Page', () => {
             expect((await update({ historyMode: 'summarized' })).ok()).toBe(true);
             expect(await historyOf(page, automationId)).toEqual({ mode: 'summarized', runs: 5 });
             expect((await update({ historyRuns: 21 })).status()).toBe(400);
+        });
+
+        test('each mode sends its share of earlier runs, and the conversation keeps them all', async ({ page }) => {
+            const prompt = `Brief me ${crypto.randomUUID()}`;
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Modes', prompt });
+            testAutomationIds.push(automationId);
+
+            const setHistory = async (data: object) =>
+                expect((await page.request.put(`/api/automations/${automationId}`, { data })).ok()).toBe(true);
+            const run = async () => {
+                const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
+                await expect.poll(async () => (await (await page.request.get(`/api/automations/executions/${executionId}`)).json()).execution?.status,
+                    { timeout: 30000 }).toBe('completed');
+            };
+            /** The user turns of the latest run's request to the model */
+            const sent = async () => (await requestsFor(prompt)).at(-1)!.userTurns;
+            const promptsIn = (turns: string[]) => turns.filter(turn => turn === prompt).length;
+
+            await setHistory({ historyMode: 'all' });
+            await run(); await run(); await run();
+            expect(promptsIn(await sent())).toBe(3);
+
+            await setHistory({ historyMode: 'fresh' });
+            await run();
+            expect(await sent()).toEqual([prompt]);
+
+            await setHistory({ historyMode: 'summarized', historyRuns: 1 });
+            await run();
+            const summarized = await sent();
+            expect(summarized[0]).toMatch(/^# Earlier runs of this routine\nRuns 1-3 are not in this context/);
+            expect(promptsIn(summarized)).toBe(2);
+
+            await setHistory({ historyMode: 'all' });
+            await run();
+            expect(promptsIn(await sent())).toBe(6);
+
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as { history: Array<{ message?: string }> };
+            expect(history.filter(step => step.message === prompt)).toHaveLength(6);
         });
     });
 });
