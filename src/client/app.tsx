@@ -235,6 +235,12 @@ const App = () => {
         wsUrl,
         shouldActivateConversationOnCreate: () => pendingBackgroundMessageRef.current === null,
         onConversationCreated: (newConversationId) => {
+            // A conversation started from a new chat is on screen from here. The ref would
+            // learn of it a render later, after a turn refused at once has been handled.
+            if (pendingBackgroundMessageRef.current === null && conversationIdRef.current === undefined) {
+                conversationIdRef.current = newConversationId;
+            }
+
             // Cache the current model for this new conversation
             const modelForNewConversation = selectedModel ?? defaultModelRef.current;
             if (newConversationId && modelForNewConversation) {
