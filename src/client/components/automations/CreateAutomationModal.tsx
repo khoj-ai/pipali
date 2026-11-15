@@ -8,6 +8,8 @@ import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from
 import { apiFetch } from '../../utils/api';
 import { useModels } from '../../hooks/useModels';
 import { StartDateField } from './StartDateField';
+import { HistoryField } from './HistoryField';
+import { DEFAULT_ROUTINE_HISTORY_RUNS, type RoutineHistoryMode } from '../../../shared';
 import { buildCronSchedule, DEFAULT_FORM_SCHEDULE } from './schedule';
 
 interface CreateAutomationModalProps {
@@ -48,6 +50,8 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
 
     // Form state
     const [chatModelId, setChatModelId] = useState<number | null>(null);
+    const [historyMode, setHistoryMode] = useState<RoutineHistoryMode>('summarized');
+    const [historyRuns, setHistoryRuns] = useState(DEFAULT_ROUTINE_HISTORY_RUNS);
     const [isCreating, setIsCreating] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -78,6 +82,8 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
                 name,
                 prompt: instructions,
                 chatModelId,
+                historyMode,
+                historyRuns,
             };
 
             // Only include trigger config if schedule is enabled
@@ -177,6 +183,18 @@ export function CreateAutomationModal({ onClose, onCreated }: CreateAutomationMo
                                 </option>
                             ))}
                         </select>
+                    </div>
+
+                    <div className="form-section">
+                        <div className="form-section-header">
+                            <h3>{t('automations.history')}</h3>
+                        </div>
+                        <HistoryField
+                            mode={historyMode}
+                            runs={historyRuns}
+                            onModeChange={setHistoryMode}
+                            onRunsChange={setHistoryRuns}
+                        />
                     </div>
 
                     {/* Schedule Section - Optional, collapsible */}

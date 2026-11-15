@@ -1,6 +1,7 @@
 // Automation types for the frontend client
 
 import type { ConfirmationRequest } from './confirmation';
+import type { RoutineHistoryMode } from '../../shared';
 
 export type TriggerType = 'cron' | 'file_watch';
 
@@ -38,6 +39,8 @@ export type AutomationInfo = {
     maxExecutionsPerHour?: number;
     /** Model this routine runs on. Null or absent follows the user's default. */
     chatModelId?: number | null;
+    historyMode: RoutineHistoryMode;
+    historyRuns: number;
     lastExecutedAt?: string;
     nextScheduledAt?: string;
     /** The next few runs as dates, for schedules too detailed to sum up in a phrase. */

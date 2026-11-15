@@ -1348,6 +1348,42 @@ test.describe('Automations Page', () => {
             expect((await update({ historyRuns: 21 })).status()).toBe(400);
         });
 
+        test('the form starts summarized with three runs, and keeps the count while it is hidden', async ({ page }) => {
+            const prompt = `Collect the release notes ${crypto.randomUUID()}`;
+            await automationsPage.goto();
+            await automationsPage.createBtn.click();
+            const createModal = page.locator(Selectors.createAutomationModal);
+            const mode = createModal.getByRole('combobox', { name: 'History' });
+            const runs = createModal.getByRole('combobox', { name: 'Recent runs kept in full' });
+
+            await expect(mode).toHaveValue('summarized');
+            await expect(runs).toHaveValue('3');
+            await runs.selectOption('5');
+            await mode.selectOption('fresh');
+            await expect(runs).toBeHidden();
+            await expect(createModal).toContainText('Each run starts without its earlier runs.');
+            await mode.selectOption('summarized');
+            await expect(runs).toHaveValue('5');
+            await expect(createModal).toContainText('the latest 5 runs in full');
+
+            await createModal.locator('.instructions-textarea').fill(prompt);
+            await createModal.locator('button[type="submit"]').click();
+            await expect(createModal).toBeHidden({ timeout: 5000 });
+            const { automations } = await (await page.request.get('/api/automations')).json();
+            const created = automations.find((a: { prompt: string }) => a.prompt === prompt);
+            testAutomationIds.push(created.id);
+            expect(created).toMatchObject({ historyMode: 'summarized', historyRuns: 5 });
+
+            await automationsPage.openAutomationDetailByPrompt(prompt);
+            const detail = automationsPage.detailModal;
+            await expect(detail.locator('.automation-detail-history')).toHaveText('Summarized');
+            await automationsPage.clickEditButton();
+            await detail.getByRole('combobox', { name: 'History' }).selectOption('fresh');
+            await automationsPage.saveAutomation();
+            const { automation } = await (await page.request.get(`/api/automations/${created.id}`)).json();
+            expect(automation).toMatchObject({ historyMode: 'fresh', historyRuns: 5 });
+        });
+
         test('each mode sends its share of earlier runs, and the conversation keeps them all', async ({ page }) => {
             const prompt = `Brief me ${crypto.randomUUID()}`;
             const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Modes', prompt });
