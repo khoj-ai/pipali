@@ -1162,6 +1162,8 @@ export const defaultMockScenarios: MockScenario[] = [
     // the general one, whose pattern matches its queries too
     memoryRecallSelectorScenario(),
     slowMemoryRecallSelectorScenario(),
+    // Folds a routine's older runs into its summary
+    simpleResponse('^<previous_summary>', 'Earlier briefs: nothing urgent; the user asked to skip crypto.'),
 ];
 
 /** A routine run whose context the platform compacts on its first step, which the run then continues from */

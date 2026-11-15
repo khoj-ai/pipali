@@ -33,6 +33,7 @@ import { COMPACTION_SOURCE_STEPS_KEY } from './conversation/utils';
 import type { ConfirmationContext } from './confirmation';
 import { createChildLogger } from '../logger';
 import { routineHistoryPolicy, routineHistoryView } from '../automation/history';
+import { foldRoutineHistory } from '../automation/summary';
 
 const log = createChildLogger({ component: 'research-runner' });
 
@@ -148,6 +149,17 @@ export async function* runResearchWithConversation(
     // A routine's run is given only the history its routine keeps. Everything from here
     // on reads and extends that view, while new steps still land in the whole conversation.
     const historyPolicy = await routineHistoryPolicy(conversationId);
+    if (historyPolicy?.mode === 'summarized') {
+        // Before the run is given its summary, bring it up to the runs it leaves out
+        trajectory.extra = await foldRoutineHistory({
+            conversationId,
+            steps: trajectory.steps,
+            extra: trajectory.extra,
+            keep: historyPolicy.runs,
+            user,
+            chatModelId: options.chatModelId,
+        });
+    }
     const history = historyPolicy ? routineHistoryView(trajectory.steps, historyPolicy, trajectory.extra) : undefined;
     if (history) trajectory.steps = history.steps;
 

@@ -15,7 +15,7 @@ import { mkdir, rm, rmdir, writeFile } from 'fs/promises';
 import path from 'path';
 import { AutomationsPage, ChatPage, HomePage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
-import { carriesUpdate, requestsFor } from '../helpers/mock-requests';
+import { carriesUpdate, readRequests, requestsFor } from '../helpers/mock-requests';
 
 test.describe('Automations Page', () => {
     let automationsPage: AutomationsPage;
@@ -1375,16 +1375,63 @@ test.describe('Automations Page', () => {
             await setHistory({ historyMode: 'summarized', historyRuns: 1 });
             await run();
             const summarized = await sent();
-            expect(summarized[0]).toMatch(/^# Earlier runs of this routine\nRuns 1-3 are not in this context/);
+            expect(summarized[0]).toMatch(new RegExp('^# Earlier runs of this routine\\n'
+                + 'Runs 1-3 are not in this context\\. Summary of runs 1-3, the last from [^\\n]+:\\n'
+                + 'Run 4 follows in full, then run 5, this one\\.\\n\\n'
+                + 'Earlier briefs: nothing urgent; the user asked to skip crypto\\.$'));
             expect(promptsIn(summarized)).toBe(2);
+
+            // Keeping more runs summarizes fewer, rather than one summary covering runs also kept
+            await setHistory({ historyRuns: 3 });
+            await run();
+            const kept = await sent();
+            expect(kept[0]).toMatch(/^# Earlier runs of this routine\nRuns 1-2 are not in this context\. Summary of runs 1-2, /);
+            expect(promptsIn(kept)).toBe(4);
 
             await setHistory({ historyMode: 'all' });
             await run();
-            expect(promptsIn(await sent())).toBe(6);
+            expect(promptsIn(await sent())).toBe(7);
 
             const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
             const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as { history: Array<{ message?: string }> };
-            expect(history.filter(step => step.message === prompt)).toHaveLength(6);
+            expect(history.filter(step => step.message === prompt)).toHaveLength(7);
+        });
+
+        test('deleting a reply in summarized runs rebuilds the summary without it', async ({ page }) => {
+            const prompt = `Brief me ${crypto.randomUUID()}`;
+            const reply = `Remember the word ${crypto.randomUUID()}`;
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Rebuild', prompt });
+            testAutomationIds.push(automationId);
+            await page.request.put(`/api/automations/${automationId}`, { data: { historyMode: 'summarized', historyRuns: 0 } });
+            const run = async () => {
+                const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
+                await expect.poll(async () => (await (await page.request.get(`/api/automations/executions/${executionId}`)).json()).execution?.status,
+                    { timeout: 30000 }).toBe('completed');
+            };
+            /** The summarizer's requests for this routine, which carry its prompt */
+            const summarizing = async () => (await readRequests())
+                .filter(record => record.query.startsWith('<previous_summary>') && record.query.includes(prompt));
+
+            await run();
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const chatPage = new ChatPage(page);
+            await chatPage.gotoConversation(automation.conversationId);
+            await chatPage.sendMessage(reply);
+            await chatPage.waitForAssistantResponse();
+
+            await run();
+            expect((await summarizing()).at(-1)!.query).toContain(reply);
+
+            const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as { history: Array<{ step_id: number; message?: string }> };
+            const replyStep = history.find(step => step.message === reply)!;
+            expect((await page.request.delete(`/api/conversations/${automation.conversationId}/messages/${replyStep.step_id}?role=user`)).ok()).toBe(true);
+
+            await run();
+            const rebuilt = (await summarizing()).at(-1)!.query;
+            expect(rebuilt).toMatch(/<previous_summary>\n\n<\/previous_summary>/);
+            expect(rebuilt).toContain('## Run 1,');
+            expect(rebuilt).toContain('## Run 2,');
+            expect(rebuilt).not.toContain(reply);
         });
     });
 });
