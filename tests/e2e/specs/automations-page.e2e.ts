@@ -1279,4 +1279,25 @@ test.describe('Automations Page', () => {
             expect((await readAutomation(page, automationId)).chatModelId).toBeNull();
         });
     });
+
+    test.describe('Routine History', () => {
+        async function historyOf(page: Page, id: string) {
+            const { automation } = await (await page.request.get(`/api/automations/${id}`)).json();
+            return { mode: automation.historyMode, runs: automation.historyRuns };
+        }
+
+        test('a new routine keeps a summary and three runs, and its count outlasts other modes', async ({ page }) => {
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Defaults', prompt: 'Say hello' });
+            testAutomationIds.push(automationId);
+            expect(await historyOf(page, automationId)).toEqual({ mode: 'summarized', runs: 3 });
+
+            const update = (data: object) => page.request.put(`/api/automations/${automationId}`, { data });
+            expect((await update({ historyRuns: 5 })).ok()).toBe(true);
+            expect((await update({ historyMode: 'fresh' })).ok()).toBe(true);
+            expect(await historyOf(page, automationId)).toEqual({ mode: 'fresh', runs: 5 });
+            expect((await update({ historyMode: 'summarized' })).ok()).toBe(true);
+            expect(await historyOf(page, automationId)).toEqual({ mode: 'summarized', runs: 5 });
+            expect((await update({ historyRuns: 21 })).status()).toBe(400);
+        });
+    });
 });

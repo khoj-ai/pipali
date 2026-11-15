@@ -52,6 +52,8 @@ started them. Read one with `inspect_task`, or pull just the parts you need from
 - `triggerConfig.startDate`: optional `"YYYY-MM-DD"`. The schedule fires only from that date on, read in `timezone` (else system local time). Omit to start right away
 - PUT replaces `triggerConfig` whole, so send every field it should keep
 - A schedule with both day of month and day of week set fires when either matches: `0 10 1-7 * 1` runs on the 1st to 7th and every Monday. The first Monday of each month is `0 10 * * 1#1`
+- `historyMode`: what a run is given of the routine's earlier runs. `"all"` (every run), `"summarized"` (one rolling summary of older runs plus the latest `historyRuns` runs whole) or `"fresh"` (none). The conversation keeps every run either way. New routines default to `"summarized"` with `historyRuns` 3
+- `historyRuns`: 0 to 20, used by `"summarized"`. 0 keeps the summary alone. It is kept while another mode is chosen
 - GET `/automations` lists each routine's `upcomingRuns`, the next three times its schedule fires
 
 ## MCP Servers (Tool Integrations)
