@@ -17,6 +17,7 @@ import { Automation, AutomationExecution, Conversation, User } from '../db/schem
 import { getSkillsDir } from '../paths';
 import { deleteSkill, resetBuiltinSkill } from '../skills';
 import { createChildLogger } from '../logger';
+import { countUnlistedMemories } from './index';
 import { loadMemorySettings } from './settings';
 import type { TriggerEventData } from '../automation/types';
 
@@ -218,7 +219,14 @@ export async function maybeDream(user: typeof User.$inferSelect): Promise<void> 
         const triggerData: TriggerEventData = {
             type: 'external',
             timestamp: new Date().toISOString(),
-            external: { source: 'script', metadata: { review_since: since.toISOString() } },
+            external: {
+                source: 'script',
+                metadata: {
+                    review_since: since.toISOString(),
+                    // The dream's own prompt holds the catalogue of its first run, not this one's tally
+                    unlisted_memories: await countUnlistedMemories(),
+                },
+            },
         };
 
         const { queueExecution } = await import('../automation/executor');

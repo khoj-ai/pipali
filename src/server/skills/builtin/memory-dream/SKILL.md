@@ -20,9 +20,14 @@ Work the phases in order and finish with the report.
 `list_files` on your memory directory, then read the memories that cover the topics
 you are about to touch. You are improving a store that already exists.
 
+Also read every memory `modified` since `review_since` in the trigger metadata
+(`grep_files` for `^modified:`). Mid-conversation edits can contradict themselves: a
+new fact beside the line it replaces, or a body changed under a stale description.
+
 ## 2. Gather
 
-The trigger metadata names `review_since`. Read what was said since then:
+Read what was said since `review_since`. This runs in the sandbox, so it is never held
+for a confirmation:
 
 ```
 bun ~/.pipali/skills/memory-dream/scripts/transcripts.ts --since <review_since>
@@ -52,11 +57,13 @@ What is not:
 For each thing worth keeping:
 
 - A memory already covers the topic: edit that file. Two files saying nearby things
-  are harder to find than one saying both.
+  are harder to find than one saying both. Recall cuts a body off at 8,000 characters.
 - Nothing covers it: write a new memory.
 - A memory is contradicted: fix it at the source, in the file, rather than adding a
   memory that argues with it.
 - Relative dates ("yesterday", "last week") become absolute dates.
+- State what is true now, not a change log ("changed to X on <date>"). Keep the why
+  where it guides future behavior.
 - Link related memories with `[[their-filename]]`.
 
 Deleting is removing the file - `shell_command` with `rm`. The catalogue is derived
@@ -64,9 +71,10 @@ from the directory, so nothing else needs updating.
 
 ## 4. Prune
 
-The store works while it stays scannable; past roughly 200 memories, recall degrades
-for every one of them. Bring it back under that by merging overlapping files and
-deleting what has gone stale.
+The catalogue holds 25,000 bytes of lines - roughly 120 memories with descriptions
+under 150 characters - and leaves older memories out past that: `unlisted_memories`
+in the trigger metadata counts them. Bring the store back within it by merging
+overlapping files, deleting what has gone stale, and shortening long descriptions.
 
 Then reread the descriptions. A description is the only thing a future recall sees,
 so one that could describe half the store makes its memory unreachable however good
@@ -79,10 +87,13 @@ the body is. Sharpen the vague ones.
 - When you are unsure whether to delete something, keep it. A stale memory costs a
   line in the catalogue; a deleted load-bearing one costs the user their context.
 - Verify before you record. A memory naming a file, path or tool that no longer exists
-  is worse than no memory.
+  is worse than no memory. So is a temp path that will not last, or something only
+  proposed recorded as installed, sent or decided. A path the sandbox cannot read, like
+  Windows app data, only looks missing.
 
 ## Report
 
 Close with a short summary the user will read on the routine's card: what you added,
 what you merged, what you deleted, and why. A few lines. If you changed nothing, say
-that and say what you looked at.
+that and say what you looked at. If the store is still larger than the catalogue holds,
+say so and by roughly how many memories.

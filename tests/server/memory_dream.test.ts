@@ -1,4 +1,4 @@
-import { test, expect, describe, mock, beforeEach, afterEach } from 'bun:test';
+import { test, expect, describe, mock, beforeEach, afterAll, afterEach } from 'bun:test';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
@@ -8,8 +8,9 @@ import { getLoadedSkills, installBuiltinSkills, loadSkills, resetBuiltinSkill } 
 import { formatTranscript, selectConversations } from '../../src/server/skills/builtin/memory-dream/scripts/transcripts';
 
 // Keep the module's other exports intact: mock.module replaces it process-wide, and
-// src/server/automation re-exports all of them.
-const actualExecutor = await import('../../src/server/automation/executor');
+// src/server/automation re-exports all of them. Copied, as the mock rewrites the module's own.
+const executorModule = import.meta.resolve('../../src/server/automation/executor');
+const actualExecutor = { ...await import('../../src/server/automation/executor') };
 
 const HOUR = 60 * 60 * 1000;
 const now = new Date('2026-08-19T20:00:00.000Z');
@@ -53,12 +54,14 @@ describe('dream automation id', () => {
 describe('a dream that already started does not queue another', () => {
     const user = { id: 1 } as typeof User.$inferSelect;
     const queued: string[] = [];
+    const triggers: { external?: { metadata?: Record<string, unknown> } }[] = [];
     const rewritten: Record<string, unknown>[] = [];
 
-    mock.module(import.meta.resolve('../../src/server/automation/executor'), () => ({
+    mock.module(executorModule, () => ({
         ...actualExecutor,
-        async queueExecution(automationId: string) {
+        async queueExecution(automationId: string, trigger: typeof triggers[number]) {
             queued.push(automationId);
+            triggers.push(trigger);
             return { executionId: 'exec-new', conversationId: 'conv-new' };
         },
     }));
@@ -76,6 +79,7 @@ describe('a dream that already started does not queue another', () => {
      */
     function install(executions: { createdAt: Date; status: string }[]) {
         queued.length = 0;
+        triggers.length = 0;
         rewritten.length = 0;
         globalThis.__pipaliUnitDb = {
             select(table: unknown) {
@@ -100,6 +104,9 @@ describe('a dream that already started does not queue another', () => {
 
     afterEach(() => { globalThis.__pipaliUnitDb = undefined; });
 
+    // Test files after this one share the process, and queue routines for real
+    afterAll(() => { mock.module(executorModule, () => actualExecutor); });
+
     test('the run it just finished finds the window already closed', async () => {
         install([{ createdAt: new Date(Date.now() - 3 * 60 * 1000), status: 'completed' }]);
 
@@ -116,6 +123,34 @@ describe('a dream that already started does not queue another', () => {
         expect(queued).toEqual([dreamAutomationId(user.id)]);
     });
 
+    test('the dream is told how many memories its catalogue left out', async () => {
+        const memoryDir = path.join(os.tmpdir(), 'memory-dream-tests', 'memory');
+        const previousDir = process.env.PIPALI_MEMORY_DIR;
+        await fs.mkdir(memoryDir, { recursive: true });
+        process.env.PIPALI_MEMORY_DIR = memoryDir;
+
+        try {
+            // Descriptions heavy enough that eight fill the catalogue, leaving two out
+            for (let day = 0; day < 10; day++) {
+                await Bun.write(
+                    path.join(memoryDir, `bulky-${day}.md`),
+                    `---\ndescription: ${`Memory ${day} `.padEnd(3000, 'x')}\nmodified: 2026-03-1${day}T00:00:00.000Z\n---\n\nBody.\n`,
+                );
+            }
+            install([]);
+
+            await maybeDream(user);
+
+            expect(triggers[0]?.external?.metadata).toEqual({
+                review_since: expect.any(String),
+                unlisted_memories: 2,
+            });
+        } finally {
+            process.env.PIPALI_MEMORY_DIR = previousDir;
+            await fs.rm(memoryDir, { recursive: true, force: true });
+        }
+    });
+
     test('the prompt is repointed at the skill this release ships', async () => {
         install([]);
 
@@ -127,41 +162,125 @@ describe('a dream that already started does not queue another', () => {
 });
 
 describe('transcript digest', () => {
-    const conversation = { id: 'c1', title: 'Ledger cleanup', updatedAt: '2026-08-19T09:00:00.000Z' };
+    const since = new Date('2026-08-19T00:00:00.000Z');
+    // Times as the conversation list gives them: UTC, without a zone
+    const conversation = {
+        id: 'c1',
+        title: 'Ledger cleanup',
+        createdAt: '2026-08-10 08:00:00.000',
+        updatedAt: '2026-08-19 09:00:00.000',
+    };
+    const at = (dayAndTime: string) => `2026-08-${dayAndTime}:00.000Z`;
+    const transcriptsScript = path.join(
+        import.meta.dir, '..', '..', 'src', 'server', 'skills', 'builtin', 'memory-dream', 'scripts', 'transcripts.ts',
+    );
 
     test('keeps what was said and drops the machinery around it', () => {
         const transcript = formatTranscript(conversation, [
-            { source: 'system', message: 'You are Pipali.' },
-            { source: 'user', message: 'reconcile august' },
-            { source: 'agent', message: 'Reading the ledger', tool_calls: [{ function_name: 'read_file' }] },
-            { source: 'agent', message: 'Done - three entries were duplicated.' },
-            { source: 'user', message: 'use beancount next time, not csv' },
-            { source: 'user', message: '[Handoff Context] Summary of earlier turns', extra: { is_compaction: true } },
-        ]);
+            { source: 'system', message: 'You are Pipali.', timestamp: at('19T08:59') },
+            { source: 'user', message: 'reconcile august', timestamp: at('19T09:00') },
+            { source: 'agent', message: 'Reading the ledger', tool_calls: [{ function_name: 'read_file' }], timestamp: at('19T09:01') },
+            {
+                source: 'agent',
+                message: 'Checking before I merge',
+                timestamp: at('19T09:02'),
+                tool_calls: [
+                    { tool_call_id: 'ask', function_name: 'ask_user', arguments: { title: 'Merge the duplicates?', description: 'Three entries repeat.' } },
+                    { tool_call_id: 'note', function_name: 'ask_user', arguments: { title: 'Backup written' } },
+                ],
+                observation: { results: [
+                    { source_call_id: 'ask', content: 'User responded: keep the one with a receipt' },
+                    { source_call_id: 'note', content: 'User acknowledged: "Backup written"' },
+                ] },
+            },
+            { source: 'agent', message: 'Done - three entries were duplicated.', timestamp: at('19T09:03') },
+            { source: 'user', message: 'use beancount next time, not csv', timestamp: at('19T09:04') },
+            { source: 'user', message: '[Handoff Context] Summary of earlier turns', extra: { is_compaction: true }, timestamp: at('19T09:05') },
+        ], since, 'UTC');
 
         expect(transcript).toBe([
-            '## Ledger cleanup (2026-08-19T09:00:00.000Z)',
-            'user: reconcile august',
-            'pipali: Done - three entries were duplicated.',
-            'user: use beancount next time, not csv',
+            '## Ledger cleanup',
+            '2026-08-19 09:00 user: reconcile august',
+            '2026-08-19 09:02 pipali asked: Merge the duplicates? - Three entries repeat.',
+            '2026-08-19 09:02 user responded: keep the one with a receipt',
+            '2026-08-19 09:03 pipali: Done - three entries were duplicated.',
+            '2026-08-19 09:04 user: use beancount next time, not csv',
         ].join('\n'));
     });
 
     test('a conversation that only ran tools contributes nothing', () => {
         expect(formatTranscript(conversation, [
-            { source: 'agent', message: 'Working', tool_calls: [{ function_name: 'shell_command' }] },
-        ])).toBe('');
+            { source: 'agent', message: 'Working', tool_calls: [{ function_name: 'shell_command' }], timestamp: at('19T09:00') },
+        ], since, 'UTC')).toBe('');
+    });
+
+    test('a conversation carried over the cutoff shows only what came after, led by the reply it reacts to', () => {
+        const history = [
+            { source: 'user', message: 'reconcile august', timestamp: at('18T09:00') },
+            { source: 'agent', message: 'Done - three entries were duplicated.', timestamp: at('18T09:02') },
+            // Written after the cutoff, and still not something anyone said
+            { source: 'user', message: '[Handoff Context] Summary of earlier turns', extra: { is_compaction: true }, timestamp: at('19T08:59') },
+            { source: 'user', message: 'use beancount next time, not csv', timestamp: at('19T09:00') },
+        ];
+
+        expect(formatTranscript(conversation, history, since, 'UTC')).toBe([
+            '## Ledger cleanup',
+            '(earlier) 2026-08-18 09:02 pipali: Done - three entries were duplicated.',
+            '2026-08-19 09:00 user: use beancount next time, not csv',
+        ].join('\n'));
+        expect(formatTranscript(conversation, history, new Date(at('19T12:00')), 'UTC')).toBe('');
+    });
+
+    test('a fork shows only what was said after it was made', () => {
+        // Copied from a routine run earlier the same day, inside the review window
+        const fork = { ...conversation, createdAt: '2026-08-19 08:00:00.000' };
+
+        expect(formatTranscript(fork, [
+            { source: 'user', message: 'Summarize my inbox.', timestamp: at('19T07:00') },
+            { source: 'agent', message: 'Three threads need a reply.', timestamp: at('19T07:01') },
+            { source: 'user', message: 'draft the one to Dana, keep it short', timestamp: at('19T09:00') },
+        ], since, 'UTC')).toBe([
+            '## Ledger cleanup',
+            '(earlier) 2026-08-19 07:01 pipali: Three threads need a reply.',
+            '2026-08-19 09:00 user: draft the one to Dana, keep it short',
+        ].join('\n'));
     });
 
     test('reviews only what the user held themselves, since the cutoff', () => {
-        const selected = selectConversations([
-            { id: 'own', title: 'Own', updatedAt: '2026-08-19T09:00:00.000Z' },
-            { id: 'old', title: 'Old', updatedAt: '2026-08-01T09:00:00.000Z' },
-            { id: 'routine', title: 'Routine', updatedAt: '2026-08-19T10:00:00.000Z', isAutomation: true },
-            { id: 'subtask', title: 'Subtask', updatedAt: '2026-08-19T11:00:00.000Z', parentConversationId: 'own' },
-        ], new Date('2026-08-18T00:00:00.000Z'), 30);
+        const { selected } = selectConversations([
+            { ...conversation, id: 'own' },
+            { ...conversation, id: 'old', updatedAt: '2026-08-01 09:00:00.000' },
+            { ...conversation, id: 'routine', isAutomation: true },
+            { ...conversation, id: 'subtask', parentConversationId: 'own' },
+        ], since, 30);
 
         expect(selected.map(conversation => conversation.id)).toEqual(['own']);
+    });
+
+    test('a message is timed on the clock of the zone it is shown in', () => {
+        // "Yesterday" in a message is the user's day, which here has already turned over
+        expect(formatTranscript(conversation, [
+            { source: 'user', message: 'the invoice went out yesterday', timestamp: at('19T20:00') },
+        ], since, 'Asia/Kolkata')).toContain('2026-08-20 01:30 user: the invoice went out yesterday');
+    });
+
+    test('reads list times as UTC wherever the machine is, counting what the limit left out', async () => {
+        // A process keeps the zone it started in on some platforms, so one east of UTC, where
+        // the same times read as local fall before the cutoff, is started for this
+        const script = `
+            import { selectConversations } from ${JSON.stringify(Bun.pathToFileURL(transcriptsScript).href)};
+            const { selected, total } = selectConversations(${JSON.stringify([
+                { ...conversation, id: 'first-hour', updatedAt: '2026-08-19 00:30:00.000' },
+                { ...conversation, id: 'third-hour', updatedAt: '2026-08-19 02:30:00.000' },
+            ])}, new Date(${since.getTime()}), 1);
+            console.log(JSON.stringify({ selected: selected.map(conversation => conversation.id), total }));`;
+        const run = Bun.spawn([process.execPath, '-e', script], {
+            env: { ...process.env, TZ: 'Asia/Kolkata' },
+            stdout: 'pipe',
+            stderr: 'inherit',
+        });
+
+        expect(JSON.parse(await new Response(run.stdout).text())).toEqual({ selected: ['third-hour'], total: 2 });
     });
 });
 

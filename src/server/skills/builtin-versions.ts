@@ -112,6 +112,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, string[]> = {
     ],
     'memory-dream': [
         '6061e40c02580e0197c555203e27eef31dbeb26b9cdaacb897d3d2d479281bdc',
+        'c186edd938e41b8b2faad6a0681dd07cabdd40cef1362acfcf729eafc889aa12',
     ],
     'skill-creator': [
         '924a30cddd6cae87a84552fb53c6b79efc5fff885ff5ed4c784ed971a748db45',

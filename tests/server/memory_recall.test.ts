@@ -6,6 +6,7 @@ import {
     formatMemoryRecall,
     getMemory,
     hasMemoryInteraction,
+    loadCatalogue,
     memoryPathsExtra,
     surfacedMemories,
     MEMORY_RECALL_KIND,
@@ -190,6 +191,23 @@ describe('memory recall', () => {
             expect(queries[0]).not.toContain('editor.md');
             expect(queries[0]).toContain('ledger.md');
             expect(recall).toBeUndefined();
+        });
+
+        test('offers the selector memories the catalogue is too full to list', async () => {
+            await Bun.write(
+                path.join(testDir, 'allergy.md'),
+                '---\ndescription: Penicillin allergy\ntype: user\nmodified: 2026-01-01T00:00:00.000Z\n---\n\nSevere.\n',
+            );
+            // Descriptions heavy enough that nine overrun the catalogue's budget, pushing the oldest out
+            for (let i = 0; i < 9; i++) await memory(`bulky-${i}.md`, `Note ${i} `.padEnd(3000, 'x'));
+            const queries = selectorReplies('{"selected_memories": ["allergy.md"]}');
+
+            expect(await loadCatalogue()).not.toContain('allergy.md');
+
+            const recall = await recallMemories('what can I take for a sinus infection?', new Set());
+
+            expect(queries[0]).toContain('allergy.md (user): Penicillin allergy');
+            expect(recall?.extra.memory_paths).toEqual(['allergy.md']);
         });
 
         test('ignores filenames the selector made up', async () => {

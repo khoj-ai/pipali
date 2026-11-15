@@ -57,8 +57,8 @@ export interface StoredMemory extends MemorySummary {
 
 /** Stated once, so the system prompt and a rejected write cannot teach different formats */
 const MEMORY_FRONTMATTER = `---
-description: <required. One line, shown in the catalogue - write it so a future
-you can tell from this line alone whether the memory is worth opening>
+description: <required. One line under 150 characters, shown in the catalogue - write it
+so a future you can tell from this line alone whether the memory is worth opening>
 type: user | feedback | project | resource
 ---`;
 
@@ -318,31 +318,50 @@ async function catalogueEntries(): Promise<CatalogueEntry[]> {
         .sort((a, b) => b.modified - a.modified || a.line.localeCompare(b.line));
 }
 
+/** The entries the catalogue has room to list, given most recently changed first */
+function withinBudget(entries: CatalogueEntry[]): CatalogueEntry[] {
+    let bytes = 0;
+    const listed: CatalogueEntry[] = [];
+
+    for (const entry of entries) {
+        bytes += Buffer.byteLength(entry.line, 'utf-8') + 1;
+        if (bytes > CATALOGUE_MAX_BYTES) break;
+        listed.push(entry);
+    }
+
+    return listed;
+}
+
+/** How many memories the catalogue leaves out for being over its size budget */
+export async function countUnlistedMemories(): Promise<number> {
+    const entries = await catalogueEntries();
+    return entries.length - withinBudget(entries).length;
+}
+
+/** How many memories the catalogue left out when it was last rendered */
+let lastOmitted = 0;
+
 /**
  * Render entries into the catalogue, stopping at the size budget.
  *
  * Newest first, so what falls off the end is what has gone longest without being
  * touched. The remainder is announced rather than dropped in silence - those
- * memories are still on disk and still readable, they just are not worth the
- * prompt space every request.
+ * memories are still on disk and still offered to recall, they just are not
+ * worth the prompt space every request.
  */
 function renderCatalogue(entries: CatalogueEntry[]): string {
-    const lines: string[] = [];
-    let bytes = 0;
-
-    for (const entry of entries) {
-        const size = Buffer.byteLength(entry.line, 'utf-8') + 1;
-        if (bytes + size > CATALOGUE_MAX_BYTES) break;
-        lines.push(entry.line);
-        bytes += size;
-    }
-
+    const lines = withinBudget(entries).map(entry => entry.line);
     const omitted = entries.length - lines.length;
+
     if (omitted > 0) {
-        log.info({ omitted, listed: lines.length }, 'Memory catalogue is over budget, listing the most recently changed');
+        // Raised when the count moves rather than on every turn
+        if (omitted !== lastOmitted) {
+            log.warn({ omitted, listed: lines.length }, 'Memory catalogue is over budget, listing the most recently changed');
+        }
         // Carries no `<file>: ` prefix, so CATALOGUE_ENTRY cannot read it back as a memory
         lines.push(`(${omitted} older ${omitted === 1 ? 'memory is' : 'memories are'} not listed here - read ${getMemoryDir()} to see the rest)`);
     }
+    lastOmitted = omitted;
 
     return lines.join('\n');
 }
@@ -602,7 +621,7 @@ export function formatMemoryForPrompt(catalogue: string, options?: { canWrite?: 
 
     const sections = [`# Memory
 ${MEMORY_SECTION_LEAD} \`${memoryDir}\`. Each memory is one file holding one
-fact. <memory_catalogue> lists every one of them as \`file (type): description\`, most recently
+fact. <memory_catalogue> lists them as \`file (type): description\`, most recently
 changed first. Read any whose descriptions look relevant. A memory reflects
 what was true when it was written, so if one names a file, path or tool, check it still exists
 before acting on it.`];

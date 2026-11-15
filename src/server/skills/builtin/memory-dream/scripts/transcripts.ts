@@ -1,11 +1,12 @@
 #!/usr/bin/env bun
 /**
- * Print what was said in the user's recent conversations, for the dream to read.
+ * Print what was said in the user's conversations since a cutoff, for the dream to read.
  *
  * A raw conversation history is mostly tool calls and their output - megabytes of it
  * for a working day, and none of it where preferences and corrections live. Those are
- * in what the user typed, and in the replies they were reacting to. This keeps those
- * two and drops the rest.
+ * in what the user typed or answered when asked, and in the replies they were reacting
+ * to. This keeps those and drops the rest, along with whatever an earlier dream already
+ * read.
  *
  * Usage: bun transcripts.ts [--since <ISO date>] [--limit <n>] [--url <server>]
  */
@@ -22,6 +23,7 @@ const AGENT_MAX_CHARS = 400;
 interface ConversationSummary {
     id: string;
     title: string;
+    createdAt: string;
     updatedAt: string;
     isAutomation?: boolean;
     parentConversationId?: string | null;
@@ -29,10 +31,15 @@ interface ConversationSummary {
 
 interface Step {
     source: string;
+    timestamp: string;
     message?: string;
-    tool_calls?: unknown[];
+    tool_calls?: Array<{ tool_call_id?: string; function_name: string; arguments?: Record<string, unknown> }>;
+    observation?: { results?: Array<{ source_call_id: string; content: unknown }> };
     extra?: Record<string, unknown>;
 }
+
+/** An ask_user result holding the user's own choice or words, not an acknowledgement or error */
+const ANSWERED = /^User (responded|selected|entered)/;
 
 function truncate(text: string, max: number): string {
     const trimmed = text.trim();
@@ -40,38 +47,100 @@ function truncate(text: string, max: number): string {
 }
 
 /**
- * Render one conversation as the exchange between the user and Pipali.
- *
- * Returns an empty string when nothing was said - a conversation that only ever ran
- * tools has nothing for the dream to learn from.
+ * The conversation list gives its times in UTC without a zone, which Date.parse alone
+ * reads as local time.
  */
-export function formatTranscript(conversation: ConversationSummary, history: Step[]): string {
-    const lines = history.flatMap(step => {
-        if (step.extra?.is_compaction || !step.message?.trim()) return [];
-        if (step.source === 'user') return [`user: ${truncate(step.message, USER_MAX_CHARS)}`];
-        // An agent step carrying tool calls is Pipali narrating its own work, not answering
-        if (step.source === 'agent' && !step.tool_calls?.length) {
-            return [`pipali: ${truncate(step.message, AGENT_MAX_CHARS)}`];
-        }
-        return [];
-    });
-
-    if (lines.length === 0) return '';
-
-    return [`## ${conversation.title} (${conversation.updatedAt})`, ...lines].join('\n');
+function utcTime(time: string): number {
+    return Date.parse(/(Z|[+-]\d\d:?\d\d)$/.test(time) ? time : `${time}Z`.replace(' ', 'T'));
 }
 
-/** Conversations the user held themselves, most recent first */
+/** The user's own clock unless a zone is named, as "yesterday" in a message means their day */
+function localTime(time: number, timeZone?: string): string {
+    return new Date(time).toLocaleString('sv-SE', { timeZone }).slice(0, 16);
+}
+
+/**
+ * What one step holds of the exchange: what the user typed, Pipali's reply to them, or
+ * a question it asked through ask_user with what they answered.
+ */
+function spoken(step: Step): Array<{ speaker: string; text: string }> {
+    if (step.extra?.is_compaction) return [];
+
+    // The user's answer is held nowhere but the tool result
+    const asked = (step.tool_calls ?? []).flatMap(call => {
+        const answer = step.observation?.results?.find(result => result.source_call_id === call.tool_call_id)?.content;
+        if (call.function_name !== 'ask_user' || typeof answer !== 'string' || !ANSWERED.test(answer)) return [];
+        const question = [call.arguments?.title, call.arguments?.description].filter(Boolean).join(' - ');
+        return [
+            { speaker: 'pipali', text: `pipali asked: ${truncate(question, AGENT_MAX_CHARS)}` },
+            { speaker: 'user', text: truncate(answer.replace('User', 'user'), USER_MAX_CHARS) },
+        ];
+    });
+    if (asked.length > 0) return asked;
+
+    if (!step.message?.trim()) return [];
+    if (step.source === 'user') return [{ speaker: 'user', text: `user: ${truncate(step.message, USER_MAX_CHARS)}` }];
+    // An agent step carrying tool calls is Pipali narrating its own work, not answering
+    if (step.source === 'agent' && !step.tool_calls?.length) {
+        return [{ speaker: 'pipali', text: `pipali: ${truncate(step.message, AGENT_MAX_CHARS)}` }];
+    }
+    return [];
+}
+
+/**
+ * Render what was said in one conversation since the cutoff, as the exchange between
+ * the user and Pipali.
+ *
+ * The conversation's own creation bounds what is new as well: the steps a fork copies
+ * from its source keep the times they were first said.
+ *
+ * The message before the first new one is kept when the other side sent it - the reply a
+ * new message reacts to, or the question a new reply answers.
+ *
+ * Returns an empty string when nothing new was said.
+ */
+export function formatTranscript(
+    conversation: ConversationSummary,
+    history: Step[],
+    since: Date,
+    timeZone?: string,
+): string {
+    const newFrom = Math.max(since.getTime(), utcTime(conversation.createdAt));
+
+    const said = history.flatMap(step => {
+        const time = utcTime(step.timestamp);
+        return spoken(step).map(({ speaker, text }) => (
+            { speaker, text: `${localTime(time, timeZone)} ${text}`, isNew: time >= newFrom }
+        ));
+    });
+
+    const first = said.findIndex(message => message.isNew);
+    if (first === -1) return '';
+
+    const before = said[first - 1];
+    const messages = said.filter(message => message.isNew).map(message => message.text);
+    if (before && before.speaker !== said[first]!.speaker) {
+        messages.unshift(`(earlier) ${before.text}`);
+    }
+
+    return [`## ${conversation.title}`, ...messages].join('\n');
+}
+
+/**
+ * Conversations the user held themselves since the cutoff, most recent first, with how
+ * many there were before the limit cut them short.
+ */
 export function selectConversations(
     conversations: ConversationSummary[],
     since: Date,
     limit: number,
-): ConversationSummary[] {
-    return conversations
+): { selected: ConversationSummary[]; total: number } {
+    const recent = conversations
         .filter(conversation => !conversation.isAutomation && !conversation.parentConversationId)
-        .filter(conversation => Date.parse(conversation.updatedAt) > since.getTime())
-        .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-        .slice(0, limit);
+        .filter(conversation => utcTime(conversation.updatedAt) > since.getTime())
+        .sort((a, b) => utcTime(b.updatedAt) - utcTime(a.updatedAt));
+
+    return { selected: recent.slice(0, limit), total: recent.length };
 }
 
 function readFlag(name: string): string | undefined {
@@ -94,15 +163,18 @@ async function main(): Promise<void> {
     }
 
     const { conversations } = await listed.json() as { conversations: ConversationSummary[] };
-    const selected = selectConversations(conversations, since, limit);
+    const { selected, total } = selectConversations(conversations, since, limit);
+    const leftOut = total > selected.length
+        ? ` of ${total}, most recent first. Rerun with --limit ${total} for the rest`
+        : '';
 
-    console.log(`Conversations since ${since.toISOString()}: ${selected.length}\n`);
+    console.log(`Conversations since ${localTime(since.getTime())}, in local time: ${selected.length}${leftOut}\n`);
 
     for (const conversation of selected) {
         const response = await fetch(`${url}/api/chat/${conversation.id}/history`);
         if (!response.ok) continue;
         const { history } = await response.json() as { history: Step[] };
-        const transcript = formatTranscript(conversation, history);
+        const transcript = formatTranscript(conversation, history, since);
         if (transcript) console.log(`${transcript}\n`);
     }
 }
