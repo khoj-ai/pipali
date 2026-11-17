@@ -560,9 +560,10 @@ export function formatToolArgsRich(
             return args.action ? { text: args.action === 'accept' ? 'Accept' : 'Dismiss' } : null;
         }
         case 'chrome-browser__upload_file': {
-            if (!args.filePath) return null;
-            const fileName = args.filePath.split('/').pop() || args.filePath;
-            return { text: fileName, hoverText: args.filePath };
+            // Calls stored before chrome-devtools-mcp 1.8 name a single filePath
+            const filePaths: string[] = [args.filePaths ?? args.filePath ?? []].flat();
+            if (filePaths.length === 0) return null;
+            return { text: filePaths.map(getFileName).join(', '), hoverText: filePaths.join('\n') };
         }
 
         default:

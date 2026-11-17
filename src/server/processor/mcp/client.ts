@@ -622,20 +622,28 @@ export class McpClient {
     }
 }
 
+/** Arguments of chrome-devtools-mcp's evaluate_script that say what script to run */
+const SCRIPT_SOURCE_ARGS = ['function', 'sourcePath', 'format'];
+
 /**
  * Synthetic tools - virtual tools appended to real MCP server tool lists
  * These extend an MCP server's capabilities without modifying the server itself.
  */
 function buildSyntheticTools(serverName: string, tools: McpToolInfo[]): McpToolInfo[] {
     if (serverName === 'chrome-browser') {
-        const realSchema = tools.find(t => t.originalName === 'evaluate_script');
-        const realProps = (realSchema?.inputSchema?.properties ?? {}) as Record<string, unknown>;
+        // The file stands in for the script source. Every other argument of the real
+        // tool, such as the page to run in, is taken as it is and passed through.
+        const realSchema = tools.find(t => t.originalName === 'evaluate_script')?.inputSchema;
+        const passedThrough = Object.fromEntries(
+            Object.entries(realSchema?.properties ?? {}).filter(([name]) => !SCRIPT_SOURCE_ARGS.includes(name))
+        );
+        const required = ((realSchema?.required ?? []) as string[]).filter(name => name in passedThrough);
 
         return [{
             originalName: 'evaluate_script_file',
             namespacedName: `${serverName}__evaluate_script_file`,
             serverName,
-            description: 'Evaluate a JavaScript file in the currently selected browser page. Use this instead of evaluate_script to run reusable script files managed by you under ~/.pipali/home/code/browser/.',
+            description: 'Evaluate a JavaScript file in a browser page. Use this instead of evaluate_script to run reusable script files managed by you under ~/.pipali/home/code/browser/.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -643,10 +651,9 @@ function buildSyntheticTools(serverName: string, tools: McpToolInfo[]): McpToolI
                         type: 'string',
                         description: 'Absolute path to the .js file to evaluate (e.g. ~/.pipali/home/code/browser/draft-email_safe.js). Supports ~ expansion. Files ending in _safe.js or _unsafe.js encode their operation_type in the filename — set operation_type to match the suffix.',
                     },
-                    ...(realProps.args ? { args: realProps.args } : {}),
-                    ...(realProps.includeSnapshot ? { includeSnapshot: realProps.includeSnapshot } : {}),
+                    ...passedThrough,
                 },
-                required: ['file_path'],
+                required: ['file_path', ...required],
             },
         }];
     }

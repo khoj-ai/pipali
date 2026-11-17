@@ -14,7 +14,7 @@ interface PageEntry {
 }
 
 /** Parse the markdown page list from Chrome MCP results */
-function parsePages(result: string): { message?: string; pages: PageEntry[] } {
+export function parsePages(result: string): { message?: string; pages: PageEntry[] } {
     const pages: PageEntry[] = [];
     let message: string | undefined;
 
@@ -27,12 +27,13 @@ function parsePages(result: string): { message?: string; pages: PageEntry[] } {
             continue;
         }
 
-        // Parse page entries like "1: https://example.com [selected]"
+        // Parse page entries like "1: https://example.com [selected]",
+        // or "1: Example (https://example.com) [selected]" for a page with a title
         const match = trimmed.match(/^(\d+):\s+(.+?)(\s+\[selected\])?\s*$/);
         if (match?.[1] && match[2]) {
             pages.push({
                 id: parseInt(match[1]),
-                url: match[2],
+                url: match[2].match(/\s\((\S+)\)$/)?.[1] ?? match[2],
                 selected: !!match[3],
             });
         }

@@ -154,6 +154,21 @@ describe('MCP Client', () => {
         });
     });
 
+    test('evaluate_script_file takes what evaluate_script needs besides the script source', async () => {
+        const client = new McpClient({ ...httpOAuthServer, name: 'chrome-browser' });
+        const properties = { pageId: {}, function: {}, sourcePath: {}, format: {}, args: {} };
+        (client as any).client = {
+            listTools: async () => ({ tools: [{ name: 'evaluate_script', inputSchema: { type: 'object', properties, required: ['pageId'] } }] }),
+        };
+        (client as any)._status = 'connected';
+
+        await (client as any).refreshTools();
+        const scriptFile = (await client.getTools()).find(tool => tool.originalName === 'evaluate_script_file')!;
+
+        expect(Object.keys(scriptFile.inputSchema.properties as object)).toEqual(['file_path', 'pageId', 'args']);
+        expect(scriptFile.inputSchema.required).toEqual(['file_path', 'pageId']);
+    });
+
     describe('runTool', () => {
         test('flags UnauthorizedError tool calls as auth-required', async () => {
             const client = new McpClient(httpOAuthServer);

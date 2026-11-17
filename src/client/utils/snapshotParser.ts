@@ -20,13 +20,15 @@ const ROLE_DISPLAY: Record<string, string> = {
 
 /** Parse a single snapshot line into a structured node */
 function parseLine(line: string): SnapshotNode | null {
-    // Match: optional leading spaces, uid=X_Y, role, optional "label", optional key=value or key="value" attrs
-    const match = line.match(/^(\s*)uid=(\S+)\s+(\w+)\s*(.*)/);
+    // Match: optional leading spaces, uid=X_Y, role, optional "label", optional key=value or key="value" attrs.
+    // A text node has no role: uid=X_Y "label". Conversations stored before
+    // chrome-devtools-mcp 1.11 hold snapshots that give it one, StaticText
+    const match = line.match(/^(\s*)uid=(\S+)(?:\s+(\w+))?\s*(.*)/);
     if (!match) return null;
 
     const indent = match[1]!.length;
     const uid = match[2]!;
-    const role = match[3]!;
+    const role = match[3] ?? 'StaticText';
     const rest = match[4]!;
 
     // Extract quoted label (first quoted string after role)
