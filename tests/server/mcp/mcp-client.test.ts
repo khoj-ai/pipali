@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import fs from 'fs/promises';
 import os from 'os';
 import path from 'path';
+import { fileURLToPath } from 'url';
 import { McpClient, parseStdioCommand, splitCommandLine, isHttpTransport, resolveVendoredBin } from '../../../src/server/processor/mcp/client';
 
 const httpOAuthServer = {
@@ -123,6 +124,34 @@ describe('MCP Client', () => {
                 } : null);
             });
         }
+    });
+
+    describe('stdio server stderr', () => {
+        const fixture = fileURLToPath(new URL('../../fixtures/mcp-stderr-server.ts', import.meta.url));
+        const stderrServer = (mode: string) => new McpClient({
+            ...httpOAuthServer,
+            name: 'stderr-server',
+            transportType: 'stdio',
+            authType: 'none',
+            path: `"${process.execPath}" "${fixture}" ${mode}`,
+        });
+
+        test('reports what a server wrote to stderr before it exited while starting', async () => {
+            const client = stderrServer('refuse');
+
+            await expect(client.connect()).rejects.toThrow(/Connection closed\nServer output:\nerror: EXAMPLE_API_KEY is not set/);
+        });
+
+        test('reports what a server wrote to stderr before it exited during a tool call', async () => {
+            const client = stderrServer('serve');
+            await client.connect();
+
+            const result = await client.runTool('crash', {});
+            await client.close();
+
+            expect(result.success).toBe(false);
+            expect(result.error).toMatch(/Connection closed\nServer output:\nfatal: out of memory/);
+        });
     });
 
     describe('runTool', () => {

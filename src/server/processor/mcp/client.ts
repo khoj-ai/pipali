@@ -2,6 +2,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js';
+import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import type { McpServerConfig, McpToolInfo, McpToolCallResult, McpClientStatus, McpContentType } from './types';
 import { DbMcpOAuthProvider } from './oauth-provider';
 import os from 'os';
@@ -10,6 +11,9 @@ import { createChildLogger } from '../../logger';
 import { getBundledRuntimes } from '../../bundled-runtimes';
 
 const log = createChildLogger({ component: 'mcp' });
+
+/** How much of a stdio server's latest stderr is kept to explain a failure */
+const STDERR_TAIL_CHARS = 1000;
 
 /**
  * Build the environment for stdio MCP servers.
@@ -280,6 +284,7 @@ export class McpClient {
     private tools: McpToolInfo[] = [];
     private _status: McpClientStatus = 'disconnected';
     private reconnecting: Promise<void> | null = null;
+    private stderrTail = '';
 
     constructor(config: McpServerConfig, options: { oauthInteractive?: boolean; callbackOrigin?: string } = {}) {
         this.config = config;
@@ -337,7 +342,7 @@ export class McpClient {
             await this.refreshTools();
         } catch (error) {
             this._status = 'error';
-            throw error;
+            throw this.withServerOutput(error);
         }
     }
 
@@ -368,14 +373,28 @@ export class McpClient {
             configEnv: this.config.env,
         });
 
-        this.transport = new StdioClientTransport({
-            command,
-            args,
-            env,
-            stderr: 'inherit',
+        // The server gets a stderr of its own, read here. Sharing this process's
+        // stderr ends a server that writes to it once nothing reads it anymore.
+        const transport = new StdioClientTransport({ command, args, env, stderr: 'pipe' });
+        this.transport = transport;
+        this.stderrTail = '';
+        const decoder = new TextDecoder();
+        transport.stderr?.on('data', (chunk: Buffer) => {
+            const text = decoder.decode(chunk, { stream: true });
+            log.debug({ server: this.config.name }, text.trimEnd());
+            this.stderrTail = (this.stderrTail + text).slice(-STDERR_TAIL_CHARS);
         });
 
-        await this.client!.connect(this.transport);
+        await this.client!.connect(transport);
+    }
+
+    /** Add what a stdio server last wrote to stderr to an error that does not say why */
+    private withServerOutput(error: unknown): unknown {
+        const output = this.stderrTail.trim();
+        if (!output || !(error instanceof Error)) {
+            return error;
+        }
+        return new Error(`${error.message}\nServer output:\n${output}`, { cause: error.cause });
     }
 
     /**
@@ -535,6 +554,9 @@ export class McpClient {
     }
 
     private formatToolError(error: unknown, toolName: string): McpToolCallResult {
+        if (error instanceof McpError && error.code === ErrorCode.ConnectionClosed) {
+            error = this.withServerOutput(error);
+        }
         let errorMsg = error instanceof Error ? error.message : String(error);
         // Preserve the cause chain (e.g., puppeteer wraps the real error in a generic message)
         if (error instanceof Error && error.cause) {
