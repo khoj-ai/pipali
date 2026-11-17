@@ -1,5 +1,8 @@
-import { describe, expect, test } from 'bun:test';
-import { McpClient, parseStdioCommand, splitCommandLine, isHttpTransport } from '../../../src/server/processor/mcp/client';
+import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import fs from 'fs/promises';
+import os from 'os';
+import path from 'path';
+import { McpClient, parseStdioCommand, splitCommandLine, isHttpTransport, resolveVendoredBin } from '../../../src/server/processor/mcp/client';
 
 const httpOAuthServer = {
     id: 7,
@@ -83,6 +86,41 @@ describe('MCP Client', () => {
                 const result = parseStdioCommand(path);
                 expect(result.command).toBe(command);
                 expect(result.args).toEqual(args);
+            });
+        }
+    });
+
+    describe('resolveVendoredBin', () => {
+        let serverDir: string;
+
+        beforeAll(async () => {
+            serverDir = await fs.mkdtemp(path.join(os.tmpdir(), 'pipali-vendored-'));
+            for (const name of ['chrome-devtools-mcp', '@scope/server']) {
+                const dir = path.join(serverDir, 'node_modules', name);
+                await fs.mkdir(dir, { recursive: true });
+                await Bun.write(path.join(dir, 'package.json'), JSON.stringify({ name, version: '1.2.3', bin: { [name]: './bin.js' } }));
+            }
+        });
+
+        afterAll(() => fs.rm(serverDir, { recursive: true, force: true }));
+
+        const cases: Array<{ spec: string; vendored: string | null; desc: string }> = [
+            { spec: 'chrome-devtools-mcp', vendored: 'chrome-devtools-mcp', desc: 'no selector' },
+            { spec: 'chrome-devtools-mcp@1.2.3', vendored: 'chrome-devtools-mcp', desc: 'the vendored version' },
+            { spec: '@scope/server', vendored: '@scope/server', desc: 'scoped, no selector' },
+            { spec: 'chrome-devtools-mcp@latest', vendored: null, desc: 'a tag' },
+            { spec: 'chrome-devtools-mcp@1.2.4', vendored: null, desc: 'another version' },
+            { spec: 'chrome-devtools-mcp@^1.0.0', vendored: null, desc: 'a range the vendored version satisfies' },
+            { spec: '@scope/server@latest', vendored: null, desc: 'scoped, a tag' },
+        ];
+
+        for (const { spec, vendored, desc } of cases) {
+            test(`${desc}: ${spec} -> ${vendored ? 'vendored' : 'bun x'}`, async () => {
+                const result = await resolveVendoredBin(['x', '-y', spec, '--autoConnect'], serverDir);
+                expect(result).toEqual(vendored ? {
+                    binPath: path.join(serverDir, 'node_modules', vendored, 'bin.js'),
+                    extraArgs: ['--autoConnect'],
+                } : null);
             });
         }
     });

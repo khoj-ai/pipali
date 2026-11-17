@@ -142,11 +142,23 @@ export function isMcpSessionExpiredError(error: unknown): boolean {
 }
 
 /**
- * Resolve a `bun x <package>` call to a vendored binary in the server resource
- * node_modules. Returns null if the package isn't vendored.
+ * Split an npm package spec into its name and selector,
+ * e.g. "@scope/pkg@^1.2" into "@scope/pkg" and "^1.2".
  */
-async function resolveVendoredBin(
-    args: string[]
+function parsePackageSpec(spec: string): { name: string; selector?: string } {
+    const at = spec.indexOf('@', 1); // a leading @ opens a scope
+    return at === -1 ? { name: spec } : { name: spec.slice(0, at), selector: spec.slice(at + 1) };
+}
+
+/**
+ * Resolve a `bun x <package>` call to a vendored binary in the server resource
+ * node_modules. Returns null if the package isn't vendored, or if the call asks
+ * for a version, range or tag other than the vendored version, which is left
+ * for `bun x` to resolve.
+ */
+export async function resolveVendoredBin(
+    args: string[],
+    serverDir = process.env.PIPALI_SERVER_RESOURCE_DIR
 ): Promise<{ binPath: string; extraArgs: string[] } | null> {
     // Only handle `bun x -y <package> [args...]` patterns
     if (args[0] !== 'x') return null;
@@ -156,17 +168,16 @@ async function resolveVendoredBin(
     while (pkgIndex < args.length && args[pkgIndex]!.startsWith('-')) pkgIndex++;
     if (pkgIndex >= args.length) return null;
 
-    const pkgSpec = args[pkgIndex]!; // e.g. "chrome-devtools-mcp@latest" or "chrome-devtools-mcp"
-    const pkgName = pkgSpec.replace(/@[\w.*^~>=<|-]+$/, ''); // strip version suffix
+    const { name: pkgName, selector } = parsePackageSpec(args[pkgIndex]!);
     const extraArgs = args.slice(pkgIndex + 1);
 
-    const serverDir = process.env.PIPALI_SERVER_RESOURCE_DIR;
     if (!serverDir) return null;
 
     // Check if the package is vendored by looking for its package.json
     const pkgJsonPath = path.join(serverDir, 'node_modules', pkgName, 'package.json');
     try {
         const pkgJson = JSON.parse(await Bun.file(pkgJsonPath).text());
+        if (selector !== undefined && selector !== pkgJson.version) return null;
         // Resolve the bin entry — use the package name key or the first bin entry
         const bin = pkgJson.bin;
         let binRelPath: string | undefined;
