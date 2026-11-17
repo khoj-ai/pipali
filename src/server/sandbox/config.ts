@@ -188,6 +188,8 @@ export const DEFAULT_ALLOWED_DOMAINS: string[] = [
     'pypi.org',
     '*.pypi.org',
     'files.pythonhosted.org',
+    // Where uv downloads the Python it installs, before trying GitHub
+    'releases.astral.sh',
     'rubygems.org',
     'crates.io',
     // GitHub

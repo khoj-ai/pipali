@@ -45,8 +45,9 @@ const TARGET_TRIPLE_MAP: Record<Platform, string> = {
 };
 
 // UV download URLs by platform
-// Using latest stable release - check https://github.com/astral-sh/uv/releases for updates
-const UV_VERSION = "0.5.24";
+// 0.5.26 or later: the document skill runs its scripts as "uvx --with <package> python".
+// Releases: https://github.com/astral-sh/uv/releases
+const UV_VERSION = "0.13.9";
 const UV_DOWNLOAD_MAP: Record<Platform, string> = {
     "darwin-arm64": `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-aarch64-apple-darwin.tar.gz`,
     "darwin-x64": `https://github.com/astral-sh/uv/releases/download/${UV_VERSION}/uv-x86_64-apple-darwin.tar.gz`,
