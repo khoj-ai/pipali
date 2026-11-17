@@ -1,6 +1,7 @@
 import type { Responses } from 'openai/resources/responses/responses';
 import type { ChatMessage } from './conversation';
 import type { ATIFStep } from './atif/atif.types';
+import { IMAGE_OVER_REQUEST_BUDGET_NOTE, imagesOverRequestBudget, isBase64Image, type ContentItem } from './images';
 
 /**
  * Sanitize a raw output item for use as input.
@@ -17,10 +18,17 @@ function sanitizeOutputItemForInput(item: Responses.ResponseOutputItem): Respons
 
 /**
  * Convert provider-agnostic image format to OpenAI's input_image format.
+ * An image the request has no room for is replaced by a note.
  */
-function convertToOpenAIImageContent(content: any[]): Responses.ResponseInputMessageContentList {
-    return content.map((item: any) => {
-        if (item.type === 'image' && item.source_type === 'base64') {
+function convertToOpenAIImageContent(content: ContentItem[], omittedImages: Set<ContentItem>): Responses.ResponseInputMessageContentList {
+    return content.map((item) => {
+        if (omittedImages.has(item)) {
+            return {
+                type: 'input_text' as const,
+                text: IMAGE_OVER_REQUEST_BUDGET_NOTE
+            };
+        }
+        if (isBase64Image(item)) {
             return {
                 type: 'input_image' as const,
                 image_url: `data:${item.mime_type};base64,${item.data}`
@@ -34,13 +42,6 @@ function convertToOpenAIImageContent(content: any[]): Responses.ResponseInputMes
         }
         return item;
     }) as Responses.ResponseInputMessageContentList;
-}
-
-/**
- * Check if content array contains provider-agnostic images that need conversion.
- */
-function hasProviderAgnosticImage(content: any[]): boolean {
-    return content.some((item: any) => item.type === 'image' && item.source_type === 'base64');
 }
 
 /** Set on a compaction step to how many steps came before it when it was made */
@@ -92,6 +93,8 @@ export function generateChatmlMessagesWithContext(
             stepsToProcess = history.slice(compactionIndex);
         }
     }
+
+    const omittedImages = imagesOverRequestBudget(stepsToProcess);
 
     for (const msg of stepsToProcess) {
         if (msg.source === 'system') {
@@ -146,12 +149,11 @@ export function generateChatmlMessagesWithContext(
             if (msg.observation?.results && msg.observation.results.length > 0) {
                 for (const result of msg.observation.results) {
                     // Handle multimodal content (images from view_file, MCP tools, etc.)
-                    if (Array.isArray(result.content) && hasProviderAgnosticImage(result.content)) {
-                        // Add text-only function output for the tool result
+                    if (Array.isArray(result.content) && result.content.some(isBase64Image)) {
                         messages.push({
                             type: 'function_call_output',
                             call_id: result.source_call_id,
-                            output: convertToOpenAIImageContent(result.content),
+                            output: convertToOpenAIImageContent(result.content, omittedImages),
                         } as Responses.ResponseInputItem.FunctionCallOutput);
                     } else {
                         // Standard text output

@@ -28,6 +28,7 @@ import { generateImage, type GenerateImageArgs } from '../actor/generate_image';
 import { emailUser, type EmailUserArgs } from '../actor/email_user';
 import { applyProviderToolSearch, applyToolDeferral, buildMcpInventoryForPrompt, searchTools, SEARCH_TOOLS_TOOL_NAME, type SearchToolsArgs } from '../actor/search_tools';
 import { getFunctionCallName } from '../conversation/openai/utils';
+import { omitOversizedImage } from '../conversation/images';
 import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
@@ -85,7 +86,7 @@ export const MAX_TOOL_OUTPUT_CHARS = 100_000;
 /**
  * Truncate tool output content to prevent context window blowup and DB bloat.
  * - For strings: truncate to MAX_TOOL_OUTPUT_CHARS
- * - For arrays: truncate text items, preserve binary data (images/audio)
+ * - For arrays: truncate text items, leave out images too large to send, preserve other binary data (audio)
  */
 export function truncateToolOutput(
     content: ATIFObservationResult['content']
@@ -98,7 +99,7 @@ export function truncateToolOutput(
             `\n\n[Output truncated: showing first ${MAX_TOOL_OUTPUT_CHARS.toLocaleString()} of ${content.length.toLocaleString()} characters]`;
     }
 
-    // For multimodal arrays, truncate text items only
+    // For multimodal arrays, truncate text items and leave out oversized images
     return content.map(item => {
         if (item.type === 'text' && typeof item.text === 'string') {
             if (item.text.length <= MAX_TOOL_OUTPUT_CHARS) {
@@ -110,8 +111,7 @@ export function truncateToolOutput(
                     `\n\n[Output truncated: showing first ${MAX_TOOL_OUTPUT_CHARS.toLocaleString()} of ${item.text.length.toLocaleString()} characters]`,
             };
         }
-        // Preserve non-text items (images, audio) as-is
-        return item;
+        return omitOversizedImage(item);
     });
 }
 
