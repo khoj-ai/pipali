@@ -121,6 +121,7 @@ describe('MCP Client', () => {
                 expect(result).toEqual(vendored ? {
                     binPath: path.join(serverDir, 'node_modules', vendored, 'bin.js'),
                     extraArgs: ['--autoConnect'],
+                    env: { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1' },
                 } : null);
             });
         }

@@ -44,6 +44,13 @@ const TARGET_TRIPLE_MAP: Record<Platform, string> = {
     "windows-x64": "x86_64-pc-windows-msvc",
 };
 
+/**
+ * Oldest Bun the app can be built with. The app bundles the Bun that builds it, and
+ * the bundled chrome-devtools-mcp reaches Chrome through the `ws` library, which
+ * cannot connect under an older Bun.
+ */
+const MIN_BUN_VERSION = "1.4.0";
+
 // UV download URLs by platform
 // 0.5.26 or later: the document skill runs its scripts as "uvx --with <package> python".
 // Releases: https://github.com/astral-sh/uv/releases
@@ -441,7 +448,9 @@ async function buildServerBundle() {
         dependencies: {
             "@electric-sql/pglite": "^0.3.14",
             "@anthropic-ai/sandbox-runtime": "^0.0.81",
-            "chrome-devtools-mcp": "^0.20.3",
+            // Exact, since the app reads this server's tool arguments and result
+            // text, and both have changed between its minor releases
+            "chrome-devtools-mcp": "1.13.0",
         },
     };
     await fs.writeFile(
@@ -461,10 +470,6 @@ async function buildServerBundle() {
         throw new Error(`Failed to install dependencies: exit code ${exitCode}`);
     }
 
-    // Patch chrome-devtools-mcp to use Bun's native WebSocket instead of the
-    // bundled `ws` library which is broken under Bun.
-    await patchChromeDevtoolsMcp(serverResourceDir);
-
     // Copy PGlite WASM assets next to the bundled server
     console.log("   Copying PGlite assets...");
     const pgliteDist = path.join(serverResourceDir, "node_modules", "@electric-sql", "pglite", "dist");
@@ -478,73 +483,6 @@ async function buildServerBundle() {
     );
 
     console.log("✅ Server bundle built successfully");
-}
-
-/**
- * Patch chrome-devtools-mcp's NodeWebSocketTransport to use Bun's native
- * WebSocket instead of the bundled `ws` library (which is broken under Bun).
- *
- * TODO: This patched, vendored chrome-devtools-mcp can be dropped after
- * Bun PR #27859 is merged.
- * At that point `ws` will work correctly under Bun and we can go back to
- * fetching chrome-devtools-mcp on-demand via `bun x`.
- */
-async function patchChromeDevtoolsMcp(serverResourceDir: string) {
-    const thirdPartyPath = path.join(
-        serverResourceDir, "node_modules", "chrome-devtools-mcp", "build", "src", "third_party", "index.js"
-    );
-
-    let content: string;
-    try {
-        content = await fs.readFile(thirdPartyPath, "utf-8");
-    } catch {
-        throw new Error(`chrome-devtools-mcp third_party/index.js not found at ${thirdPartyPath}`);
-    }
-
-    const original = `static create(url, headers) {
-        return new Promise((resolve, reject) => {
-            const ws = new WebSocket$1(url, [], {
-                followRedirects: true,
-                perMessageDeflate: false,
-                allowSynchronousEvents: false,
-                maxPayload: 256 * 1024 * 1024,
-                headers: {
-                    'User-Agent': \`Puppeteer \${packageVersion}\`,
-                    ...headers,
-                },
-            });`;
-
-    const patched = `static create(url, headers) {
-        const useNativeWebSocket = typeof Bun !== 'undefined';
-        return new Promise((resolve, reject) => {
-            let ws;
-            if (useNativeWebSocket) {
-                ws = new WebSocket(url);
-            } else {
-                ws = new WebSocket$1(url, [], {
-                    followRedirects: true,
-                    perMessageDeflate: false,
-                    allowSynchronousEvents: false,
-                    maxPayload: 256 * 1024 * 1024,
-                    headers: {
-                        'User-Agent': \`Puppeteer \${packageVersion}\`,
-                        ...headers,
-                    },
-                });
-            }`;
-
-    if (!content.includes(original)) {
-        // Check if already patched
-        if (content.includes("useNativeWebSocket")) {
-            console.log("   chrome-devtools-mcp already patched, skipping");
-            return;
-        }
-        throw new Error("Could not find NodeWebSocketTransport.create() to patch in chrome-devtools-mcp — the upstream code may have changed");
-    }
-
-    const patchedContent = content.replace(original, patched);
-    await fs.writeFile(thirdPartyPath, patchedContent);
-    console.log("   Patched NodeWebSocketTransport to use Bun native WebSocket");
 }
 
 // Directories to skip when copying (platform is a separate service, not needed in desktop app)
@@ -1045,6 +983,10 @@ async function buildTauri(debug: boolean, platform: Platform, disableUpdaterArti
 }
 
 async function main() {
+    if (Bun.semver.order(Bun.version, MIN_BUN_VERSION) < 0) {
+        throw new Error(`The desktop app needs Bun ${MIN_BUN_VERSION} or later to build, found ${Bun.version}`);
+    }
+
     const startTime = Date.now();
     const { platform, debug, disableUpdaterArtifacts } = await parseArgs();
 

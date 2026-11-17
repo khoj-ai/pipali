@@ -155,6 +155,12 @@ function parsePackageSpec(spec: string): { name: string; selector?: string } {
 }
 
 /**
+ * Environment for a server run from its vendored copy. The app updates that copy,
+ * so chrome-devtools-mcp's own daily check for a newer release is turned off.
+ */
+const VENDORED_ENV = { CHROME_DEVTOOLS_MCP_NO_UPDATE_CHECKS: '1' };
+
+/**
  * Resolve a `bun x <package>` call to a vendored binary in the server resource
  * node_modules. Returns null if the package isn't vendored, or if the call asks
  * for a version, range or tag other than the vendored version, which is left
@@ -163,7 +169,7 @@ function parsePackageSpec(spec: string): { name: string; selector?: string } {
 export async function resolveVendoredBin(
     args: string[],
     serverDir = process.env.PIPALI_SERVER_RESOURCE_DIR
-): Promise<{ binPath: string; extraArgs: string[] } | null> {
+): Promise<{ binPath: string; extraArgs: string[]; env: Record<string, string> } | null> {
     // Only handle `bun x -y <package> [args...]` patterns
     if (args[0] !== 'x') return null;
 
@@ -193,7 +199,7 @@ export async function resolveVendoredBin(
         if (!binRelPath) return null;
 
         const binPath = path.join(serverDir, 'node_modules', pkgName, binRelPath);
-        return { binPath, extraArgs };
+        return { binPath, extraArgs, env: VENDORED_ENV };
     } catch {
         return null;
     }
@@ -351,6 +357,7 @@ export class McpClient {
      */
     private async connectStdio(): Promise<void> {
         let { command, args } = parseStdioCommand(this.config.path);
+        let vendoredEnv: Record<string, string> | undefined;
 
         // Use bundled bun if available (desktop app)
         const runtimes = await getBundledRuntimes();
@@ -360,6 +367,7 @@ export class McpClient {
             const vendoredBin = await resolveVendoredBin(args);
             if (vendoredBin) {
                 args = ['run', vendoredBin.binPath, ...vendoredBin.extraArgs];
+                vendoredEnv = vendoredBin.env;
             }
         }
 
@@ -370,7 +378,7 @@ export class McpClient {
         const env = buildStdioEnvironment(defaultEnv, {
             homeDir: getHomeDir(),
             shellPath,
-            configEnv: this.config.env,
+            configEnv: { ...vendoredEnv, ...this.config.env },
         });
 
         // The server gets a stderr of its own, read here. Sharing this process's
