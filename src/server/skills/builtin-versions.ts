@@ -94,6 +94,7 @@ export const SHIPPED_SKILL_HASHES: Record<string, string[]> = {
         '46df65862f9a3eeea34f34e1c44def8a8dd0b503e052a6856d45371086311d9b',
         '9c138279bb01b818d1a5adcca31873483effcdf229b6ca3fcc34ac528954d5c5',
         '7d29babb2781fcb9aead0c204cae156eb4e35d1a45cd57d8902c819214ec1e32',
+        'bcca529dbc1a01a58192f0b63ab9e5c08641681104c3af4e4263ba654af3e348',
     ],
     'introspect': [
         'd3e02831e09870c54897f8050824cd36943cd1494f203646f2673ba4103855a6',

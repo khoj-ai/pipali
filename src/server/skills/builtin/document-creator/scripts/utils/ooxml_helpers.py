@@ -13,7 +13,8 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator
-import defusedxml.ElementTree as ET
+import xml.etree.ElementTree as ET
+from defusedxml.ElementTree import parse as parse_xml
 
 
 # OOXML Namespaces
@@ -46,7 +47,7 @@ def parse_document(folder_path: str) -> ET.Element:
     if not doc_path.exists():
         raise FileNotFoundError(f"document.xml not found in {folder_path}")
 
-    tree = ET.parse(str(doc_path))
+    tree = parse_xml(str(doc_path))
     return tree.getroot()
 
 
@@ -279,9 +280,8 @@ def enable_track_changes(folder_path: str) -> None:
     if not settings_path.exists():
         # Create minimal settings.xml if it doesn't exist
         root = ET.Element(f"{{{NAMESPACES['w']}}}settings")
-        root.set(f"xmlns:w", NAMESPACES["w"])
     else:
-        tree = ET.parse(str(settings_path))
+        tree = parse_xml(str(settings_path))
         root = tree.getroot()
 
     # Check if trackRevisions already exists
