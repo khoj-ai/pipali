@@ -434,6 +434,8 @@ export async function wrapCommandWithSandbox(command: string, commandId?: string
 export interface SandboxedCommand {
     cmd: string[];
     env: Record<string, string | undefined>;
+    /** The folder to start the command in */
+    cwd: string;
 }
 
 /**
@@ -452,6 +454,7 @@ export async function prepareSandboxedCommand(
         cmd: ['/bin/bash', '-c', await wrapCommandWithSandbox(command, commandId)],
         // Redirect tool caches to paths the sandbox lets them write
         env: { ...process.env, ...getSandboxEnvOverrides() },
+        cwd,
     };
 }
 
@@ -469,16 +472,20 @@ async function prepareWindowsCommand(command: string, commandId: string, cwd: st
         throw new Error('The sandbox is not running');
     }
 
+    // PowerShell cannot start in a folder spelled with 8.3 short names, as %TEMP% and so the
+    // scratch folder often are, when the sandbox cannot read a folder on the way to it.
+    // The command starts in the folder it is spawned in, so the caller spawns it here.
+    const startIn = await fs.promises.realpath(cwd).catch(() => cwd);
     const { argv, env } = await SandboxManager.wrapWithSandboxArgv(
         `${await windowsPreamble()}; ${command}`,
         { ...parseWindowsBinShell('powershell'), args: ['-NoProfile', '-NonInteractive', '-Command'] },
         undefined,
         undefined,
-        cwd,
+        startIn,
         { commandId, commandText: command },
     );
     log.debug({ command: command.substring(0, 100) }, 'Command wrapped with sandbox');
-    return { cmd: argv, env };
+    return { cmd: argv, env, cwd: startIn };
 }
 
 /**

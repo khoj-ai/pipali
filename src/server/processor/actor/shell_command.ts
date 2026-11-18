@@ -255,10 +255,12 @@ export async function shellCommand(
         // Determine shell command based on platform and sandbox mode
         let shellCmd: string[];
         let baseEnv: Record<string, string | undefined>;
+        let startIn = workingDir;
 
         if (sandboxed) {
             shellCmd = sandboxed.cmd;
             baseEnv = sandboxed.env;
+            startIn = sandboxed.cwd;
             log.debug(`Executing (sandboxed): ${command} in ${workingDir}`);
         } else if (isWindows) {
             shellCmd = ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', command];
@@ -276,12 +278,12 @@ export async function shellCommand(
             const describeExit = sandboxed
                 ? (exitCode: number, errors: string) => describeSandboxRefusals(commandId, { exitCode, errors })
                 : undefined;
-            return startInBackground({ command, workingDir, shellCmd, env, query, describeExit }, options);
+            return startInBackground({ command, workingDir, startIn, shellCmd, env, query, describeExit }, options);
         }
 
         const proc = Bun.spawn({
             cmd: shellCmd,
-            cwd: workingDir,
+            cwd: startIn,
             env,
             stdout: 'pipe',
             stderr: 'pipe',
@@ -406,6 +408,8 @@ function startInBackground(
     prepared: {
         command: string;
         workingDir: string;
+        /** The folder the command starts in, workingDir as the sandbox spells it */
+        startIn: string;
         shellCmd: string[];
         env: Record<string, string | undefined>;
         query: string;
@@ -413,7 +417,7 @@ function startInBackground(
     },
     options?: ShellCommandOptions,
 ): ShellCommandResult {
-    const { command, workingDir, shellCmd, env, query, describeExit } = prepared;
+    const { command, workingDir, startIn, shellCmd, env, query, describeExit } = prepared;
     const base = { query, file: workingDir, uri: workingDir };
 
     if (!options?.conversationId || !options?.user) {
@@ -423,7 +427,7 @@ function startInBackground(
     try {
         const record = startBackgroundProcess({
             cmd: shellCmd,
-            cwd: workingDir,
+            cwd: startIn,
             env,
             command,
             conversationId: options.conversationId,

@@ -71,7 +71,7 @@ async function whyNotRunning(): Promise<string> {
  * Run a command the way the agent does, counting confirmations asked for. Refuses while the
  * sandbox is down, where the command would only go to the user and be declined.
  */
-async function run(command: string, timeout?: number) {
+async function run(command: string, timeout?: number, cwd?: string) {
     if (!isSandboxActive()) {
         throw new Error(`The sandbox is not running: ${await whyNotRunning()}`);
     }
@@ -84,7 +84,7 @@ async function run(command: string, timeout?: number) {
         },
     };
     const result = await shellCommand(
-        { justification: 'windows sandbox test', command, read_only: false, execution_mode: 'sandbox', timeout },
+        { justification: 'windows sandbox test', command, read_only: false, execution_mode: 'sandbox', timeout, cwd },
         { confirmationContext },
     );
     return { output: String(result.compiled), asked };
@@ -143,6 +143,13 @@ describeHere('Windows sandbox', () => {
         const { output, asked } = await run(`Write-Output 'hello from the sandbox'`);
         expect(asked).toBe(0);
         expect(output).toContain('hello from the sandbox');
+    });
+
+    test('starts in its scratch folder however %TEMP% spells it', async () => {
+        // %TEMP% is often spelled with 8.3 short names, such as C:\Users\ADMINI~1\AppData\Local\Temp
+        const { output, asked } = await run('(Get-Location).Path', undefined, SANDBOX_TEMP_DIR);
+        expect(asked).toBe(0);
+        expect(output).toContain(fs.realpathSync.native(SANDBOX_TEMP_DIR));
     });
 
     test('writes inside its scratch folder', async () => {
