@@ -33,7 +33,7 @@ import { getChatModelById, getDefaultChatModel } from '../../db';
 import * as prompts from './prompts';
 import { getLoadedSkills, formatSkillsForPrompt } from '../../skills';
 import { formatMemoryForPrompt, MEMORY_RECALL_KIND } from '../../memory';
-import { formatLocalDateTime } from '../clock';
+import { formatLocalDateTime, systemPromptStep } from '../clock';
 import { type ATIFMetrics, type ATIFObservationResult, type ATIFStep, type ATIFToolCall, type ATIFTrajectory } from '../conversation/atif/atif.types';
 import { addMetrics } from '../conversation/atif/atif.utils';
 import type { ConfirmationContext } from '../confirmation';
@@ -122,6 +122,7 @@ interface ResearchConfig {
     /** When the conversation's system prompt was written; the prompt states this moment, not the current one */
     startedAt?: Date;
     location?: string;
+    language?: string;
     username?: string;
     userContext?: string;
     /** Catalogue the conversation's system prompt lists, frozen at conversation start */
@@ -148,8 +149,6 @@ interface ResearchConfig {
     runId?: string;
     // Step count when iteration threshold was first reached, for stable warning injection
     thresholdStepCount?: number;
-    // Whether this is the user's very first conversation ever
-    isFirstEverConversation?: boolean;
     // Conversation ID for tools that need to reference the current conversation
     conversationId?: string;
     // Whether this conversation may itself delegate
@@ -181,6 +180,19 @@ async function buildMcpContext(): Promise<string> {
     }
 }
 
+/** Marks a persisted system prompt written for the user's first conversation */
+export const FIRST_CONVERSATION_KEY = 'first_conversation';
+
+const PROVIDE_UPDATES_PREAMBLE = "Provide frequent, user-visible intermediary updates to communicate progress and new information to the user as you work. Tone of your updates must match your personality.";
+
+function isGpt54OrLater(modelName: string): boolean {
+    const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(modelName.toLowerCase());
+    if (!match) return false;
+    const major = Number(match[1]);
+    const minor = Number(match[2] ?? 0);
+    return major > 5 || (major === 5 && minor >= 4);
+}
+
 export async function buildSystemPrompt(args: {
     /** Moment the prompt describes as the conversation's start. Defaults to now, for a new conversation. */
     startedAt?: Date;
@@ -188,7 +200,8 @@ export async function buildSystemPrompt(args: {
     language?: string;
     username?: string;
     userContext?: string;
-    provideUpdatesPreamble?: string;
+    /** The model the conversation was started with */
+    modelName?: string;
     isFirstEverConversation?: boolean;
     conversationRole?: ConversationRole;
     /** Catalogue to list, frozen at conversation start by the caller. Live changes arrive as steps. */
@@ -199,8 +212,8 @@ export async function buildSystemPrompt(args: {
         ? await prompts.userContext.format({ userContext: args.userContext })
         : '';
 
-    const provideUpdatesPreamble = args.provideUpdatesPreamble
-        ? `\n- ${args.provideUpdatesPreamble}`
+    const provideUpdatesPreamble = args.modelName && isGpt54OrLater(args.modelName)
+        ? `\n- ${PROVIDE_UPDATES_PREAMBLE}`
         : '';
 
     const memoryContext = args.memoriesEnabled === false
@@ -740,7 +753,7 @@ export function stepLimitWarningThreshold(maxIterations: number): number {
 async function pickNextTool(
     config: ResearchConfig
 ): Promise<ResearchIteration> {
-    const { startedAt, location, username, userContext, currentIteration = 0, maxIterations, thresholdStepCount } = config;
+    const { startedAt, location, language, username, userContext, currentIteration = 0, maxIterations, thresholdStepCount } = config;
     const isLast = currentIteration >= maxIterations - 1;
 
     // Get all tools (built-in + delegation + MCP). A delegated task does its own work
@@ -753,12 +766,15 @@ async function pickNextTool(
     const toolChoice = isLast ? 'none' : 'auto';
 
     const now = new Date();
+    // Rebuilt from the same inputs it was written with, so an unchanged setting keeps the prompt a stable prefix
     const systemPrompt = config.systemPrompt ?? await buildSystemPrompt({
         startedAt,
         location,
+        language,
         username,
         userContext,
-        isFirstEverConversation: config.isFirstEverConversation,
+        modelName: config.chatHistory.agent.model_name,
+        isFirstEverConversation: systemPromptStep(config.chatHistory.steps)?.extra?.[FIRST_CONVERSATION_KEY] === true,
         conversationRole: config.conversationRole,
         memoryCatalogue: config.memoryCatalogue,
         memoriesEnabled: config.memoriesEnabled,

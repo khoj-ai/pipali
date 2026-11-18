@@ -302,6 +302,7 @@ export async function* runResearchWithConversation(
         startedAt,
         username: userContext.name,
         location: userContext.location,
+        language: userContext.language,
         userContext: userContext.instructions,
         memoryCatalogue,
         // Behind a routine's compaction boundary the catalogue is listed as it is now

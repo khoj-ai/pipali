@@ -41,9 +41,14 @@ export function formatExactLocalDateTime(date: Date): string {
     return `${formatLocalDate(date)} ${date.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
-/** When the persisted system prompt was written. Auxiliary system steps all carry a kind; the prompt is the one that does not. */
+/** The persisted system prompt. Auxiliary system steps all carry a kind; the prompt is the one that does not. */
+export function systemPromptStep(steps: ATIFStep[]): ATIFStep | undefined {
+    return steps.find(step => step.source === 'system' && step.extra?.kind === undefined);
+}
+
+/** When the persisted system prompt was written */
 export function conversationStartedAt(steps: ATIFStep[]): Date | undefined {
-    const prompt = steps.find(step => step.source === 'system' && step.extra?.kind === undefined);
+    const prompt = systemPromptStep(steps);
     return prompt ? new Date(prompt.timestamp) : undefined;
 }
 

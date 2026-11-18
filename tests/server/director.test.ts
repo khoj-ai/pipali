@@ -1,5 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research, stepLimitWarningThreshold, ResearchPausedError, ModelRefusalError } from '../../src/server/processor/director';
+import { truncateToolOutput, MAX_TOOL_OUTPUT_CHARS, buildSystemPrompt, research, stepLimitWarningThreshold, ResearchPausedError, ModelRefusalError, FIRST_CONVERSATION_KEY } from '../../src/server/processor/director';
 import { isFirstRunEasterEgg } from '../../src/server/utils';
 import { MEMORY_RECALL_KIND } from '../../src/server/memory';
 import type { ATIFTrajectory, ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
@@ -251,6 +251,46 @@ describe('research system prompt clock', () => {
 
         expect(systemMessage).toContain('Conversation Started (in User Local Timezone): Friday, 2026-09-18 afternoon');
         expect(systemMessage).not.toContain('Current Date');
+    });
+
+    // The first run sends the prompt it persists and later runs rebuild it. Rebuilt from
+    // unchanged settings it must match byte for byte, or every follow-up edits the
+    // prefix and the provider drops the cache and the reasoning held against it.
+    test('rebuilds the prompt a conversation was started with on a follow-up', async () => {
+        const startedAt = new Date(2026, 10, 18, 9);
+        const written = await buildSystemPrompt({
+            startedAt,
+            language: 'fr',
+            modelName: 'gpt-6.2-sol',
+            isFirstEverConversation: true,
+        });
+        expect(written).toContain('Provide frequent, user-visible intermediary updates');
+        expect(written).toContain('# First Conversation');
+        expect(written).toContain('French');
+
+        const history = trajectory([
+            { source: 'system', message: written, extra: { [FIRST_CONVERSATION_KEY]: true } },
+            { source: 'user', message: 'Hi, what can you do?' },
+            { source: 'agent', message: 'Hello! Tell me about your work.' },
+            { source: 'user', message: 'I research birds.' },
+        ]);
+        history.agent.model_name = 'gpt-6.2-sol';
+
+        const previousMock = globalThis.__pipaliMockLLM;
+        let systemMessage: string | undefined;
+        globalThis.__pipaliMockLLM = (_query, ctx) => {
+            systemMessage = (ctx?.messages?.[0] as { content?: string } | undefined)?.content;
+            return { message: 'Done.', raw: [] };
+        };
+        try {
+            for await (const iteration of research({ chatHistory: history, startedAt, language: 'fr', maxIterations: 2 })) {
+                if (iteration.isToolCallStart) continue;
+            }
+        } finally {
+            globalThis.__pipaliMockLLM = previousMock;
+        }
+
+        expect(systemMessage).toBe(written);
     });
 });
 

@@ -13,7 +13,7 @@ import { runResearchWithConversation, ResearchPausedError } from '../processor/r
 import { PlatformBillingError } from '../http/billing-errors';
 import { PlatformAuthError } from '../http/platform-fetch';
 import { atifConversationService, type ConversationRole } from '../processor/conversation/atif/atif.service';
-import { buildSystemPrompt, ModelRefusalError } from '../processor/director';
+import { buildSystemPrompt, FIRST_CONVERSATION_KEY, ModelRefusalError } from '../processor/director';
 import { loadUserContext } from '../user-context';
 import { loadMemorySettings } from '../memory/settings';
 import { loadCatalogue } from '../memory';
@@ -88,14 +88,6 @@ function ensureUniqueRunId(
     return { runId: regenerated, suggestedRunId: runHandle.runId };
 }
 
-function isGpt54OrLater(modelName: string): boolean {
-    const match = /^gpt-(\d+)(?:\.(\d+))?/.exec(modelName);
-    if (!match) return false;
-    const major = Number(match[1]);
-    const minor = Number(match[2] ?? 0);
-    return major > 5 || (major === 5 && minor >= 4);
-}
-
 async function ensureSystemPromptPersisted(
     conversationId: string,
     userId: number,
@@ -106,13 +98,8 @@ async function ensureSystemPromptPersisted(
     const hasSystem = !!conversation?.trajectory.steps.some(s => s.source === 'system');
     if (hasSystem) return undefined;
 
-    const isFirstEverConversation = (userMessage && isFirstRunEasterEgg(userMessage))
+    const isFirstEverConversation = (!!userMessage && isFirstRunEasterEgg(userMessage))
         || (await atifConversationService.countUserConversations(userId)) <= 1;
-
-    const modelName = conversation?.trajectory.agent.model_name.toLowerCase() || '';
-    const provideUpdatesPreamble = isGpt54OrLater(modelName)
-        ? "Provide frequent, user-visible intermediary updates to communicate progress and new information to the user as you work. Tone of your updates must match your personality."
-        : undefined;
 
     const userContext = await loadUserContext();
     const { memoriesEnabled } = await loadMemorySettings(userId);
@@ -121,7 +108,7 @@ async function ensureSystemPromptPersisted(
         language: userContext.language,
         username: userContext.name,
         userContext: userContext.instructions,
-        provideUpdatesPreamble,
+        modelName: conversation?.trajectory.agent.model_name,
         isFirstEverConversation,
         conversationRole,
         // Only reached for a conversation without a system prompt, so this is its baseline
@@ -129,7 +116,12 @@ async function ensureSystemPromptPersisted(
         memoriesEnabled,
     });
 
-    await atifConversationService.addStep(conversationId, 'system', systemPrompt);
+    // Recorded, as later runs rebuild the prompt and could no longer count it as the first
+    await atifConversationService.addStep(
+        conversationId, 'system', systemPrompt,
+        undefined, undefined, undefined, undefined, undefined,
+        isFirstEverConversation ? { [FIRST_CONVERSATION_KEY]: true } : undefined,
+    );
     return systemPrompt;
 }
 
