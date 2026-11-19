@@ -30,8 +30,11 @@ Integrate Jira, Linear, Slack etc. via MCP. Pipali can create issues, post messa
 ### Use your favorite AI models
 Use the right AI model for the right task. Model access is provided through the Pipali Platform — Single Sign On, no API key setup needed.
 
+Prefer to bring your own key or run models locally? Pipali works with OpenAI, Anthropic and Gemini API keys, and with local, self-hosted models via Ollama or any OpenAI Responses API compatible server.
+
 ### Run safely
 Pipali runs commands safely in a local sandbox that restricts file and network access. This reduces your confirmation fatigue while it works safely on your computer.
+
 Commands that need broader access require your explicit approval. You can configure these permissions yourself.
 
 ## Starter Prompts
@@ -54,7 +57,15 @@ Commands that need broader access require your explicit approval. You can config
   Individual users and Team admins should set up billing before the initial signup credits run out.
 
 - **Do I need API keys?**<br />
-  No — model access is provided via the Pipali Platform.
+  No. Model access is provided via the Pipali Platform.
+
+- **Can I use my own API keys or local models?**<br />
+  Yes. Set any of these environment variables before starting Pipali:
+  - Local models (Ollama etc.): `OPENAI_BASE_URL` to your server's OpenAI compatible endpoint (e.g. `http://localhost:11434/v1` for Ollama) and `OPENAI_API_KEY` to any value. Its models are discovered automatically, or list them in `OPENAI_MODELS`
+  - Your own keys: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` or `GEMINI_API_KEY`
+  - Skip signing in to the Pipali Platform: `PIPALI_ANON_MODE=true`. Web search then needs your own `EXA_API_KEY` or `SERPER_DEV_API_KEY`
+
+  Note: *Local models need a capable machine and a model that handles tool calls well.*
 
 ## Contributing
 
