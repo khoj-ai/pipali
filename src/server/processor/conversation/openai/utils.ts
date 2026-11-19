@@ -19,6 +19,7 @@ export function toOpenaiTools(tools?: ToolDefinition[]): Responses.Tool[] | unde
                     name: child.name,
                     description: child.description ?? undefined,
                     parameters: child.schema,
+                    strict: false,
                     ...(child.deferLoading ? { defer_loading: true } : {}),
                 })),
             };

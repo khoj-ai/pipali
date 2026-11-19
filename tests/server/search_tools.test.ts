@@ -539,9 +539,27 @@ describe('toOpenaiTools provider tool search mapping', () => {
                 name: 'create_issue',
                 description: 'Create an issue',
                 parameters: { type: 'object' },
+                strict: false,
                 defer_loading: true,
             }],
         });
+    });
+});
+
+describe('namespace children and strict schemas', () => {
+    test('children carry the same non-strict mode as flat function tools', () => {
+        // MCP schemas use JSON Schema formats (e.g. byte) that strict mode rejects with a 400
+        const mcpSchema = { type: 'object', properties: { data: { type: 'string', format: 'byte' } } };
+        const tool: ToolDefinition = { ...makeTool('files', 'upload', 'Upload a file'), schema: mcpSchema };
+        const [flat] = toOpenaiTools([tool]) ?? [];
+        const [namespace] = applyProviderToolSearch([...DEFERRING_TOOLS, tool], { namespaced: true })
+            .filter(t => t.type === 'namespace' && t.name === 'files');
+        const [mappedNamespace] = toOpenaiTools([namespace!]) ?? [];
+        const child = (mappedNamespace as { tools: Array<{ strict?: boolean | null; parameters: unknown }> }).tools[0]!;
+
+        expect((flat as { strict?: boolean | null }).strict).toBe(false);
+        expect(child.strict).toBe(false);
+        expect(child.parameters).toEqual(mcpSchema);
     });
 });
 
