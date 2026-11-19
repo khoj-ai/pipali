@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { runsFingerprints, splitRoutineRuns, type SummaryCheckpoint } from '../../src/server/automation/history';
-import { boundSummary, foldCheckpoints, planFolds, renderRun } from '../../src/server/automation/summary';
+import { foldCheckpoints, renderRun } from '../../src/server/automation/summary';
 import type { ATIFStep } from '../../src/server/processor/conversation/atif/atif.types';
 
 let nextId = 1;
@@ -22,46 +22,22 @@ function runsOf(count: number, output = 0): ATIFStep[][] {
 
 /** A summarizer that answers with the runs it was given, so each summary shows what it covers */
 function fakeSummarizer() {
-    const queries: string[] = [];
-    const summarize = async (query: string) => {
-        queries.push(query);
-        const previous = query.match(/<previous_summary>\n([\s\S]*?)\n<\/previous_summary>/)![1];
-        const runs = [...query.matchAll(/## Run (\d+)/g)].map(match => match[1]).join(',');
+    const requests: string[][] = [];
+    const summarize = async (previous: string, parts: string[]) => {
+        requests.push(parts);
+        const runs = parts.flatMap(part => [...part.matchAll(/^## Run (\d+)/g)].map(match => match[1])).join(',');
         return [previous, runs].filter(Boolean).join(',');
     };
-    return { queries, summarize };
+    return { requests, summarize };
 }
 const checkpointOf = (runs: ATIFStep[][], covered: number, text: string): SummaryCheckpoint =>
     ({ text, runs: covered, fingerprint: runsFingerprints(runs)[covered - 1]! });
 const covering = (checkpoints: SummaryCheckpoint[]) => checkpoints.map(cp => `${cp.runs}:${cp.text}`);
 
-describe('planFolds', () => {
-    test('short runs share a call that ends where they do', () => {
-        const calls = planFolds(runsOf(3), 1, 3);
-        expect(calls).toHaveLength(1);
-        expect(calls[0]!.coversRuns).toBe(3);
-        expect(calls[0]!.text.match(/## Run \d/g)).toEqual(['## Run 1', '## Run 2', '## Run 3']);
-    });
-
-    test('a run too long for one call is split into parts, and every character reaches a call', () => {
-        const runs = runsOf(2, 150_000);
-        const calls = planFolds(runs, 1, 2);
-
-        expect(calls.every(call => call.text.length <= 60_000)).toBe(true);
-        expect(calls.filter(call => call.coversRuns).map(call => call.coversRuns)).toEqual([1, 2]);
-        const sent = calls.map(call => call.text).join('\n').replace(/\[Run \d, part \d of \d\]\n/g, '');
-        for (const run of [1, 2]) {
-            const output = sent.slice(sent.indexOf(`<output of run ${run}>`), sent.indexOf(`</output of run ${run}>`));
-            expect(output.replace(/\n/g, '')).toHaveLength(`<output of run ${run}>`.length + 150_000);
-        }
-        expect(calls[0]!.text).toStartWith('[Run 1, part 1 of 3]');
-    });
-});
-
 describe('renderRun', () => {
-    test('gives the summarizer what was said, done and recalled, not bookkeeping or derived summaries', () => {
+    test('gives the summarizer what was said, done and recalled, a part per step, not bookkeeping or derived summaries', () => {
         nextId = 1;
-        const text = renderRun([
+        const parts = renderRun([
             step('user', 'Brief me'),
             step('user', 'Markets were calm all week', { extra: { is_compaction: true } }),
             step('system', '# Routine run\nTrigger: schedule', { extra: { kind: 'routine_trigger' } }),
@@ -73,51 +49,39 @@ describe('renderRun', () => {
             step('agent', 'Nothing urgent'),
         ], 4);
 
-        expect(text.split('\n').map(line => line.slice(0, 60))).toEqual([
-            '## Run 4, Sunday, 2026-11-01 09:01',
-            'User: Brief me',
-            'System: # Routine run',
-            'Trigger: schedule',
-            'System: # Memory recalled',
-            'The user reads at 7am',
+        expect(parts.map(part => part.slice(0, 60))).toEqual([
+            '## Run 4, Sunday, 2026-11-01 09:01\nUser: Brief me',
+            'System: # Routine run\nTrigger: schedule',
+            'System: # Memory recalled\nThe user reads at 7am',
             'Tool call: search_web {"query":"news"}',
             `Tool result: ${'y'.repeat(47)}`,
             'Pipali: Nothing urgent',
         ]);
-        expect(text).toContain(`Tool result: ${'y'.repeat(5_000)}\n`);
-    });
-});
-
-describe('boundSummary', () => {
-    test('shortens a summary over its limit, and says where it cuts one still over', async () => {
-        expect(await boundSummary('short', async () => 'unused')).toBe('short');
-        expect(await boundSummary('z'.repeat(7_000), async () => 'shortened')).toBe('shortened');
-        const cut = await boundSummary('z'.repeat(7_000), async () => 'w'.repeat(6_500));
-        expect(cut).toBe(`${'w'.repeat(6_000)}\n[The summary was over its 6000 character limit and is cut here.]`);
+        expect(parts[4]).toBe(`Tool result: ${'y'.repeat(5_000)}`);
     });
 });
 
 describe('foldCheckpoints', () => {
     test('folds the runs left out on top of the summary that covers the runs before them', async () => {
-        const runs = runsOf(6);
-        const { queries, summarize } = fakeSummarizer();
-        const saved: SummaryCheckpoint[][] = [];
+        const runs = runsOf(7);
+        const { requests, summarize } = fakeSummarizer();
 
-        const checkpoints = await foldCheckpoints(runs, [checkpointOf(runs, 1, 'S1')], 3, summarize, async cps => saved.push(cps));
-        expect(covering(checkpoints)).toEqual(['1:S1', '2:S1,2']);
-        expect(queries).toHaveLength(1);
-        expect(saved.at(-1)).toEqual(checkpoints);
+        const checkpoints = await foldCheckpoints(runs, [checkpointOf(runs, 1, 'S1')], 3, summarize);
+        expect(covering(checkpoints!)).toEqual(['1:S1', '3:S1,2,3']);
+        expect(requests).toHaveLength(1);
+        expect(await foldCheckpoints(runs, checkpoints!, 3, summarize)).toBeUndefined();
     });
 
     test('an edit in summarized runs rebuilds from the last summary before it', async () => {
         const runs = runsOf(6);
         const stored = [checkpointOf(runs, 1, 'S1'), checkpointOf(runs, 2, 'S1,2')];
         runs[1]![1] = { ...runs[1]![1]!, message: 'Report 2, corrected' };
-        const { summarize } = fakeSummarizer();
+        const { requests, summarize } = fakeSummarizer();
 
-        const checkpoints = await foldCheckpoints(runs, stored, 3, summarize, async () => {});
-        expect(covering(checkpoints)).toEqual(['1:S1', '2:S1,2']);
-        expect(checkpoints[1]!.fingerprint).toBe(runsFingerprints(runs)[1]!);
+        const checkpoints = await foldCheckpoints(runs, stored, 3, summarize);
+        expect(covering(checkpoints!)).toEqual(['1:S1', '2:S1,2']);
+        expect(checkpoints![1]!.fingerprint).toBe(runsFingerprints(runs)[1]!);
+        expect(requests[0]).toContain('Pipali: Report 2, corrected');
     });
 
     test('keeping more runs folds a shorter summary from an earlier one, or from the first run', async () => {
@@ -125,27 +89,26 @@ describe('foldCheckpoints', () => {
         const { summarize } = fakeSummarizer();
         const stored = [checkpointOf(runs, 2, 'S1,2'), checkpointOf(runs, 6, 'S1,2,3,4,5,6')];
 
-        expect(covering(await foldCheckpoints(runs, stored, 4, summarize, async () => {})))
+        expect(covering((await foldCheckpoints(runs, stored, 4, summarize))!))
             .toEqual(['2:S1,2', '3:S1,2,3', '6:S1,2,3,4,5,6']);
-        expect(covering(await foldCheckpoints(runs, [stored[1]!], 6, summarize, async () => {})))
+        expect(covering((await foldCheckpoints(runs, [stored[1]!], 6, summarize))!))
             .toEqual(['1:1', '6:S1,2,3,4,5,6']);
     });
 
-    test('a long backlog folds a few calls per run, finishing the run it is in', async () => {
+    test('a long backlog goes in one request, every step of it whole', async () => {
         const runs = runsOf(9, 50_000);
-        const { queries, summarize } = fakeSummarizer();
+        const { requests, summarize } = fakeSummarizer();
 
-        const checkpoints = await foldCheckpoints(runs, [], 0, summarize, async () => {});
-        expect(checkpoints.at(-1)!.runs).toBe(4);
-        expect(queries.length).toBeGreaterThanOrEqual(4);
+        const checkpoints = await foldCheckpoints(runs, [], 0, summarize);
+        expect(covering(checkpoints!)).toEqual(['8:1,2,3,4,5,6,7,8']);
+        expect(requests).toHaveLength(1);
+        for (let run = 1; run <= 8; run++) {
+            expect(requests[0]).toContain(`Tool result: <output of run ${run}>${'x'.repeat(50_000)}</output of run ${run}>`);
+        }
     });
 
-    test('a failed call keeps what was folded before it', async () => {
-        const runs = runsOf(30, 50_000);
-        let calls = 0;
-        const summarize = async () => (++calls === 3 ? undefined : `S${calls}`);
-
-        const checkpoints = await foldCheckpoints(runs, [], 0, summarize, async () => {});
-        expect(checkpoints.map(cp => cp.runs)).toEqual([1, 2]);
+    test('a call that returns no summary throws', async () => {
+        const runs = runsOf(5);
+        await expect(foldCheckpoints(runs, [checkpointOf(runs, 1, 'S1')], 0, async () => undefined)).rejects.toThrow('no summary');
     });
 });

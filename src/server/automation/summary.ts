@@ -2,11 +2,11 @@
  * The rolling summary of a summarized routine's older runs.
  *
  * Before a run, the runs it leaves out that no valid checkpoint covers yet are folded
- * in, oldest first, starting from the latest checkpoint that still matches the history,
- * or from the first run when none does. A fold is an ordinary model call given the
- * summary so far and the next runs in full; runs too long for one call are split across
- * several, so every original step reaches the summarizer. The call goes to the model the run
- * itself uses, so history sent to a user's own key is never sent to the platform.
+ * in, given the latest checkpoint that still matches the history, or none, and every
+ * step after it in full. Only a fold that returns a summary records a checkpoint, so a
+ * failed one leaves the run's notice saying which runs are not summarized yet. The fold
+ * goes to the model the run itself uses, so history sent to a user's own key is never
+ * sent to the platform.
  */
 
 import { eq } from 'drizzle-orm';
@@ -23,28 +23,17 @@ import { latestValidCheckpoint, readSummaryCheckpoints, runsFingerprints, splitR
 
 const log = createChildLogger({ component: 'routine-summary' });
 
-const SUMMARY_MAX_CHARS = 6_000;
-/** What one call is given of the runs it folds */
-const FOLD_MAX_CHARS = 60_000;
-/**
- * Fold calls a run starts after, each with up to one more to shorten its summary. The run
- * being folded when the limit is reached is finished, however many calls that takes, and
- * the rest of a longer backlog continues at the next run.
- */
-const MAX_CALLS = 4;
 /** Enough to go back as far as the largest recent-run count */
 const MAX_CHECKPOINTS = MAX_ROUTINE_HISTORY_RUNS + 1;
 
 const SUMMARIZER_PROMPT = `You keep the running summary of a routine's earlier runs. A routine is a task Pipali runs on a schedule or trigger, in one conversation the user can also reply in. Its next runs read this summary in place of the runs it covers.
 
-You are given the summary so far, which may be empty, and the runs that follow it. A long run may arrive in parts over several requests. Write one summary covering everything given, in at most 600 words of plain text, with no preamble. Keep:
+You are given the summary so far, which may be empty, and the runs that follow it. Write one concise handoff covering everything given, in plain text, with no preamble. Keep:
 - Instructions, preferences and corrections the user gave, in their own words where short
 - Findings, figures and decisions later runs may build on, with their dates
 - What was already reported, so it is not reported again
 - Work left unfinished or promised
 Where runs disagree, the later run holds. Leave out what a later run cannot use, like greetings and how tools were called.`;
-
-const SHORTEN_PROMPT = `You are given the running summary of a routine's earlier runs, which is over its length limit. Rewrite it in at most 500 words of plain text, with no preamble, keeping the user's instructions and corrections, the findings later runs may build on, what was already reported, and unfinished work.`;
 
 const SKIPPED_SYSTEM_KINDS = new Set([CLOCK_KIND, MCP_INVENTORY_KIND, MEMORY_STATE_KIND, MEMORY_UPDATE_KIND]);
 
@@ -69,76 +58,31 @@ function stepText(step: ATIFStep): string[] {
     ];
 }
 
-/** A run as the summarizer reads it, in full */
-export function renderRun(run: ATIFStep[], number: number): string {
-    return [`## Run ${number}, ${formatExactLocalDateTime(new Date(run[0]!.timestamp))}`, ...run.flatMap(stepText)].join('\n');
+/** A run as the summarizer reads it, in full: a part per step, the first headed with the run's number and time */
+export function renderRun(run: ATIFStep[], number: number): string[] {
+    const steps = run.map(step => stepText(step).join('\n')).filter(Boolean);
+    const header = `## Run ${number}, ${formatExactLocalDateTime(new Date(run[0]!.timestamp))}`;
+    return steps.length ? [`${header}\n${steps[0]}`, ...steps.slice(1)] : [header];
 }
 
-/** Text cut into pieces that each fit a call, at a line end where one falls late enough, else mid-line */
-function piecesOf(text: string, size: number): string[] {
-    const pieces: string[] = [];
-    let rest = text;
-    while (rest.length > size) {
-        const lineEnd = rest.lastIndexOf('\n', size);
-        const cut = lineEnd > size / 2 ? lineEnd : size;
-        pieces.push(rest.slice(0, cut));
-        rest = rest.slice(lineEnd > size / 2 ? cut + 1 : cut);
-    }
-    return [...pieces, rest];
-}
+/** Folds runs, given as parts, into the summary so far */
+type Summarize = (previous: string, parts: string[]) => Promise<string | undefined>;
 
-export interface FoldCall {
-    text: string;
-    /** Set when the call ends a run: how many runs, from the first, the summary then covers */
-    coversRuns?: number;
-}
+const withPrevious = (previous: string, parts: string[]) => [`<previous_summary>\n${previous}\n</previous_summary>`, ...parts];
 
 /**
- * The calls that fold runs `from` up to `to` (1-based, inclusive) into a summary, oldest
- * first: short runs share a call, and a long run is split across calls of its own in
- * labelled parts, so every run ends at the end of a call.
- */
-export function planFolds(runs: ATIFStep[][], from: number, to: number): FoldCall[] {
-    const calls: FoldCall[] = [];
-    let current: FoldCall | undefined;
-    for (let number = from; number <= to; number++) {
-        const pieces = piecesOf(renderRun(runs[number - 1]!, number), FOLD_MAX_CHARS - 100);
-        if (pieces.length > 1) current = undefined;
-        pieces.forEach((piece, index) => {
-            const text = pieces.length === 1 ? piece : `[Run ${number}, part ${index + 1} of ${pieces.length}]\n${piece}`;
-            if (current && current.text.length + text.length + 2 > FOLD_MAX_CHARS) current = undefined;
-            if (!current) calls.push(current = { text: '' });
-            current.text = current.text ? `${current.text}\n\n${text}` : text;
-            current.coversRuns = index === pieces.length - 1 ? number : undefined;
-        });
-        if (pieces.length > 1) current = undefined;
-    }
-    return calls;
-}
-
-type Summarize = (query: string, systemPrompt: string) => Promise<string | undefined>;
-
-/**
- * Summarize with the run's own model. A platform model folds with the platform's fast
- * model, where the run's history goes anyway; any other model folds with itself.
+ * Summarize with the run's own model, in one request with each part a message of its own.
+ * A platform model folds with the platform's fast model, where the run's history goes
+ * anyway; any other model folds with itself.
  */
 async function summarizerFor(user: typeof User.$inferSelect, chatModelId: number | undefined): Promise<Summarize> {
     const model = (chatModelId ? await getChatModelById(chatModelId) : undefined) ?? await getDefaultChatModel(user);
     if (model?.aiModelApi?.name === 'Pipali') {
-        return async (query, systemPrompt) => (await sendMessageToFastModel(query, systemPrompt))?.message?.trim();
+        return async (previous, parts) =>
+            (await sendMessageToFastModel(withPrevious(previous, parts), SUMMARIZER_PROMPT))?.message?.trim();
     }
-    return async (query, systemPrompt) => (await sendMessageToModel(
-        query, undefined, systemPrompt, undefined, 'auto', false, false, user, model?.chatModel.id,
-    ))?.message?.trim();
-}
-
-/** A summary within its limit: shortened by one more call if over it, cut with a visible note if still over */
-export async function boundSummary(text: string, summarize: Summarize): Promise<string> {
-    if (text.length <= SUMMARY_MAX_CHARS) return text;
-    const shorter = await summarize(`<summary>\n${text}\n</summary>`, SHORTEN_PROMPT) ?? text;
-    return shorter.length <= SUMMARY_MAX_CHARS
-        ? shorter
-        : `${shorter.slice(0, SUMMARY_MAX_CHARS)}\n[The summary was over its ${SUMMARY_MAX_CHARS} character limit and is cut here.]`;
+    return async (previous, parts) => (await sendMessageToModel(withPrevious(previous, parts), undefined,
+        SUMMARIZER_PROMPT, undefined, 'auto', false, false, user, model?.chatModel.id))?.message?.trim();
 }
 
 /** Checkpoints to keep: the latest that the next runs can start from, then later ones while there is room */
@@ -149,50 +93,34 @@ function retained(checkpoints: SummaryCheckpoint[], target: number): SummaryChec
 }
 
 /**
- * Fold `runs` into checkpoints until they cover the runs a run keeping `keep` leaves
- * out, saving after each run folded, and return them. Voided checkpoints are dropped.
- * A failed call keeps what was folded so far; the run's notice says what is missing.
+ * The checkpoints once the runs left out by keeping `keep` are folded in, voided ones
+ * dropped, or undefined when a valid checkpoint already covers them.
  */
 export async function foldCheckpoints(
     runs: ATIFStep[][],
     stored: SummaryCheckpoint[],
     keep: number,
     summarize: Summarize,
-    save: (checkpoints: SummaryCheckpoint[]) => Promise<unknown>,
-): Promise<SummaryCheckpoint[]> {
+): Promise<SummaryCheckpoint[] | undefined> {
     const target = runs.length - 1 - keep;
     const fingerprints = runsFingerprints(runs);
-    let checkpoints = stored.filter(cp => fingerprints[cp.runs - 1] === cp.fingerprint);
+    const checkpoints = stored.filter(cp => fingerprints[cp.runs - 1] === cp.fingerprint);
     const start = latestValidCheckpoint(runs, checkpoints, target);
-    if (target <= 0 || start?.runs === target) return checkpoints;
+    if (target <= 0 || start?.runs === target) return undefined;
 
-    try {
-        let summary = start?.text ?? '';
-        let made = 0;
-        for (const call of planFolds(runs, (start?.runs ?? 0) + 1, target)) {
-            const folded = await summarize(
-                `<previous_summary>\n${summary}\n</previous_summary>\n\n<runs>\n${call.text}\n</runs>`, SUMMARIZER_PROMPT);
-            if (!folded) throw new Error('The summarizer returned no summary');
-            summary = await boundSummary(folded, summarize);
-            made++;
+    const from = start?.runs ?? 0;
+    const summary = await summarize(start?.text ?? '',
+        runs.slice(from, target).flatMap((run, index) => renderRun(run, from + index + 1)));
+    if (!summary) throw new Error('The summarizer returned no summary');
 
-            if (call.coversRuns) {
-                const checkpoint = { text: summary, runs: call.coversRuns, fingerprint: fingerprints[call.coversRuns - 1]! };
-                checkpoints = retained([...checkpoints.filter(cp => cp.runs !== checkpoint.runs), checkpoint], target);
-                await save(checkpoints);
-                if (made >= MAX_CALLS) break;
-            }
-        }
-    } catch (error) {
-        log.warn({ err: error }, 'Could not fold routine runs into its summary');
-    }
-    return checkpoints;
+    const checkpoint = { text: summary, runs: target, fingerprint: fingerprints[target - 1]! };
+    return retained([...checkpoints.filter(cp => cp.runs !== target), checkpoint], target);
 }
 
 /**
  * Fold a summarized routine conversation's runs with the run's own model, saving the
- * checkpoints to its `extra`, and return that extra as saved: with every run folded, or
- * as far as a failed call let it get.
+ * checkpoints to its `extra`, and return that extra as it now stands. A failed call
+ * saves nothing; the run's notice then says which runs are not summarized yet.
  */
 export async function foldRoutineHistory(args: {
     conversationId: string;
@@ -202,19 +130,18 @@ export async function foldRoutineHistory(args: {
     user: typeof User.$inferSelect;
     chatModelId?: number;
 }): Promise<Record<string, unknown> | undefined> {
-    const { conversationId, user } = args;
-    let extra = args.extra;
+    const { conversationId, extra } = args;
     try {
-        const summarize = await summarizerFor(user, args.chatModelId);
-        const { runs } = splitRoutineRuns(args.steps);
-        await foldCheckpoints(runs, readSummaryCheckpoints(extra), args.keep, summarize, async checkpoints => {
-            const saved = { ...extra, [ROUTINE_SUMMARY_KEY]: { checkpoints } };
-            await db.update(Conversation).set({ extra: saved }).where(eq(Conversation.id, conversationId));
-            extra = saved;
-            log.info({ conversationId, runs: checkpoints.at(-1)?.runs }, 'Folded routine runs into its summary');
-        });
+        const summarize = await summarizerFor(args.user, args.chatModelId);
+        const checkpoints = await foldCheckpoints(splitRoutineRuns(args.steps).runs, readSummaryCheckpoints(extra), args.keep, summarize);
+        if (!checkpoints) return extra;
+
+        const saved = { ...extra, [ROUTINE_SUMMARY_KEY]: { checkpoints } };
+        await db.update(Conversation).set({ extra: saved }).where(eq(Conversation.id, conversationId));
+        log.info({ conversationId, checkpoints: checkpoints.map(cp => cp.runs) }, 'Folded routine runs into its summary');
+        return saved;
     } catch (error) {
         log.warn({ err: error, conversationId }, 'Could not fold routine runs into its summary');
+        return extra;
     }
-    return extra;
 }

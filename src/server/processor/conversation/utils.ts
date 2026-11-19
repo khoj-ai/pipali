@@ -65,7 +65,8 @@ export function findMostRecentCompactionIndex(history: ATIFStep[]): number {
 }
 
 export function generateChatmlMessagesWithContext(
-    query: string,
+    /** The user's message, or several sent as messages of their own */
+    query: string | string[],
     history?: ATIFStep[],
     systemMessage?: string,
     chatModel?: { name: string; visionEnabled: boolean },
@@ -168,11 +169,12 @@ export function generateChatmlMessagesWithContext(
         }
     }
 
-    if (!!query) {
+    for (const content of typeof query === 'string' ? [query] : query) {
+        if (!content) continue;
         messages.push({
             type: 'message',
             role: 'user',
-            content: query,
+            content,
         } as Responses.EasyInputMessage);
     }
 

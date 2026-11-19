@@ -28,7 +28,7 @@ declare global {
 
 export async function sendMessageToModel(
     // Context
-    query: string,
+    query: string | string[],
     history?: ATIFTrajectory,
     systemMessage?: string,
     // Model Config
@@ -46,7 +46,8 @@ export async function sendMessageToModel(
 ) {
     // Check for test mock (E2E tests inject this via preload)
     if (globalThis.__pipaliMockLLM) {
-        const actualQuery = query || history?.steps?.findLast(s => s.source === 'user')?.message || '';
+        const actualQuery = (typeof query === 'string' ? query : query.join('\n\n'))
+            || history?.steps?.findLast(s => s.source === 'user')?.message || '';
         log.debug({ query: actualQuery.substring(0, 50) }, 'Using mock LLM');
         return globalThis.__pipaliMockLLM(actualQuery, {
             conversationId,
@@ -179,18 +180,16 @@ export const PLATFORM_TIER_MODELS = {
  * For small internal jobs — spoken summaries, chat titles, etc.
  */
 export async function sendMessageToFastModel(
-    query: string,
+    /** One message, or several sent as messages of their own */
+    query: string | string[],
     systemMessage?: string,
 ): Promise<ResponseWithThought | undefined> {
     if (globalThis.__pipaliMockLLM) {
-        return globalThis.__pipaliMockLLM(query);
+        return globalThis.__pipaliMockLLM(typeof query === 'string' ? query : query.join('\n\n'));
     }
 
     if (await isAuthenticated()) {
-        const messages: ChatMessage[] = [
-            ...(systemMessage ? [{ role: 'system', content: systemMessage } satisfies ChatMessage] : []),
-            { role: 'user', content: query },
-        ];
+        const messages = generateChatmlMessagesWithContext(query, undefined, systemMessage);
         return withTokenRefresh((token) =>
             sendMessageToGpt(messages, PLATFORM_FAST_MODEL, token, `${getPlatformUrl()}/openai/v1`));
     }

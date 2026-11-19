@@ -108,6 +108,19 @@ describe('generateChatmlMessagesWithContext', () => {
             expect(messages).toHaveLength(0);
         });
 
+        test('should send several query parts as typed user messages of their own, after the history', () => {
+            const history: ATIFStep[] = [{ step_id: 1, timestamp: '2026-11-01T09:00:00Z', source: 'user', message: 'Earlier' }];
+            const messages = generateChatmlMessagesWithContext(['<previous_summary>\n\n</previous_summary>', '## Run 1\nUser: Brief me', 'Pipali: Report'], history, 'Summarize');
+
+            expect(messages).toEqual([
+                { type: 'message', role: 'system', content: 'Summarize' },
+                { type: 'message', role: 'user', content: 'Earlier' },
+                { type: 'message', role: 'user', content: '<previous_summary>\n\n</previous_summary>' },
+                { type: 'message', role: 'user', content: '## Run 1\nUser: Brief me' },
+                { type: 'message', role: 'user', content: 'Pipali: Report' },
+            ]);
+        });
+
         test('should combine system message and query', () => {
             const messages = generateChatmlMessagesWithContext('Hello', undefined, 'You are helpful');
 
