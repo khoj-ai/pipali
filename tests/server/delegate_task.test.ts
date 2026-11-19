@@ -1,8 +1,5 @@
 import { test, expect, describe } from 'bun:test';
-import {
-    selectDelegatedModelAlias,
-    summarizeToolCall,
-} from '../../src/server/processor/actor/delegate_task';
+import { summarizeToolCall } from '../../src/server/processor/actor/delegate_task';
 
 /**
  * inspect_task shows what a delegated task did, so it summarizes each tool call
@@ -51,19 +48,5 @@ describe('summarizeToolCall', () => {
     test('falls back to the name when the identifying argument is missing or blank', () => {
         expect(summarizeToolCall('grep_files', {})).toBe('grep_files');
         expect(summarizeToolCall('grep_files', { pattern: '   ' })).toBe('grep_files');
-    });
-});
-
-describe('selectDelegatedModelAlias', () => {
-    test('uses the tier explicitly selected by the parent model', () => {
-        expect(selectDelegatedModelAlias('lite', 'flagship')).toBe('pipali:lite');
-    });
-
-    test('defaults to the current conversation model tier', () => {
-        expect(selectDelegatedModelAlias(undefined, 'balanced')).toBe('pipali:balanced');
-    });
-
-    test('leaves models without a tier unaliased', () => {
-        expect(selectDelegatedModelAlias(undefined, null)).toBeUndefined();
     });
 });

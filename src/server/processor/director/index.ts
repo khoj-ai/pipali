@@ -615,7 +615,7 @@ You can also start several tasks in the background and wait_for_tasks on all of 
                 model_tier: {
                     type: 'string',
                     enum: ['flagship', 'balanced', 'lite'],
-                    description: 'Model intelligence tier for this task. Choose based on difficulty and cost; omit to use the same tier as this conversation.',
+                    description: 'Model intelligence tier for this task. Choose based on difficulty and cost. Defaults to balanced.',
                 },
                 conversation_id: {
                     type: 'string',

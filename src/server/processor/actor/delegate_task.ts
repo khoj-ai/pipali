@@ -36,7 +36,7 @@ const STOP_MARK_TTL_MS = 30_000;
 export interface DelegateTaskArgs {
     title: string;
     message: string;
-    /** Omit to use the parent conversation's intelligence tier. */
+    /** Omit for the balanced tier. */
     model_tier?: PlatformModelTier;
     /** Omit to start a new task; provide to send a follow-up to one already running. */
     conversation_id?: string;
@@ -62,14 +62,6 @@ export interface WaitForTasksArgs {
 
 export interface DelegationResult {
     compiled: string;
-}
-
-export function selectDelegatedModelAlias(
-    requestedTier: PlatformModelTier | undefined,
-    parentTier: PlatformModelTier | null | undefined,
-): string | undefined {
-    const tier = requestedTier ?? parentTier;
-    return tier ? PLATFORM_TIER_MODELS[tier] : undefined;
 }
 
 function errorResult(message: string): DelegationResult {
@@ -183,7 +175,7 @@ export async function delegateTask(
             ? await getChatModelById(options.parentChatModelId)
             : await getDefaultChatModel(user);
         const chatModelAlias = parentModel?.aiModelApi?.name === 'Pipali'
-            ? selectDelegatedModelAlias(args.model_tier, parentModel.chatModel.tier)
+            ? PLATFORM_TIER_MODELS[args.model_tier ?? 'balanced']
             : undefined;
 
         const result = await startConversationRun({
