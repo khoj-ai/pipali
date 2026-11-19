@@ -24,6 +24,7 @@ import {
     type TriggerEventData,
 } from '../automation';
 import { createChildLogger } from '../logger';
+import { MAX_ROUTINE_HISTORY_RUNS, ROUTINE_HISTORY_MODES } from '../../shared';
 
 const log = createChildLogger({ component: 'automations' });
 
@@ -63,6 +64,8 @@ const createAutomationSchema = z.object({
     maxExecutionsPerHour: z.number().min(1).optional(),
     // Null follows the user's default model.
     chatModelId: z.number().nullable().optional(),
+    historyMode: z.enum(ROUTINE_HISTORY_MODES).optional(),
+    historyRuns: z.number().int().min(0).max(MAX_ROUTINE_HISTORY_RUNS).optional(),
 });
 
 const confirmationResponseSchema = z.object({
@@ -162,6 +165,8 @@ automations.get('/', async (c) => {
         maxExecutionsPerDay: automation.maxExecutionsPerDay,
         maxExecutionsPerHour: automation.maxExecutionsPerHour,
         chatModelId: automation.chatModelId,
+        historyMode: automation.historyMode,
+        historyRuns: automation.historyRuns,
         lastExecutedAt: automation.lastExecutedAt?.toISOString(),
         nextScheduledAt: automation.nextScheduledAt?.toISOString(),
         upcomingRuns: automation.triggerType === 'cron' && automation.triggerConfig
@@ -210,6 +215,8 @@ automations.post('/', zValidator('json', createAutomationSchema), async (c) => {
             maxExecutionsPerDay: data.maxExecutionsPerDay,
             maxExecutionsPerHour: data.maxExecutionsPerHour,
             chatModelId: data.chatModelId ?? null,
+            historyMode: data.historyMode,
+            historyRuns: data.historyRuns,
             status: 'active',
         })
         .returning();

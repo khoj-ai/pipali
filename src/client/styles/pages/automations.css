@@ -358,7 +358,8 @@
 .frequency-selector,
 .time-selector,
 .start-date-selector,
-.custom-schedule {
+.custom-schedule,
+.history-field {
     display: flex;
     flex-direction: column;
     gap: 12px;

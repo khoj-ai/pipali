@@ -57,3 +57,15 @@ export interface RefusalInfo {
 export function isAgentAnswer(step: { source: string; tool_calls?: unknown[] } | undefined): boolean {
     return step?.source === 'agent' && !step.tool_calls?.length;
 }
+
+/**
+ * How much of a routine's earlier runs its next run is given. Every mode keeps the
+ * whole conversation on screen; only what the model is sent differs.
+ * - all: every earlier run
+ * - summarized: one rolling summary of older runs, plus the latest `historyRuns` runs whole
+ * - fresh: none of them
+ */
+export const ROUTINE_HISTORY_MODES = ['all', 'summarized', 'fresh'] as const;
+export type RoutineHistoryMode = typeof ROUTINE_HISTORY_MODES[number];
+export const DEFAULT_ROUTINE_HISTORY_RUNS = 3;
+export const MAX_ROUTINE_HISTORY_RUNS = 20;

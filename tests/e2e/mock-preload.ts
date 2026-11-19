@@ -36,6 +36,12 @@ function recordRequest(query: string, ctx: MockCtx): void {
         sessionId: ctx.sessionId,
         runId: ctx.runId,
         tail: { type: last?.type, role: last?.role, text: contentText(last?.content).slice(0, 300) },
+        // The memory catalogue the system prompt listed
+        catalogue: contentText(ctx.messages[0]?.content).match(/<memory_catalogue>\n([\s\S]*?)\n<\/memory_catalogue>/)?.[1] ?? null,
+        // Every user turn sent, to tell which of a routine's runs a request carried
+        userTurns: ctx.messages
+            .filter(message => message.role === 'user')
+            .map(message => contentText(message.content).slice(0, 300)),
         // Mid-conversation system messages: how inbox updates reach the model
         systemUpdates: ctx.messages
             .slice(1)
@@ -238,6 +244,7 @@ function getMockResponse(query: string, ctx?: MockCtx): ResponseWithThought | Pr
             arguments: JSON.stringify(resolveToolArguments(tc.arguments as Record<string, unknown>, ctx)),
         })),
         thought: iteration.thought,
+        compactionSummary: iteration.compactionSummary,
     };
 }
 

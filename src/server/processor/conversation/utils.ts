@@ -43,6 +43,9 @@ function hasProviderAgnosticImage(content: any[]): boolean {
     return content.some((item: any) => item.type === 'image' && item.source_type === 'base64');
 }
 
+/** Set on a compaction step to how many steps came before it when it was made */
+export const COMPACTION_SOURCE_STEPS_KEY = 'source_steps';
+
 /**
  * Find the index of the most recent compaction step in history.
  * Returns -1 if no compaction step found.

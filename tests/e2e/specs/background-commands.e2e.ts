@@ -7,21 +7,12 @@
  */
 
 import { test, expect, type APIRequestContext } from '@playwright/test';
-import { readFile } from 'fs/promises';
 import { ChatPage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
 import { stopAllActiveConversations, stopAllActiveRunsFromHome } from '../helpers/cleanup';
+import { carriesUpdate, requestsFor, type RequestRecord } from '../helpers/mock-requests';
 
 type SystemStep = { source: string; message?: string; extra?: { kind?: string } };
-
-/** What the mock LLM was handed, one line per request - see mock-preload. */
-type RequestRecord = {
-    query: string;
-    sessionId?: string;
-    runId?: string;
-    tail: { type?: string | null; role?: string; text: string };
-    systemUpdates: string[];
-};
 
 async function historyOf(request: APIRequestContext, conversationId: string): Promise<SystemStep[]> {
     const res = await request.get(`/api/chat/${conversationId}/history`);
@@ -33,28 +24,9 @@ async function backgroundUpdates(request: APIRequestContext, conversationId: str
         .filter(s => s.source === 'system' && s.extra?.kind === 'background_command_update');
 }
 
-/** Requests from the most recent conversation that answered this prompt. */
-async function requestsFor(prompt: string): Promise<RequestRecord[]> {
-    const path = process.env.TEST_REQUEST_LOG;
-    if (!path) throw new Error('TEST_REQUEST_LOG not set - global-setup may not have run');
-    const contents = await readFile(path, 'utf8').catch(() => '');
-    const records = contents
-        .split('\n')
-        .filter(Boolean)
-        .map(line => JSON.parse(line) as RequestRecord)
-        .filter(record => record.query === prompt);
-    // A retried spec answers the same prompt again; only the last attempt is ours.
-    const session = records.at(-1)?.sessionId;
-    return records.filter(record => record.sessionId === session);
-}
-
 /** Run ids in the order they first appear, so an extra one means an extra run. */
 function runsIn(records: RequestRecord[]): string[] {
     return [...new Set(records.map(record => record.runId!))];
-}
-
-function carriesUpdate(records: RequestRecord[], marker: string): boolean {
-    return records.some(record => record.systemUpdates.some(update => update.includes(marker)));
 }
 
 test.describe('Background commands', () => {

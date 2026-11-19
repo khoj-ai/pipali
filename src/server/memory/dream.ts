@@ -184,6 +184,8 @@ async function ensureDreamAutomation(userId: number): Promise<typeof Automation.
             prompt: dreamPrompt(),
             status: 'active',
             maxExecutionsPerDay: DREAM_MAX_PER_DAY,
+            // Each pass is told what is new since the last, so it needs none of its earlier passes
+            historyMode: 'fresh',
         })
         .onConflictDoNothing();
 

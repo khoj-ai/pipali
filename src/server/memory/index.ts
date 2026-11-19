@@ -665,9 +665,15 @@ if asked to remember something like that, ask what was non-obvious about it and 
 export async function resolveMemoryContext(args: {
     steps: CatalogueStep[],
     memoriesEnabled: boolean,
-    isNewConversation: boolean
+    isNewConversation: boolean,
+    /** Earlier history is out of context, so the prompt lists the catalogue as it is now */
+    freshBaseline?: boolean,
 }): Promise<MemoryContextPlan> {
-    const {steps, memoriesEnabled, isNewConversation} = args;
+    const {steps, memoriesEnabled, isNewConversation, freshBaseline} = args;
+
+    if (freshBaseline) {
+        return { memoryCatalogue: memoriesEnabled ? await loadCatalogue() : undefined, systemSteps: [] };
+    }
 
     // If memory is disabled
     if (!memoriesEnabled) {

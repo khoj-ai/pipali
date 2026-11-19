@@ -1,7 +1,7 @@
 // Modal for viewing, editing, and deleting an automation
 
 import React, { useState, useEffect } from 'react';
-import { X, Loader2, Trash2, Calendar, CalendarClock, Clock, Pencil, Save, AlertCircle, Send, MessageSquare, Zap, ChevronDown, ChevronRight, Bot } from 'lucide-react';
+import { X, Loader2, Trash2, Calendar, CalendarClock, Clock, Pencil, Save, AlertCircle, Send, MessageSquare, Zap, ChevronDown, ChevronRight, Bot, History } from 'lucide-react';
 import type { AutomationInfo, FrequencyType, DayOfWeek, AutomationPendingConfirmation } from '../../types/automations';
 import { DAYS_OF_WEEK, TIME_OPTIONS, DAY_OF_MONTH_OPTIONS, MINUTE_OPTIONS } from '../../types/automations';
 import { DiffView } from '../tool-views/DiffView';
@@ -11,6 +11,8 @@ import { useTranslation } from 'react-i18next';
 import { useModels } from '../../hooks/useModels';
 import { formatDate, formatRunTimes, formatSchedule, upcomingStartDate } from './utils';
 import { StartDateField } from './StartDateField';
+import { HistoryField, useHistoryText } from './HistoryField';
+import type { RoutineHistoryMode } from '../../../shared';
 import { buildCronSchedule, parseFormSchedule, DEFAULT_FORM_SCHEDULE } from './schedule';
 
 interface AutomationDetailModalProps {
@@ -75,6 +77,9 @@ export function AutomationDetailModal({
     const [name, setName] = useState(automation.name);
     const [instructions, setInstructions] = useState(automation.prompt);
     const [chatModelId, setChatModelId] = useState<number | null>(automation.chatModelId ?? null);
+    const [historyMode, setHistoryMode] = useState<RoutineHistoryMode>(automation.historyMode);
+    const [historyRuns, setHistoryRuns] = useState(automation.historyRuns);
+    const historyText = useHistoryText();
 
     // Schedule toggle for edit mode (initialized from automation's current state)
     const [editHasSchedule, setEditHasSchedule] = useState(!!automation.triggerType && !!automation.triggerConfig);
@@ -124,6 +129,8 @@ export function AutomationDetailModal({
                 name: name.trim().slice(0, 100),
                 prompt: instructions,
                 chatModelId,
+                historyMode,
+                historyRuns,
             };
 
             // Only include trigger config if schedule is enabled
@@ -347,6 +354,15 @@ export function AutomationDetailModal({
                             </div>
 
                             <div className="automation-detail-section">
+                                <h3>{t('automations.history')}</h3>
+                                <div className="automation-detail-row automation-detail-history">
+                                    <History size={16} />
+                                    <span>{historyText.label(automation.historyMode)}</span>
+                                </div>
+                                <p className="automation-detail-meta">{historyText.hint(automation.historyMode, automation.historyRuns)}</p>
+                            </div>
+
+                            <div className="automation-detail-section">
                                 <h3>{t('automations.schedule')}</h3>
                                 <div className="automation-detail-row automation-detail-schedule">
                                     <Calendar size={16} />
@@ -417,6 +433,16 @@ export function AutomationDetailModal({
                                         </option>
                                     ))}
                                 </select>
+                            </div>
+
+                            <div className="automation-detail-section">
+                                <h3>{t('automations.history')}</h3>
+                                <HistoryField
+                                    mode={historyMode}
+                                    runs={historyRuns}
+                                    onModeChange={setHistoryMode}
+                                    onRunsChange={setHistoryRuns}
+                                />
                             </div>
 
                             {/* Schedule Section - Optional, collapsible */}

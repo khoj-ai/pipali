@@ -32,6 +32,11 @@ export interface ExecuteRunOptions {
     conversationId: string;
     user: typeof User.$inferSelect;
     userMessage?: string;
+    /** Saved with userMessage, never with messages queued after it: extra on its step, and a system step right after it */
+    userMessageContext?: {
+        extra: Record<string, unknown>;
+        systemStep: { message: string; extra: Record<string, unknown> };
+    };
     runId: string;
     clientMessageId: string;
     confirmationPreferences: ConfirmationPreferences;
@@ -134,8 +139,19 @@ async function persistUserMessage(
     runId: string,
     clientMessageId: string,
     message: string,
+    context?: ExecuteRunOptions['userMessageContext'],
 ): Promise<number> {
-    const userStep = await atifConversationService.addStep(conversationId, 'user', message);
+    const userStep = await atifConversationService.addStep(
+        conversationId, 'user', message,
+        undefined, undefined, undefined, undefined, undefined, context?.extra,
+    );
+    if (context) {
+        const { message: systemMessage, extra } = context.systemStep;
+        await atifConversationService.addStep(
+            conversationId, 'system', systemMessage,
+            undefined, undefined, undefined, undefined, undefined, extra,
+        );
+    }
     bus.publish({
         type: 'user_step_saved',
         conversationId,
@@ -154,6 +170,7 @@ async function persistUserMessage(
 export async function executeRun(options: ExecuteRunOptions): Promise<void> {
     const { bus, conversationId, user, confirmationPreferences, confirmationPersistence } = options;
     let userMessage: string | undefined = options.userMessage;
+    let userMessageContext = options.userMessageContext;
     let runId = options.runId;
     let clientMessageId = options.clientMessageId;
     let currentChatModelId = options.chatModelId;
@@ -222,8 +239,10 @@ export async function executeRun(options: ExecuteRunOptions): Promise<void> {
 
         try {
             if (isNonEmptyString(userMessage)) {
-                runHandle.userStepId = await persistUserMessage(bus, conversationId, runIdAuthoritative, runHandle.clientMessageId, userMessage);
+                runHandle.userStepId = await persistUserMessage(
+                    bus, conversationId, runIdAuthoritative, runHandle.clientMessageId, userMessage, userMessageContext);
                 userMessage = undefined;
+                userMessageContext = undefined;
             }
 
             const runner = runResearchWithConversation({

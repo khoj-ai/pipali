@@ -17,6 +17,8 @@ import { getBus, getOrCreateBus } from '../../events/conversation-event-bus';
 import { stopConversationRun } from '../../events/conversation-runs';
 import { resolveConfirmationOnBus } from '../../routes/ws/confirmation-manager';
 import { executeRun } from '../../events/run-executor';
+import { formatExactLocalDateTime } from '../../processor/clock';
+import { ROUTINE_EXECUTION_KEY } from '../history';
 import { createChildLogger } from '../../logger';
 
 const log = createChildLogger({ component: 'automation' });
@@ -215,27 +217,28 @@ async function runExecutionWithRetry(
     await markExecutionFailed(executionId, lastError?.message || 'Unknown error after retries');
 }
 
-/**
- * Build prompt with trigger context injected
- */
-function buildPromptWithContext(
-    basePrompt: string,
-    triggerData: TriggerEventData
-): string {
-    let context = '';
+const FILE_EVENT_DONE = { create: 'created', modify: 'modified', delete: 'deleted' } as const;
 
+/**
+ * What started a run, for the model. It travels as a system step after the routine's
+ * prompt, so the conversation shows the prompt exactly as the user wrote it.
+ */
+function describeTrigger(triggerData: TriggerEventData): { message: string; extra: Record<string, unknown> } {
+    const { file, external } = triggerData;
+    const lines = ['# Routine run'];
     if (triggerData.type === 'cron') {
-        context = `[Scheduled execution at ${triggerData.scheduledTime || triggerData.timestamp}]\n\n`;
-    } else if (triggerData.type === 'file_watch' && triggerData.file) {
-        context = `[Triggered by file ${triggerData.file.event}: ${triggerData.file.path}]\n\n`;
-    } else if (triggerData.type === 'external' && triggerData.external) {
-        context = `[Triggered externally via ${triggerData.external.source}]\n`;
-        if (triggerData.external.metadata && Object.keys(triggerData.external.metadata).length > 0) {
-            context += `Metadata: ${JSON.stringify(triggerData.external.metadata)}\n\n`;
+        lines.push('Trigger: schedule');
+    } else if (triggerData.type === 'file_watch') {
+        lines.push(file ? `Trigger: file ${FILE_EVENT_DONE[file.event]}\nFile: ${file.path}` : 'Trigger: file change');
+    } else {
+        lines.push(external ? `Trigger: external, via ${external.source}` : 'Trigger: external');
+        if (external?.metadata && Object.keys(external.metadata).length > 0) {
+            lines.push(`Metadata: ${JSON.stringify(external.metadata)}`);
         }
     }
-
-    return context + basePrompt;
+    const triggeredAt = new Date(triggerData.scheduledTime ?? triggerData.timestamp);
+    lines.push(`Trigger time (in User Local Timezone): ${formatExactLocalDateTime(triggeredAt)}`);
+    return { message: lines.join('\n'), extra: { kind: 'routine_trigger' } };
 }
 
 /**
@@ -406,9 +409,6 @@ async function runExecution(
         // Get or create the automation's conversation
         const conversationId = await getOrCreateAutomationConversation(automation, user);
 
-        // Build the prompt with trigger context
-        const contextualPrompt = buildPromptWithContext(automation.prompt, triggerData);
-
         // A conversation runs one run at a time, so one already going here, like the user
         // following up on an earlier report, finishes first. That run is not the routine's
         // to stop, so the conversation is recorded for cancelling only once it is free.
@@ -436,7 +436,14 @@ async function runExecution(
             user,
             // When we retry an execution, avoid persisting duplicate user messages.
             // The initial attempt already wrote the user prompt into the conversation.
-            userMessage: options?.includeUserMessage === false ? undefined : contextualPrompt,
+            ...(options?.includeUserMessage === false ? {} : {
+                userMessage: automation.prompt,
+                userMessageContext: {
+                    // Marks where each of the routine's runs starts in its conversation
+                    extra: { [ROUTINE_EXECUTION_KEY]: executionId },
+                    systemStep: describeTrigger(triggerData),
+                },
+            }),
             runId,
             clientMessageId: executionId,
             confirmationPreferences: createEmptyPreferences(),

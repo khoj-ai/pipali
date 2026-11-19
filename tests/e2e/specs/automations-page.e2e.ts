@@ -10,9 +10,12 @@
  * - Notification for automation permission confirmation
  */
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
+import { mkdir, rm, rmdir, writeFile } from 'fs/promises';
+import path from 'path';
 import { AutomationsPage, ChatPage, HomePage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
+import { carriesUpdate, readRequests, requestsFor } from '../helpers/mock-requests';
 
 test.describe('Automations Page', () => {
     let automationsPage: AutomationsPage;
@@ -674,16 +677,72 @@ test.describe('Automations Page', () => {
     });
 
     test.describe('Scheduled Automation Trigger', () => {
-        test('should trigger automation manually via API', async () => {
-            const automationId = await automationsPage.createAutomationViaAPI({
-                name: 'Manual Trigger Test',
-                prompt: 'Say hello',
-            });
+        const completes = (page: Page, executionId: string | null) => expect.poll(async () => {
+            const response = await page.request.get(`/api/automations/executions/${executionId}`);
+            return (await response.json()).execution?.status;
+        }, { timeout: 30000 }).toBe('completed');
+
+        type Step = { source: string; message?: string; extra?: Record<string, unknown> };
+
+        /** The routine's conversation, its first prompt step and the step saved right after it */
+        async function firstRun(page: Page, automationId: string) {
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const conversationId = automation.conversationId as string;
+            const { history } = await (await page.request.get(`/api/chat/${conversationId}/history`)).json() as { history: Step[] };
+            const index = history.findIndex(step => step.source === 'user');
+            return { conversationId, promptStep: history[index], triggerStep: history[index + 1] };
+        }
+
+        test('a run shows the prompt as written and tells the model what started it', async ({ page }) => {
+            const prompt = `Say hello from run ${crypto.randomUUID()}`;
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'Manual Trigger Test', prompt });
             testAutomationIds.push(automationId);
 
-            // Trigger the automation
             const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
-            expect(executionId).toBeTruthy();
+            await completes(page, executionId);
+
+            const { conversationId, promptStep, triggerStep } = await firstRun(page, automationId);
+            expect(promptStep).toMatchObject({ message: prompt, extra: { routine_execution_id: executionId } });
+            expect(triggerStep).toMatchObject({ source: 'system', extra: { kind: 'routine_trigger' } });
+            expect(triggerStep?.message).toMatch(/^# Routine run\nTrigger: external, via api\nTrigger time \(in User Local Timezone\): \w+day, \d{4}-\d\d-\d\d \d\d:\d\d$/);
+            expect(carriesUpdate(await requestsFor(prompt), 'Trigger: external, via api')).toBe(true);
+
+            const { conversations } = await (await page.request.get('/api/conversations')).json() as { conversations: Array<{ id: string; preview: string }> };
+            expect(conversations.find(conversation => conversation.id === conversationId)?.preview).toBe(prompt);
+        });
+
+        test('a file change hands the model the file that changed', async ({ page }) => {
+            const watched = `/tmp/pipali/routine-watch-${crypto.randomUUID()}`;
+            const file = path.join(watched, 'report.txt');
+            await mkdir(watched, { recursive: true });
+            try {
+                const prompt = `Summarise the new file ${crypto.randomUUID()}`;
+                const response = await page.request.post('/api/automations', {
+                    data: {
+                        name: 'File Watch Trigger Test',
+                        prompt,
+                        triggerType: 'file_watch',
+                        triggerConfig: { type: 'file_watch', paths: [watched], events: ['create'], debounceMs: 100 },
+                    },
+                });
+                const automationId = (await response.json()).automation.id as string;
+                testAutomationIds.push(automationId);
+
+                await writeFile(file, 'quarterly numbers');
+                await expect.poll(async () => {
+                    const { executions } = await (await page.request.get(`/api/automations/${automationId}/executions`)).json();
+                    return executions[0]?.status;
+                }, { timeout: 30000 }).toBe('completed');
+
+                const { promptStep, triggerStep } = await firstRun(page, automationId);
+                expect(promptStep?.message).toBe(prompt);
+                expect(triggerStep?.message).toContain('Trigger: file created\nFile: ');
+                expect(triggerStep?.message).toContain('report.txt');
+                expect(carriesUpdate(await requestsFor(prompt), 'report.txt')).toBe(true);
+            } finally {
+                await rm(file, { force: true });
+                await rmdir(watched);
+            }
         });
 
         test('waits for a run already going in its conversation to finish', async ({ page }) => {
@@ -693,13 +752,8 @@ test.describe('Automations Page', () => {
             });
             testAutomationIds.push(automationId);
 
-            const completes = (executionId: string | null) => expect.poll(async () => {
-                const response = await page.request.get(`/api/automations/executions/${executionId}`);
-                return (await response.json()).execution?.status;
-            }, { timeout: 30000 }).toBe('completed');
-
             // A first run gives the routine its conversation
-            await completes(await automationsPage.triggerAutomationViaAPI(automationId));
+            await completes(page, await automationsPage.triggerAutomationViaAPI(automationId));
             const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
 
             // The user follows up there, and the routine fires while that run awaits approval
@@ -713,7 +767,7 @@ test.describe('Automations Page', () => {
             // The user's run finishes in view, and only then does the routine's begin
             await expect(page.locator(Selectors.assistantMessage).filter({ hasText: 'The long step is done.' }))
                 .toBeVisible({ timeout: 20000 });
-            await completes(executionId);
+            await completes(page, executionId);
             const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as {
                 history: Array<{ message?: string }>;
             };
@@ -1223,6 +1277,197 @@ test.describe('Automations Page', () => {
             await automationsPage.saveAutomation();
 
             expect((await readAutomation(page, automationId)).chatModelId).toBeNull();
+        });
+    });
+
+    test.describe('Routine History', () => {
+        async function historyOf(page: Page, id: string) {
+            const { automation } = await (await page.request.get(`/api/automations/${id}`)).json();
+            return { mode: automation.historyMode, runs: automation.historyRuns };
+        }
+
+        test('a platform compaction mid-run: the run continues on the current catalogue, and is not trusted once history before it goes', async ({ page }) => {
+            const id = crypto.randomUUID();
+            const prompt = `Brief me ${id}`;
+            const compacting = `Compact mid-run ${id}`;
+            const compaction = 'Mock compaction of the routine so far.';
+            const memoryFile = `routine-${id}.md`;
+            const memoryPath = path.join(process.env.TEST_MEMORY_DIR!, memoryFile);
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Compaction', prompt });
+            testAutomationIds.push(automationId);
+            const update = (data: object) => page.request.put(`/api/automations/${automationId}`, { data });
+            const run = async () => {
+                const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
+                await expect.poll(async () => (await (await page.request.get(`/api/automations/executions/${executionId}`)).json()).execution?.status,
+                    { timeout: 30000 }).toBe('completed');
+            };
+            await update({ historyMode: 'all' });
+
+            // The conversation starts on a catalogue without the memory, which is saved after
+            await run();
+            await mkdir(path.dirname(memoryPath), { recursive: true });
+            await writeFile(memoryPath, '---\ndescription: Reads email at 7am, wants briefs before then\n---\nThe user reads email at 7am.\n');
+            try {
+                await update({ prompt: compacting });
+                await run();
+                const first = (await requestsFor(compacting)).at(-1)!;
+                const continued = (await requestsFor(compaction)).at(-1)!;
+                expect(first.catalogue ?? '').not.toContain(memoryFile);
+                expect(first.systemUpdates.some(update => update.includes(memoryFile))).toBe(true);
+                expect(continued.catalogue).toContain(memoryFile);
+                expect(continued.systemUpdates.some(update => update.startsWith('# Memory recalled'))).toBe(false);
+            } finally {
+                await rm(memoryPath, { force: true });
+            }
+
+            // The next run starts from the compaction, until a step before it is deleted
+            await update({ prompt });
+            await run();
+            expect((await requestsFor(prompt)).at(-1)!.userTurns[0]).toBe(compaction);
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as { history: Array<{ step_id: number; source: string }> };
+            const firstPrompt = history.find(step => step.source === 'user')!;
+            expect((await page.request.delete(`/api/conversations/${automation.conversationId}/messages/${firstPrompt.step_id}?role=user`)).ok()).toBe(true);
+            await run();
+            const sent = (await requestsFor(prompt)).at(-1)!.userTurns;
+            expect(sent).not.toContain(compaction);
+            expect(sent).toContain(compacting);
+        });
+
+        test('a new routine keeps a summary and three runs, and its count outlasts other modes', async ({ page }) => {
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Defaults', prompt: 'Say hello' });
+            testAutomationIds.push(automationId);
+            expect(await historyOf(page, automationId)).toEqual({ mode: 'summarized', runs: 3 });
+
+            const update = (data: object) => page.request.put(`/api/automations/${automationId}`, { data });
+            expect((await update({ historyRuns: 5 })).ok()).toBe(true);
+            expect((await update({ historyMode: 'fresh' })).ok()).toBe(true);
+            expect(await historyOf(page, automationId)).toEqual({ mode: 'fresh', runs: 5 });
+            expect((await update({ historyMode: 'summarized' })).ok()).toBe(true);
+            expect(await historyOf(page, automationId)).toEqual({ mode: 'summarized', runs: 5 });
+            expect((await update({ historyRuns: 21 })).status()).toBe(400);
+        });
+
+        test('the form starts summarized with three runs, and keeps the count while it is hidden', async ({ page }) => {
+            const prompt = `Collect the release notes ${crypto.randomUUID()}`;
+            await automationsPage.goto();
+            await automationsPage.createBtn.click();
+            const createModal = page.locator(Selectors.createAutomationModal);
+            const mode = createModal.getByRole('combobox', { name: 'History' });
+            const runs = createModal.getByRole('combobox', { name: 'Recent runs kept in full' });
+
+            await expect(mode).toHaveValue('summarized');
+            await expect(runs).toHaveValue('3');
+            await runs.selectOption('5');
+            await mode.selectOption('fresh');
+            await expect(runs).toBeHidden();
+            await expect(createModal).toContainText('Each run starts without its earlier runs.');
+            await mode.selectOption('summarized');
+            await expect(runs).toHaveValue('5');
+            await expect(createModal).toContainText('the latest 5 runs in full');
+
+            await createModal.locator('.instructions-textarea').fill(prompt);
+            await createModal.locator('button[type="submit"]').click();
+            await expect(createModal).toBeHidden({ timeout: 5000 });
+            const { automations } = await (await page.request.get('/api/automations')).json();
+            const created = automations.find((a: { prompt: string }) => a.prompt === prompt);
+            testAutomationIds.push(created.id);
+            expect(created).toMatchObject({ historyMode: 'summarized', historyRuns: 5 });
+
+            await automationsPage.openAutomationDetailByPrompt(prompt);
+            const detail = automationsPage.detailModal;
+            await expect(detail.locator('.automation-detail-history')).toHaveText('Summarized');
+            await automationsPage.clickEditButton();
+            await detail.getByRole('combobox', { name: 'History' }).selectOption('fresh');
+            await automationsPage.saveAutomation();
+            const { automation } = await (await page.request.get(`/api/automations/${created.id}`)).json();
+            expect(automation).toMatchObject({ historyMode: 'fresh', historyRuns: 5 });
+        });
+
+        test('each mode sends its share of earlier runs, and the conversation keeps them all', async ({ page }) => {
+            const prompt = `Brief me ${crypto.randomUUID()}`;
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Modes', prompt });
+            testAutomationIds.push(automationId);
+
+            const setHistory = async (data: object) =>
+                expect((await page.request.put(`/api/automations/${automationId}`, { data })).ok()).toBe(true);
+            const run = async () => {
+                const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
+                await expect.poll(async () => (await (await page.request.get(`/api/automations/executions/${executionId}`)).json()).execution?.status,
+                    { timeout: 30000 }).toBe('completed');
+            };
+            /** The user turns of the latest run's request to the model */
+            const sent = async () => (await requestsFor(prompt)).at(-1)!.userTurns;
+            const promptsIn = (turns: string[]) => turns.filter(turn => turn === prompt).length;
+
+            await setHistory({ historyMode: 'all' });
+            await run(); await run(); await run();
+            expect(promptsIn(await sent())).toBe(3);
+
+            await setHistory({ historyMode: 'fresh' });
+            await run();
+            expect(await sent()).toEqual([prompt]);
+
+            await setHistory({ historyMode: 'summarized', historyRuns: 1 });
+            await run();
+            const summarized = await sent();
+            expect(summarized[0]).toMatch(new RegExp('^# Earlier runs of this routine\\n'
+                + 'Runs 1-3 are not in this context\\. Summary of runs 1-3, the last from [^\\n]+:\\n'
+                + 'Run 4 follows in full, then run 5, this one\\.\\n\\n'
+                + 'Earlier briefs: nothing urgent; the user asked to skip crypto\\.$'));
+            expect(promptsIn(summarized)).toBe(2);
+
+            // Keeping more runs summarizes fewer, rather than one summary covering runs also kept
+            await setHistory({ historyRuns: 3 });
+            await run();
+            const kept = await sent();
+            expect(kept[0]).toMatch(/^# Earlier runs of this routine\nRuns 1-2 are not in this context\. Summary of runs 1-2, /);
+            expect(promptsIn(kept)).toBe(4);
+
+            await setHistory({ historyMode: 'all' });
+            await run();
+            expect(promptsIn(await sent())).toBe(7);
+
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as { history: Array<{ message?: string }> };
+            expect(history.filter(step => step.message === prompt)).toHaveLength(7);
+        });
+
+        test('deleting a reply in summarized runs rebuilds the summary without it', async ({ page }) => {
+            const prompt = `Brief me ${crypto.randomUUID()}`;
+            const reply = `Remember the word ${crypto.randomUUID()}`;
+            const automationId = await automationsPage.createAutomationViaAPI({ name: 'History Rebuild', prompt });
+            testAutomationIds.push(automationId);
+            await page.request.put(`/api/automations/${automationId}`, { data: { historyMode: 'summarized', historyRuns: 0 } });
+            const run = async () => {
+                const executionId = await automationsPage.triggerAutomationViaAPI(automationId);
+                await expect.poll(async () => (await (await page.request.get(`/api/automations/executions/${executionId}`)).json()).execution?.status,
+                    { timeout: 30000 }).toBe('completed');
+            };
+            /** The summarizer's requests for this routine, which carry its prompt */
+            const summarizing = async () => (await readRequests())
+                .filter(record => record.query.startsWith('<previous_summary>') && record.query.includes(prompt));
+
+            await run();
+            const { automation } = await (await page.request.get(`/api/automations/${automationId}`)).json();
+            const chatPage = new ChatPage(page);
+            await chatPage.gotoConversation(automation.conversationId);
+            await chatPage.sendMessage(reply);
+            await chatPage.waitForAssistantResponse();
+
+            await run();
+            expect((await summarizing()).at(-1)!.query).toContain(reply);
+
+            const { history } = await (await page.request.get(`/api/chat/${automation.conversationId}/history`)).json() as { history: Array<{ step_id: number; message?: string }> };
+            const replyStep = history.find(step => step.message === reply)!;
+            expect((await page.request.delete(`/api/conversations/${automation.conversationId}/messages/${replyStep.step_id}?role=user`)).ok()).toBe(true);
+
+            await run();
+            const rebuilt = (await summarizing()).at(-1)!.query;
+            expect(rebuilt).toMatch(/<previous_summary>\n\n<\/previous_summary>/);
+            expect(rebuilt).toContain('## Run 1,');
+            expect(rebuilt).toContain('## Run 2,');
+            expect(rebuilt).not.toContain(reply);
         });
     });
 });

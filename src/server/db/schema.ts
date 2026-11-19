@@ -2,6 +2,7 @@ import { serial, text, timestamp, pgTable, pgEnum, uuid, boolean, integer, jsonb
 import { type ATIFAgent, type ATIFFinalMetrics, type ATIFStep, type ATIFStepSource, type ATIFTrajectory } from '../processor/conversation/atif/atif.types';
 import { type TriggerConfig, type TriggerEventData } from '../automation/types';
 import { type ConfirmationRequest } from '../processor/confirmation/confirmation.types';
+import { DEFAULT_ROUTINE_HISTORY_RUNS, ROUTINE_HISTORY_MODES } from '../../shared';
 
 export interface Context {
     compiled: string;
@@ -276,6 +277,7 @@ export const WebScraper = pgTable('web_scraper', {
 // Automation System Schemas
 export const TriggerTypeEnum = pgEnum('trigger_type', ['cron', 'file_watch']);
 export const AutomationStatusEnum = pgEnum('automation_status', ['active', 'paused', 'disabled']);
+export const RoutineHistoryModeEnum = pgEnum('routine_history_mode', ROUTINE_HISTORY_MODES);
 export const ExecutionStatusEnum = pgEnum('execution_status', ['pending', 'running', 'awaiting_confirmation', 'completed', 'failed', 'cancelled']);
 export const ConfirmationStatusEnum = pgEnum('confirmation_status', ['pending', 'approved', 'denied', 'expired']);
 
@@ -302,6 +304,12 @@ export const Automation = pgTable('automation', {
     // Model this routine runs on. Null follows the user's default, so a routine only
     // pins a model when asked to. Cleared if that model goes away.
     chatModelId: integer('chat_model_id').references(() => ChatModel.id, { onDelete: 'set null' }),
+
+    // How much of its earlier runs a run is given. The count is kept while another mode
+    // is chosen, so switching back restores it. Routines made before these existed are 'all',
+    // except the memory dream, which is 'fresh'.
+    historyMode: RoutineHistoryModeEnum('history_mode').default('summarized').notNull(),
+    historyRuns: integer('history_runs').default(DEFAULT_ROUTINE_HISTORY_RUNS).notNull(),
 
     // Execution limits
     maxExecutionsPerDay: integer('max_executions_per_day'),
