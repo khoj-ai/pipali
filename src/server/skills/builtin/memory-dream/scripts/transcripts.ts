@@ -11,14 +11,13 @@
  * Usage: bun transcripts.ts [--since <ISO date>] [--limit <n>] [--url <server>]
  */
 
-const DEFAULT_URL = 'http://localhost:6464';
+/** The address the server binds by default. localhost can resolve to ::1, where nothing listens */
+const DEFAULT_URL = 'http://127.0.0.1:6464';
 const DEFAULT_LIMIT = 30;
 const DEFAULT_WINDOW_DAYS = 7;
 
 /** Long enough to carry a correction with its reasoning, short enough to skim many */
 const USER_MAX_CHARS = 1_200;
-/** The reply is context for the user's next message, not the material itself */
-const AGENT_MAX_CHARS = 400;
 
 interface ConversationSummary {
     id: string;
@@ -72,7 +71,7 @@ function spoken(step: Step): Array<{ speaker: string; text: string }> {
         if (call.function_name !== 'ask_user' || typeof answer !== 'string' || !ANSWERED.test(answer)) return [];
         const question = [call.arguments?.title, call.arguments?.description].filter(Boolean).join(' - ');
         return [
-            { speaker: 'pipali', text: `pipali asked: ${truncate(question, AGENT_MAX_CHARS)}` },
+            { speaker: 'pipali', text: `pipali asked: ${question.trim()}` },
             { speaker: 'user', text: truncate(answer.replace('User', 'user'), USER_MAX_CHARS) },
         ];
     });
@@ -82,7 +81,7 @@ function spoken(step: Step): Array<{ speaker: string; text: string }> {
     if (step.source === 'user') return [{ speaker: 'user', text: `user: ${truncate(step.message, USER_MAX_CHARS)}` }];
     // An agent step carrying tool calls is Pipali narrating its own work, not answering
     if (step.source === 'agent' && !step.tool_calls?.length) {
-        return [{ speaker: 'pipali', text: `pipali: ${truncate(step.message, AGENT_MAX_CHARS)}` }];
+        return [{ speaker: 'pipali', text: `pipali: ${step.message.trim()}` }];
     }
     return [];
 }
@@ -107,10 +106,12 @@ export function formatTranscript(
 ): string {
     const newFrom = Math.max(since.getTime(), utcTime(conversation.createdAt));
 
+    // A message's later lines are indented, so a heading inside a reply cannot pass for a
+    // conversation's heading or the start of a message
     const said = history.flatMap(step => {
         const time = utcTime(step.timestamp);
         return spoken(step).map(({ speaker, text }) => (
-            { speaker, text: `${localTime(time, timeZone)} ${text}`, isNew: time >= newFrom }
+            { speaker, text: `${localTime(time, timeZone)} ${text.replace(/\n(?=[^\n])/g, '\n  ')}`, isNew: time >= newFrom }
         ));
     });
 
@@ -123,7 +124,7 @@ export function formatTranscript(
         messages.unshift(`(earlier) ${before.text}`);
     }
 
-    return [`## ${conversation.title}`, ...messages].join('\n');
+    return [`## ${conversation.title} (${conversation.id})`, ...messages].join('\n');
 }
 
 /**

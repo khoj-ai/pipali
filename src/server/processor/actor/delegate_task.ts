@@ -317,7 +317,7 @@ export async function inspectTask(
                 `Steps: ${steps.length}`,
                 '',
                 'Conversations can be long, rather than reading it all at once, query the local API and efficiently select just what you need.',
-                `Call GET /api/chat/${args.conversation_id}/history on your own server (default: http://localhost:6464).`,
+                `Call GET /api/chat/${args.conversation_id}/history on your own server (default: http://127.0.0.1:6464).`,
                 'See the introspect skill for more details.',
                 '',
                 'Most recent steps:',

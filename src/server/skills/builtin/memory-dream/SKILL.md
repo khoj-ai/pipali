@@ -36,6 +36,10 @@ bun ~/.pipali/skills/memory-dream/scripts/transcripts.ts --since <review_since>
 Without `review_since` the script covers the last 7 days. `--limit <n>` caps how many
 conversations it prints, newest first.
 
+Each conversation is headed by its title and id. When a transcript leaves out what you
+need, such as what a tool call did, the whole conversation is at
+`GET http://127.0.0.1:6464/api/chat/<id>/history`.
+
 What is worth carrying out of a transcript:
 
 - Corrections. The user telling you that something you did was wrong, or how they

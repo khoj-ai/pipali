@@ -193,17 +193,20 @@ describe('transcript digest', () => {
                     { source_call_id: 'note', content: 'User acknowledged: "Backup written"' },
                 ] },
             },
-            { source: 'agent', message: 'Done - three entries were duplicated.', timestamp: at('19T09:03') },
+            { source: 'agent', message: 'Done - three entries were duplicated.\n\n## Kept\nThe ones with receipts.', timestamp: at('19T09:03') },
             { source: 'user', message: 'use beancount next time, not csv', timestamp: at('19T09:04') },
             { source: 'user', message: '[Handoff Context] Summary of earlier turns', extra: { is_compaction: true }, timestamp: at('19T09:05') },
         ], since, 'UTC');
 
         expect(transcript).toBe([
-            '## Ledger cleanup',
+            '## Ledger cleanup (c1)',
             '2026-08-19 09:00 user: reconcile august',
             '2026-08-19 09:02 pipali asked: Merge the duplicates? - Three entries repeat.',
             '2026-08-19 09:02 user responded: keep the one with a receipt',
             '2026-08-19 09:03 pipali: Done - three entries were duplicated.',
+            '',
+            '  ## Kept',
+            '  The ones with receipts.',
             '2026-08-19 09:04 user: use beancount next time, not csv',
         ].join('\n'));
     });
@@ -224,7 +227,7 @@ describe('transcript digest', () => {
         ];
 
         expect(formatTranscript(conversation, history, since, 'UTC')).toBe([
-            '## Ledger cleanup',
+            '## Ledger cleanup (c1)',
             '(earlier) 2026-08-18 09:02 pipali: Done - three entries were duplicated.',
             '2026-08-19 09:00 user: use beancount next time, not csv',
         ].join('\n'));
@@ -240,7 +243,7 @@ describe('transcript digest', () => {
             { source: 'agent', message: 'Three threads need a reply.', timestamp: at('19T07:01') },
             { source: 'user', message: 'draft the one to Dana, keep it short', timestamp: at('19T09:00') },
         ], since, 'UTC')).toBe([
-            '## Ledger cleanup',
+            '## Ledger cleanup (c1)',
             '(earlier) 2026-08-19 07:01 pipali: Three threads need a reply.',
             '2026-08-19 09:00 user: draft the one to Dana, keep it short',
         ].join('\n'));

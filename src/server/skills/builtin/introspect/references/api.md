@@ -1,5 +1,5 @@
 # Pipali Self-Query API
-Default Base URL: `http://localhost:6464/api`. If not running there, find where the bun server is running yourself.
+Default Base URL: `http://127.0.0.1:6464/api`. If not running there, find where the bun server is running yourself.
 
 Query these with `shell_command`, using the bundled `bun` or `uv` runtimes (both are always on PATH). Use `execution_mode: "direct"` if hit sandbox restrictions and to perform unsafe/modifying operations.
 
@@ -53,7 +53,7 @@ started them. Read one with `inspect_task`, or pull just the parts you need from
 - PUT replaces `triggerConfig` whole, so send every field it should keep
 - A schedule with both day of month and day of week set fires when either matches: `0 10 1-7 * 1` runs on the 1st to 7th and every Monday. The first Monday of each month is `0 10 * * 1#1`
 - `historyMode`: what a run is given of the routine's earlier runs. `"all"` (every run), `"summarized"` (one rolling summary of older runs plus the latest `historyRuns` runs whole) or `"fresh"` (none). The conversation keeps every run either way. New routines default to `"summarized"` with `historyRuns` 3
-- `historyRuns`: 0 to 20, used by `"summarized"`. 0 keeps the summary alone. It is kept while another mode is chosen
+- `historyRuns`: 0 to 20, used by `"summarized"`. 0 keeps the summary alone
 - GET `/automations` lists each routine's `upcomingRuns`, the next three times its schedule fires
 
 ## MCP Servers (Tool Integrations)

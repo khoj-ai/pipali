@@ -15,7 +15,7 @@ Query your own API to answer questions about your current setup and manage state
 See `references/api.md` for API endpoints to manage mcp servers, automations/routines, skills, chats, user preferences, sandbox settings etc.
 
 ### Common Introspection Patterns
-The bun server is usually at: `http://localhost:6464`. If not, find your bun server url first.
+The bun server is usually at: `http://127.0.0.1:6464`. If not, find your bun server url first.
 
 - What previous conversations have I had about surfing?: GET /api/conversations?q=surfing
 - What happened in a specific conversation?: Start with `inspect_task` using `latest` or `outline`. Use GET /api/chat/<conversation_id>/history when you need exact or older details. Its raw response can be large, so query it efficiently.
