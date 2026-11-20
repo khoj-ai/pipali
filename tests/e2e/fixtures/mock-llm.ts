@@ -458,6 +458,9 @@ export function fileViewerScenario(): MockScenario {
             + `the export to [export.md](file://${FILE_VIEWER_DIR}/export.md) `
             + `and the brief to [brief.docx](file://${FILE_VIEWER_DIR}/brief.docx). `
             + `The sum is on [line 2 of the script](file://${FILE_VIEWER_DIR}/summarize.ts#L2) `
+            + `and its call is [return rows](file://${FILE_VIEWER_DIR}/summarize.ts#:~:text=return%20rows,sum). `
+            + `The budget item is on [line 7 of the notes](file://${FILE_VIEWER_DIR}/notes.md#L7), `
+            + `the heading is [in the report](file://${FILE_VIEWER_DIR}/report.html#:~:text=Quarterly%20report) `
             + `and the passport renewal on [the export's last line](file://${FILE_VIEWER_DIR}/export.md#L${FILE_VIEWER_EXPORT_LINES}).`,
     };
 }

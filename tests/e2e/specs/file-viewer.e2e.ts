@@ -166,6 +166,32 @@ test.describe('File viewer', () => {
         expect(target).toEqual({ text: '* DONE Renew the passport', inView: true });
     });
 
+    test('opens a source file at the passage a link quotes, from its start to its end', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href*="summarize.ts#:~:text"]`).click();
+
+        await expect(page.locator(`${Selectors.fileViewer} ${Selectors.fileViewerSource} .hljs-keyword`).first()).toBeVisible();
+        // `return` and `rows` sit in different highlight spans
+        await expect.poll(() => page.evaluate(() => [...CSS.highlights.get('file-target') ?? []].map(range => range.toString())))
+            .toEqual(['return rows.reduce((sum']);
+    });
+
+    test('opens rendered markdown at the line a link names, counting the frontmatter', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="notes.md#L7"]`).click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        await expect(viewer.locator(`${Selectors.fileViewerMarkdown} li`)).toHaveAttribute('data-line', '7');
+        await expect.poll(() => page.evaluate(() => [...CSS.highlights.get('file-target') ?? []].map(range => range.toString())))
+            .toEqual(['Budget']);
+    });
+
+    test('opens a document in the sandboxed frame at the passage a link quotes', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href*="report.html#:~:text"]`).click();
+
+        const frame = await page.locator(`${Selectors.fileViewer} ${Selectors.fileViewerFrame}`).elementHandle().then(handle => handle!.contentFrame());
+        await expect.poll(() => frame!.evaluate(() => [...CSS.highlights.get('file-target') ?? []].map(range => range.toString())))
+            .toEqual(['Quarterly report']);
+    });
+
     test('finds text in rendered markdown', async ({ page }) => {
         await page.locator(`${Selectors.assistantMessage} a[href$="notes.md"]`).first().click();
 

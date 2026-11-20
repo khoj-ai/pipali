@@ -171,17 +171,33 @@ export function fileUrlToPath(fileUrl: string): string {
     }
 }
 
-/** Where in a file a link points: lines, 1-based and inclusive */
-export type FileLinkTarget = { kind: 'lines'; start: number; end: number };
+/** Where in a file a link points: lines, 1-based and inclusive, or a passage of its text */
+export type FileLinkTarget =
+    | { kind: 'lines'; start: number; end: number }
+    | { kind: 'text'; start: string; end?: string };
 
 const LINES_FRAGMENT = /^L(\d+)(?:-L?(\d+))?$/;
+const TEXT_DIRECTIVE = ':~:text=';
 
-/** The target a file link's fragment names: `L42` or `L42-L50` */
+/**
+ * The target a file link's fragment names: `L42`, `L42-L50`, or a text fragment
+ * (`:~:text=start,end`, https://wicg.github.io/scroll-to-text-fragment/). The `prefix-,`
+ * and `,-suffix` terms only pick between repeated passages, and the first match is taken.
+ */
 export function parseFileFragment(fragment: string): FileLinkTarget | null {
     const lines = fragment.match(LINES_FRAGMENT);
-    if (!lines) return null;
-    const start = Math.max(1, Number(lines[1]));
-    return { kind: 'lines', start, end: Math.max(start, Number(lines[2] ?? start)) };
+    if (lines) {
+        const start = Math.max(1, Number(lines[1]));
+        return { kind: 'lines', start, end: Math.max(start, Number(lines[2] ?? start)) };
+    }
+
+    const directive = fragment.indexOf(TEXT_DIRECTIVE);
+    if (directive === -1) return null;
+    const terms = fragment.slice(directive + TEXT_DIRECTIVE.length).split('&')[0]!.split(',');
+    if (terms.length > 1 && terms[0]!.endsWith('-')) terms.shift();
+    if (terms.length > 1 && terms[terms.length - 1]!.startsWith('-')) terms.pop();
+    const [start, end] = terms.map(safeDecode);
+    return start ? { kind: 'text', start, end: end || undefined } : null;
 }
 
 /** A file:// link split into the file it names and where in it to land */

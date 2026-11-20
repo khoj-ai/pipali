@@ -12,7 +12,7 @@ import { useFileViewer, type FileViewerRequest } from '../../hooks/useFileViewer
 import { fetchFileContent, fileViewKind, resolveDocumentLink, RICH_RENDER_MAX_CHARS } from '../../utils/file-viewer';
 import { getFileName, shortenHomePath } from '../../utils/formatting';
 import { FRAME_FIND_CSS, scrollToRange } from '../../utils/find-matches';
-import { clearTarget, paintTarget, targetRange } from '../../utils/file-target';
+import { clearTarget, FRAME_TARGET_CSS, paintTarget, targetRange } from '../../utils/file-target';
 import { localImageSrc } from '../../utils/markdown';
 import { getApiBaseUrl } from '../../utils/api';
 import { isTauri, openFile, openInBrowser } from '../../utils/tauri';
@@ -117,7 +117,7 @@ export function FileViewerPanel({ request, revision, onClose }: FileViewerPanelP
         clearTarget(found.root.ownerDocument);
         const { target } = request;
         // A frame shows a rendered page, whose text has no source lines
-        const range = !target || isFrame ? null : targetRange(found.root, target);
+        const range = !target || (isFrame && target.kind === 'lines') ? null : targetRange(found.root, target);
         if (!range) return;
         paintTarget(range);
         scrollToRange(range, found.scroller);
@@ -127,7 +127,7 @@ export function FileViewerPanel({ request, revision, onClose }: FileViewerPanelP
     // A frame's document has its own keys and highlight rules, so both are set up per load
     const handleDocumentLoad = useCallback((doc: Document) => {
         const style = doc.createElement('style');
-        style.textContent = FRAME_FIND_CSS;
+        style.textContent = FRAME_FIND_CSS + FRAME_TARGET_CSS;
         doc.head.append(style);
         doc.addEventListener('keydown', e => findShortcutRef.current(e));
         setFrameLoads(n => n + 1);

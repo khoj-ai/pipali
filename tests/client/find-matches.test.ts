@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { findMatchSpans, lineSpan } from '../../src/client/utils/find-matches';
+import { findMatchSpans, lineSpan, passageSpan } from '../../src/client/utils/find-matches';
 
 describe('findMatchSpans', () => {
     test('finds a phrase that crosses the text nodes syntax highlighting splits it into', () => {
@@ -43,5 +43,21 @@ describe('lineSpan', () => {
         expect(lineSpan(texts, 2, 99)).toEqual({ startNode: 1, startOffset: 8, endNode: 3, endOffset: 4 });
         expect(lineSpan(texts, 4, 5)).toBeNull();
         expect(lineSpan([], 1, 1)).toBeNull();
+    });
+});
+
+describe('passageSpan', () => {
+    // `return` / ` rows.reduce((sum, row) => sum` / ` + row, 0);` : `sum` appears before and after `rows`
+    const texts = ['sum = ', 'return', ' rows.reduce((sum, row) => sum', ' + row, 0);'];
+
+    test('runs from the first start through the first end after it, across text nodes', () => {
+        expect(passageSpan(texts, 'return rows', 'sum')).toEqual({ startNode: 1, startOffset: 0, endNode: 2, endOffset: 17 });
+        expect(passageSpan(texts, 'return', 'row, 0')).toEqual({ startNode: 1, startOffset: 0, endNode: 3, endOffset: 9 });
+    });
+
+    test('is just the start when no end follows it, and nothing without the start', () => {
+        expect(passageSpan(texts, 'rows', 'sum = ')).toEqual({ startNode: 2, startOffset: 1, endNode: 2, endOffset: 5 });
+        expect(passageSpan(texts, 'rows')).toEqual({ startNode: 2, startOffset: 1, endNode: 2, endOffset: 5 });
+        expect(passageSpan(texts, 'columns', 'sum')).toBeNull();
     });
 });

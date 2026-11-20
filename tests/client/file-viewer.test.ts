@@ -116,6 +116,21 @@ describe('parseFileLink', () => {
         expect(parseFileLink('file://~/notes/a.md#L3')).toEqual({ path: '~/notes/a.md', target: lines(3, 3) });
     });
 
+    test('reads a text fragment, decoded, with its optional end', () => {
+        const text = (fragment: string) => parseFileLink(`file:///Users/me/a.md#${fragment}`).target;
+        expect(text(':~:text=Quarterly%20report')).toEqual({ kind: 'text', start: 'Quarterly report' });
+        expect(text(':~:text=start%20here,end%20there')).toEqual({ kind: 'text', start: 'start here', end: 'end there' });
+        expect(text(':~:text=a%2C%20b')).toEqual({ kind: 'text', start: 'a, b' });
+        expect(text('intro:~:text=Budget')).toEqual({ kind: 'text', start: 'Budget' });
+        expect(text(':~:text=Budget&text=Agenda')).toEqual({ kind: 'text', start: 'Budget' });
+    });
+
+    test('takes the first match, so a text fragment\'s prefix and suffix terms are dropped', () => {
+        expect(parseFileLink('file:///a.md#:~:text=Q3-,Budget,-line').target).toEqual({ kind: 'text', start: 'Budget' });
+        expect(parseFileLink('file:///a.md#:~:text=Q3-,Budget,plan,-line').target).toEqual({ kind: 'text', start: 'Budget', end: 'plan' });
+        expect(parseFileLink('file:///a.md#:~:text=').target).toBeNull();
+    });
+
     test('keeps an encoded # in the path and ignores a fragment it does not know', () => {
         expect(parseFileLink('file:///Users/me/issue%231.md#L2')).toEqual({
             path: '/Users/me/issue#1.md',
@@ -144,6 +159,8 @@ describe('resolveDocumentLink', () => {
     test('keeps where in the linked file to land', () => {
         expect(resolveDocumentLink('file:///Users/me/run.ts#L42', doc))
             .toEqual({ kind: 'file', path: '/Users/me/run.ts', target: { kind: 'lines', start: 42, end: 42 } });
+        expect(resolveDocumentLink('../notes.md#:~:text=Budget', doc))
+            .toEqual({ kind: 'file', path: '/Users/me/notes.md', target: { kind: 'text', start: 'Budget' } });
     });
 
     test('blocks every other scheme', () => {

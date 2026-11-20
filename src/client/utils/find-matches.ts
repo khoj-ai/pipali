@@ -36,9 +36,10 @@ function fold(text: string): string {
 /**
  * Matches of `query` in `texts` read end to end, as positions within the individual texts.
  * A match may start in one text and end in a later one, which is what a phrase crossing a
- * syntax-highlight span or an inline tag looks like.
+ * syntax-highlight span or an inline tag looks like. Matches start at or after the `from`th
+ * character.
  */
-export function findMatchSpans(texts: string[], query: string, limit = MAX_MATCHES): MatchSpan[] {
+export function findMatchSpans(texts: string[], query: string, limit = MAX_MATCHES, from = 0): MatchSpan[] {
     const needle = fold(query);
     if (!needle) return [];
 
@@ -61,7 +62,7 @@ export function findMatchSpans(texts: string[], query: string, limit = MAX_MATCH
     };
 
     const spans: MatchSpan[] = [];
-    for (let at = haystack.indexOf(needle); at !== -1 && spans.length < limit; at = haystack.indexOf(needle, at + needle.length)) {
+    for (let at = haystack.indexOf(needle, from); at !== -1 && spans.length < limit; at = haystack.indexOf(needle, at + needle.length)) {
         const startNode = textAt(at);
         const endNode = textAt(at + needle.length - 1);
         spans.push({
@@ -110,6 +111,18 @@ export function lineSpan(texts: string[], start: number, end: number): MatchSpan
     return from && last >= 0 ? { startNode: from.node, startOffset: from.offset, endNode: last, endOffset: texts[last]!.length } : null;
 }
 
+/**
+ * The first `start` through the first `end` after it, in `texts` read end to end. Just the
+ * `start` match when there is no `end`, or none follows it.
+ */
+export function passageSpan(texts: string[], start: string, end?: string): MatchSpan | null {
+    const [first] = findMatchSpans(texts, start, 1);
+    if (!first || !end) return first ?? null;
+    const startEnd = texts.slice(0, first.endNode).reduce((length, text) => length + text.length, first.endOffset);
+    const [last] = findMatchSpans(texts, end, 1, startEnd);
+    return last ? { ...first, endNode: last.endNode, endOffset: last.endOffset } : first;
+}
+
 function spanToRange(nodes: Text[], span: MatchSpan): Range {
     const range = nodes[span.startNode]!.ownerDocument.createRange();
     range.setStart(nodes[span.startNode]!, span.startOffset);
@@ -126,6 +139,13 @@ export function findRanges(root: Node, query: string): Range[] {
 export function lineRange(root: Node, start: number, end: number): Range | null {
     const nodes = visibleTextNodes(root);
     const span = lineSpan(nodes.map(node => node.nodeValue!), start, end);
+    return span && spanToRange(nodes, span);
+}
+
+/** The text from the first `start` under `root` through the first `end` after it, as a Range */
+export function passageRange(root: Node, start: string, end?: string): Range | null {
+    const nodes = visibleTextNodes(root);
+    const span = passageSpan(nodes.map(node => node.nodeValue!), start, end);
     return span && spanToRange(nodes, span);
 }
 

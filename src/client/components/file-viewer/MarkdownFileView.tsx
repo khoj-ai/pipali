@@ -9,6 +9,9 @@ export function MarkdownFileView({ text }: { text: string }) {
     const parsed = parseFrontmatter(text);
     const yaml = parsed?.yaml.trim();
     const highlighted = yaml ? highlightSource(yaml, 'yaml') : null;
+    // The body is what follows the frontmatter, trimmed; its lines are numbered from the file's top
+    const bodyStart = parsed ? text.trimEnd().length - parsed.body.length : 0;
+    const lineOffset = text.slice(0, bodyStart).split('\n').length - 1;
 
     return (
         <div className="file-viewer-markdown message-content">
@@ -19,7 +22,7 @@ export function MarkdownFileView({ text }: { text: string }) {
                         : <code>{yaml}</code>}
                 </pre>
             )}
-            <ChatMarkdown>{parsed ? parsed.body : text}</ChatMarkdown>
+            <ChatMarkdown lineOffset={lineOffset}>{parsed ? parsed.body : text}</ChatMarkdown>
         </div>
     );
 }
