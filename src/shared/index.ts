@@ -69,3 +69,6 @@ export const ROUTINE_HISTORY_MODES = ['all', 'summarized', 'fresh'] as const;
 export type RoutineHistoryMode = typeof ROUTINE_HISTORY_MODES[number];
 export const DEFAULT_ROUTINE_HISTORY_RUNS = 3;
 export const MAX_ROUTINE_HISTORY_RUNS = 20;
+
+/** Lines view_file reads from a text file when the call sets no limit */
+export const DEFAULT_VIEW_FILE_LINES = 50;

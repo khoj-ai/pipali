@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { findMatchSpans } from '../../src/client/utils/find-matches';
+import { findMatchSpans, lineSpan } from '../../src/client/utils/find-matches';
 
 describe('findMatchSpans', () => {
     test('finds a phrase that crosses the text nodes syntax highlighting splits it into', () => {
@@ -22,5 +22,26 @@ describe('findMatchSpans', () => {
         // 'İ'.toLowerCase() is two code units; the match after it must still land on its own text
         const spans = findMatchSpans(['İİ', 'target'], 'target');
         expect(spans).toEqual([{ startNode: 1, startOffset: 0, endNode: 1, endOffset: 6 }]);
+    });
+});
+
+describe('lineSpan', () => {
+    // `const` / ` a = 1;\n` / `b();` / `\n` / `done` : three lines when read end to end
+    const texts = ['const', ' a = 1;\nb', '();\n', 'done'];
+
+    test('runs from the start of the first line to the end of the last, across text nodes', () => {
+        expect(lineSpan(texts, 1, 1)).toEqual({ startNode: 0, startOffset: 0, endNode: 1, endOffset: 7 });
+        expect(lineSpan(texts, 2, 2)).toEqual({ startNode: 1, startOffset: 8, endNode: 2, endOffset: 3 });
+        expect(lineSpan(texts, 1, 2)).toEqual({ startNode: 0, startOffset: 0, endNode: 2, endOffset: 3 });
+    });
+
+    test('starts a line at the end of the text node whose newline closes the one before', () => {
+        expect(lineSpan(texts, 3, 3)).toEqual({ startNode: 2, startOffset: 4, endNode: 3, endOffset: 4 });
+    });
+
+    test('stops at the end of the text when the lines run past it, and finds nothing beyond it', () => {
+        expect(lineSpan(texts, 2, 99)).toEqual({ startNode: 1, startOffset: 8, endNode: 3, endOffset: 4 });
+        expect(lineSpan(texts, 4, 5)).toBeNull();
+        expect(lineSpan([], 1, 1)).toBeNull();
     });
 });

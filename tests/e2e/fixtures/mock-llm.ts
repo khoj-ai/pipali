@@ -402,6 +402,9 @@ export function writeFileScenario(): MockScenario {
 
 export const FILE_VIEWER_DIR = '/tmp/pipali/e2e-file-viewer';
 
+/** Length of export.md, which the spec writes and the response links the last line of */
+export const FILE_VIEWER_EXPORT_LINES = 35_000;
+
 /**
  * Write an HTML report and a TypeScript file for real, then link both, so a test can open
  * each in the viewer panel. The report carries a script that must never run.
@@ -453,7 +456,9 @@ export function fileViewerScenario(): MockScenario {
             + `the script to [summarize.ts](file://${FILE_VIEWER_DIR}/summarize.ts), `
             + `the notes to [notes.md](file://${FILE_VIEWER_DIR}/notes.md), `
             + `the export to [export.md](file://${FILE_VIEWER_DIR}/export.md) `
-            + `and the brief to [brief.docx](file://${FILE_VIEWER_DIR}/brief.docx).`,
+            + `and the brief to [brief.docx](file://${FILE_VIEWER_DIR}/brief.docx). `
+            + `The sum is on [line 2 of the script](file://${FILE_VIEWER_DIR}/summarize.ts#L2) `
+            + `and the passport renewal on [the export's last line](file://${FILE_VIEWER_DIR}/export.md#L${FILE_VIEWER_EXPORT_LINES}).`,
     };
 }
 

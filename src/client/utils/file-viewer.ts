@@ -27,7 +27,7 @@ import xml from 'highlight.js/lib/languages/xml';
 import yaml from 'highlight.js/lib/languages/yaml';
 import org from './org-grammar';
 import { apiFetch } from './api';
-import { fileUrlToPath } from './formatting';
+import { parseFileLink, type FileLink } from './formatting';
 
 const GRAMMARS = {
     bash, css, diff, dos, go, ini, javascript, json, latex, org, powershell, properties,
@@ -127,7 +127,7 @@ export async function fetchFileContent(path: string): Promise<FileContentResult>
 
 export type DocumentLink =
     | { kind: 'web'; url: string }
-    | { kind: 'file'; path: string }
+    | ({ kind: 'file' } & FileLink)
     | { kind: 'blocked' };
 
 /**
@@ -137,13 +137,13 @@ export type DocumentLink =
  */
 export function resolveDocumentLink(href: string, documentPath: string): DocumentLink {
     if (/^https?:\/\//i.test(href)) return { kind: 'web', url: href };
-    if (/^file:/i.test(href)) return { kind: 'file', path: fileUrlToPath(href) };
+    if (/^file:/i.test(href)) return { kind: 'file', ...parseFileLink(href) };
     if (/^[a-z][a-z0-9+.-]*:/i.test(href)) return { kind: 'blocked' };
     try {
         const base = /^[a-zA-Z]:[\\/]/.test(documentPath)
             ? `file:///${documentPath.replace(/\\/g, '/')}`
             : `file://${documentPath}`;
-        return { kind: 'file', path: fileUrlToPath(new URL(href, base).href) };
+        return { kind: 'file', ...parseFileLink(new URL(href, base).href) };
     } catch {
         return { kind: 'blocked' };
     }

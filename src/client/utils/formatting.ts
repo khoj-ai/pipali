@@ -1,6 +1,6 @@
 // Formatting utilities for tool names, arguments, and display
 
-import { CONVERSATION_HEADER, PIPALI_MEMORY_RELATIVE_DIR } from '../../shared';
+import { CONVERSATION_HEADER, DEFAULT_VIEW_FILE_LINES, PIPALI_MEMORY_RELATIVE_DIR } from '../../shared';
 import { resolveUidLabel } from './snapshotParser';
 
 /** Format bytes to a human-readable file size string. */
@@ -139,8 +139,17 @@ export function getFileName(path: string): string {
     return parts[parts.length - 1] || path;
 }
 
+function safeDecode(value: string): string {
+    try {
+        return decodeURIComponent(value);
+    } catch {
+        return value;
+    }
+}
+
 /**
- * Local filesystem path for a file:// URL. Anything else passes through unchanged.
+ * Local filesystem path for a file:// URL, without its #fragment. Anything else passes
+ * through unchanged.
  *
  * Tool calls name files the way the model wrote them, so `file://~/notes.md` and
  * `file://Code/x.ts` occur; a URL parser would read `~` or `Code` as a host. Those come
@@ -149,22 +158,47 @@ export function getFileName(path: string): string {
  */
 export function fileUrlToPath(fileUrl: string): string {
     if (!fileUrl.startsWith('file://')) return fileUrl;
-    const rest = fileUrl.slice('file://'.length).replace(/^localhost\//, '/');
-    const decode = (value: string) => {
-        try {
-            return decodeURIComponent(value);
-        } catch {
-            return value;
-        }
-    };
-    if (!rest.startsWith('/')) return decode(rest);
+    const hash = fileUrl.indexOf('#');
+    const url = hash === -1 ? fileUrl : fileUrl.slice(0, hash);
+    const rest = url.slice('file://'.length).replace(/^localhost\//, '/');
+    if (!rest.startsWith('/')) return safeDecode(rest);
     try {
-        const path = decodeURIComponent(new URL(fileUrl).pathname);
+        const path = decodeURIComponent(new URL(url).pathname);
         // Windows drive paths come through as /C:/Users/...; strip the leading slash.
         return /^\/[a-zA-Z]:\//.test(path) ? path.slice(1) : path;
     } catch {
-        return decode(rest);
+        return safeDecode(rest);
     }
+}
+
+/** Where in a file a link points: lines, 1-based and inclusive */
+export type FileLinkTarget = { kind: 'lines'; start: number; end: number };
+
+const LINES_FRAGMENT = /^L(\d+)(?:-L?(\d+))?$/;
+
+/** The target a file link's fragment names: `L42` or `L42-L50` */
+export function parseFileFragment(fragment: string): FileLinkTarget | null {
+    const lines = fragment.match(LINES_FRAGMENT);
+    if (!lines) return null;
+    const start = Math.max(1, Number(lines[1]));
+    return { kind: 'lines', start, end: Math.max(start, Number(lines[2] ?? start)) };
+}
+
+/** A file:// link split into the file it names and where in it to land */
+export interface FileLink {
+    path: string;
+    target: FileLinkTarget | null;
+}
+
+export function parseFileLink(href: string): FileLink {
+    const hash = href.indexOf('#');
+    return { path: fileUrlToPath(href), target: hash === -1 ? null : parseFileFragment(href.slice(hash + 1)) };
+}
+
+/** A file:// link to a path as a tool named it, so a `#` or `%` in a file name stays part of the path */
+function toolFileUrl(path: string, lines?: { start: number; end: number } | null): string {
+    const fragment = !lines ? '' : lines.start === lines.end ? `#L${lines.start}` : `#L${lines.start}-L${lines.end}`;
+    return `file://${path.replace(/%/g, '%25').replace(/#/g, '%23')}${fragment}`;
 }
 
 const MEMORY_FILE_TOOLS = new Set(['view_file', 'edit_file', 'write_file']);
@@ -391,15 +425,18 @@ export function formatToolArgsRich(
             if (!args.path) return null;
             const [basename, folder] = splitPath(args.path);
             let text = basename;
-            if (!outline && (args.offset || args.limit)) {
-                const offsetStr = args.offset ? `${args.offset}` : '1';
-                const limitStr = args.limit ? `${args.offset + args.limit}` : '';
-                text += ` (lines ${[offsetStr, limitStr].filter(Boolean).join('-')})`;
+            // Args are kept as the model wrote them, so a number may be a string. Offset is 0-based.
+            const offset = Math.max(0, Number(args.offset) || 0);
+            const limit = Number(args.limit) || 0;
+            // A call naming neither reads the whole of a short file, so only a named portion gets lines
+            const lines = offset || limit ? { start: offset + 1, end: offset + (limit || DEFAULT_VIEW_FILE_LINES) } : null;
+            if (!outline && lines) {
+                text += lines.start === lines.end ? ` (line ${lines.start})` : ` (lines ${lines.start}-${lines.end})`;
             }
             const secondary = isMemoryFileToolCall(toolName, args)
                 ? 'in memories'
                 : folder ? `in ${folder}` : undefined;
-            return { text, secondary, url: `file://${args.path}`, hoverText: args.path };
+            return { text, secondary, url: toolFileUrl(args.path, lines), hoverText: args.path };
         }
         case 'edit_file':
         case 'write_file': {
@@ -408,7 +445,7 @@ export function formatToolArgsRich(
             const secondary = isMemoryFileToolCall(toolName, args)
                 ? 'in memories'
                 : folder ? `in ${folder}` : undefined;
-            return { text: basename, secondary, url: `file://${args.file_path}`, hoverText: args.file_path };
+            return { text: basename, secondary, url: toolFileUrl(args.file_path), hoverText: args.file_path };
         }
         case 'list_files': {
             if (!args.path) return null;

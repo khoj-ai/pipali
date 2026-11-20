@@ -11,6 +11,7 @@ import {
 import { isPathDeniedForRead } from '../../sandbox';
 import { isCaseInsensitiveFS } from '../../utils';
 import { createChildLogger } from '../../logger';
+import { DEFAULT_VIEW_FILE_LINES } from '../../../shared';
 
 const log = createChildLogger({ component: 'read_file' });
 
@@ -41,9 +42,6 @@ export interface ReadFileOptions {
     /** Confirmation context for requesting user approval on sensitive paths */
     confirmationContext?: ConfirmationContext;
 }
-
-/** Default maximum lines to read when no limit is specified */
-const DEFAULT_LINE_LIMIT = 50;
 
 // Supported image formats
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.webp'];
@@ -86,7 +84,7 @@ interface LineFilterResult {
  *
  * @param text - The raw text content
  * @param offset - Starting line offset (0-based), defaults to 0
- * @param limit - Maximum number of lines to read, defaults to DEFAULT_LINE_LIMIT
+ * @param limit - Maximum number of lines to read, defaults to DEFAULT_VIEW_FILE_LINES
  * @returns Filtered content with metadata
  */
 function applyLineFilter(text: string, offset: number = 0, limit?: number): LineFilterResult {
@@ -96,8 +94,7 @@ function applyLineFilter(text: string, offset: number = 0, limit?: number): Line
     // Clamp offset to valid range
     const startIdx = Math.max(0, Math.min(offset, totalLines));
 
-    // Apply limit (default to DEFAULT_LINE_LIMIT if not specified)
-    const effectiveLimit = limit ?? DEFAULT_LINE_LIMIT;
+    const effectiveLimit = limit ?? DEFAULT_VIEW_FILE_LINES;
     const endIdx = Math.min(startIdx + effectiveLimit, totalLines);
 
     const selectedLines = lines.slice(startIdx, endIdx);

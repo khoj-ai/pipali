@@ -4,9 +4,11 @@ import { newestSentence } from '../../src/client/components/thoughts/ThoughtItem
 import { formatCharCount } from '../../src/client/utils/formatting';
 import {
     buildDelegatedTaskTitleMap,
+    fileUrlToPath,
     formatDelegationToolResult,
     formatToolArgsRich,
     getDelegatedConversationId,
+    parseFileLink,
 } from '../../src/client/utils/formatting';
 import { formatConversationHeader } from '../../src/shared';
 import type { Thought } from '../../src/client/types';
@@ -204,6 +206,23 @@ describe('file tool formatting', () => {
                 secondary: 'in memories',
             });
         }
+    });
+
+    test('links a view_file call at the lines it read, and labels them alike', () => {
+        const view = (args: object) => formatToolArgsRich('view_file', { path: '/work/notes.md', ...args });
+        expect(view({})).toMatchObject({ text: 'notes.md', url: 'file:///work/notes.md' });
+        expect(view({ offset: 40, limit: 20 })).toMatchObject({ text: 'notes.md (lines 41-60)', url: 'file:///work/notes.md#L41-L60' });
+        expect(view({ offset: '40', limit: '20' })).toMatchObject({ text: 'notes.md (lines 41-60)', url: 'file:///work/notes.md#L41-L60' });
+        expect(view({ limit: 20 })).toMatchObject({ text: 'notes.md (lines 1-20)', url: 'file:///work/notes.md#L1-L20' });
+        expect(view({ offset: 40 })).toMatchObject({ text: 'notes.md (lines 41-90)', url: 'file:///work/notes.md#L41-L90' });
+        expect(view({ offset: 40, limit: 1 })).toMatchObject({ text: 'notes.md (line 41)', url: 'file:///work/notes.md#L41' });
+    });
+
+    test('keeps a # or % in a linked file name part of its path', () => {
+        const url = formatToolArgsRich('view_file', { path: '~/issue#1 at 100%.md', offset: 9, limit: 5 })!.url!;
+        expect(url).toBe('file://~/issue%231 at 100%25.md#L10-L14');
+        expect(parseFileLink(url)).toEqual({ path: '~/issue#1 at 100%.md', target: { kind: 'lines', start: 10, end: 14 } });
+        expect(fileUrlToPath(formatToolArgsRich('write_file', { file_path: '/work/a#b.md' })!.url!)).toBe('/work/a#b.md');
     });
 
     test('extracts and shortens ordinary file locations across platforms', () => {

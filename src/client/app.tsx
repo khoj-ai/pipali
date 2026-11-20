@@ -32,7 +32,7 @@ import { buildChatHistory } from "./utils/chat-messages";
 import { ensureServiceWorker } from "./utils/push";
 import { initNotifications, notifyConfirmationRequest, notifyTaskComplete, setNotificationClickHandler, setupNotificationClickListener, warmAudioContext } from "./utils/notifications";
 import { ConversationNavigationContext } from "./hooks/useConversationNavigation";
-import { FileViewerContext } from "./hooks/useFileViewer";
+import { FileViewerContext, type FileViewerRequest, type OpenInViewer } from "./hooks/useFileViewer";
 import { createComposerDraft } from "./hooks/useComposerDraft";
 import { useStableCallback } from "./hooks/useStableCallback";
 import { useVoiceSettings } from "./hooks/useVoiceSettings";
@@ -137,7 +137,10 @@ const App = () => {
     // Find in page state
     const [showFindInPage, setShowFindInPage] = useState(false);
     const [findInPageQuery, setFindInPageQuery] = useState<string | undefined>(undefined);
-    const [viewerPath, setViewerPath] = useState<string | null>(null);
+    // A fresh request object per open, so a second link into the open file lands again
+    const [viewer, setViewer] = useState<FileViewerRequest | null>(null);
+    const viewerPath = viewer?.path ?? null;
+    const openInViewer = useCallback<OpenInViewer>((path, target = null) => setViewer({ path, target }), []);
     const pendingHighlightRef = useRef<{ term: string; conversationId: string } | undefined>(undefined);
     // Billing alerts state
     const [billingAlerts, setBillingAlerts] = useState<BillingAlert[]>([]);
@@ -732,7 +735,7 @@ const App = () => {
 
     // The viewer shows a file from the conversation on screen, so it closes with it
     useEffect(() => {
-        setViewerPath(null);
+        setViewer(null);
     }, [conversationId]);
 
     // Counts completed writes to the open file, so the viewer refetches after Pipali edits it
@@ -1809,7 +1812,7 @@ const App = () => {
 
     return (
         <ConversationNavigationContext.Provider value={navigateToConversation}>
-        <FileViewerContext.Provider value={setViewerPath}>
+        <FileViewerContext.Provider value={openInViewer}>
         <ErrorBoundary>
             <div className="app-wrapper">
                 <Sidebar
@@ -1890,10 +1893,10 @@ const App = () => {
                             <ErrorBoundary>
                                 <MessageList messages={messages} conversationId={conversationId} platformFrontendUrl={platformFrontendUrl} onDeleteMessage={deleteMessage} onEditMessage={editMessage} onForkConversation={forkConversationFrom} onBillingContinue={handleBillingContinue} onBillingDismiss={handleBillingDismiss} onAuthSignIn={handleAuthSignIn} onAuthDismiss={handleAuthDismiss} onRunErrorDismiss={handleRunErrorDismiss} userFirstName={userName?.split(' ')[0] ?? authStatus?.user?.name?.split(' ')[0]} draft={composerDraft} isProcessing={isProcessing} zoom={mainViewZoom} />
                             </ErrorBoundary>
-                            {viewerPath && (
+                            {viewer && (
                                 <ErrorBoundary>
                                     {/* Keyed so a new file starts from loading instead of rendering the last file's text under its kind */}
-                                    <FileViewerPanel key={viewerPath} path={viewerPath} revision={viewerRevision} onClose={() => setViewerPath(null)} />
+                                    <FileViewerPanel key={viewer.path} request={viewer} revision={viewerRevision} onClose={() => setViewer(null)} />
                                 </ErrorBoundary>
                             )}
                         </div>

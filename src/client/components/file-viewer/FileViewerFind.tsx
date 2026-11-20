@@ -8,7 +8,7 @@ import { clearMatches, findRanges, paintMatches, scrollToRange } from '../../uti
 
 export interface FindTarget {
     /** Where the text to search lives */
-    root: Node;
+    root: Element;
     /** What scrolls it */
     scroller: Element;
 }

@@ -123,6 +123,11 @@
     color: white;
 }
 
+/* The lines or passage a link named */
+::highlight(file-target) {
+    background-color: var(--color-info-bg);
+}
+
 /* Documents keep their own styling; a generated page assumes a white ground */
 .file-viewer-frame {
     display: block;

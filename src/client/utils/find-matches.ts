@@ -92,15 +92,41 @@ function visibleTextNodes(root: Node): Text[] {
     return nodes;
 }
 
+/**
+ * Lines `start` to `end` (1-based, inclusive) of `texts` read end to end, without the
+ * newline closing the last. Null when the text has fewer than `start` lines.
+ */
+export function lineSpan(texts: string[], start: number, end: number): MatchSpan | null {
+    let line = 1;
+    let from: { node: number; offset: number } | null = start === 1 ? { node: 0, offset: 0 } : null;
+    for (let node = 0; node < texts.length; node++) {
+        const text = texts[node]!;
+        for (let at = text.indexOf('\n'); at !== -1; at = text.indexOf('\n', at + 1)) {
+            if (line === end) return from && { startNode: from.node, startOffset: from.offset, endNode: node, endOffset: at };
+            if (++line === start) from = { node, offset: at + 1 };
+        }
+    }
+    const last = texts.length - 1;
+    return from && last >= 0 ? { startNode: from.node, startOffset: from.offset, endNode: last, endOffset: texts[last]!.length } : null;
+}
+
+function spanToRange(nodes: Text[], span: MatchSpan): Range {
+    const range = nodes[span.startNode]!.ownerDocument.createRange();
+    range.setStart(nodes[span.startNode]!, span.startOffset);
+    range.setEnd(nodes[span.endNode]!, span.endOffset);
+    return range;
+}
+
 export function findRanges(root: Node, query: string): Range[] {
     const nodes = visibleTextNodes(root);
-    const doc = root.ownerDocument!;
-    return findMatchSpans(nodes.map(node => node.nodeValue!), query).map(span => {
-        const range = doc.createRange();
-        range.setStart(nodes[span.startNode]!, span.startOffset);
-        range.setEnd(nodes[span.endNode]!, span.endOffset);
-        return range;
-    });
+    return findMatchSpans(nodes.map(node => node.nodeValue!), query).map(span => spanToRange(nodes, span));
+}
+
+/** The text of lines `start` to `end` under `root`, as a Range */
+export function lineRange(root: Node, start: number, end: number): Range | null {
+    const nodes = visibleTextNodes(root);
+    const span = lineSpan(nodes.map(node => node.nodeValue!), start, end);
+    return span && spanToRange(nodes, span);
 }
 
 /** Paint `ranges`, with `active` standing out; an engine without the Highlight API shows none */

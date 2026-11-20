@@ -10,13 +10,12 @@ import { test, expect } from '@playwright/test';
 import { copyFile, mkdir, rm, writeFile } from 'fs/promises';
 import { ChatPage } from '../helpers/page-objects';
 import { Selectors } from '../helpers/selectors';
-import { FILE_VIEWER_DIR } from '../fixtures/mock-llm';
+import { FILE_VIEWER_DIR, FILE_VIEWER_EXPORT_LINES } from '../fixtures/mock-llm';
 
 // A 3 MB markdown export. Through react-markdown this takes well over the switch timeout below,
 // so a viewer that renders it, or renders it once more while switching away, fails the test.
 const EXPORT_LINE = '* TODO [#A] Call the bank :finance: see [[https://example.com][the site]] for *this* one\n';
-const EXPORT_TEXT = EXPORT_LINE.repeat(Math.ceil(3 * 1024 * 1024 / EXPORT_LINE.length))
-    + '* DONE Renew the passport\n';
+const EXPORT_TEXT = EXPORT_LINE.repeat(FILE_VIEWER_EXPORT_LINES - 1) + '* DONE Renew the passport\n';
 
 test.describe('File viewer', () => {
     let chatPage: ChatPage;
@@ -132,6 +131,39 @@ test.describe('File viewer', () => {
         await input.press('Escape');
         await expect(viewer.locator(Selectors.findBar)).toHaveCount(0);
         expect(await page.evaluate(() => CSS.highlights.has('file-find'))).toBe(false);
+    });
+
+    test('opens a source file at the line a link names', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="summarize.ts#L2"]`).click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        await expect(viewer.locator(`${Selectors.fileViewerSource} .hljs-keyword`).first()).toBeVisible();
+        await expect.poll(() => page.evaluate(() => [...CSS.highlights.get('file-target') ?? []].map(range => range.toString())))
+            .toEqual(['    return rows.reduce((sum, row) => sum + row, 0);']);
+    });
+
+    test('clears where the last link landed when another link opens the same file', async ({ page }) => {
+        const targets = () => page.evaluate(() => [...CSS.highlights.get('file-target') ?? []].length);
+        await page.locator(`${Selectors.assistantMessage} a[href$="summarize.ts#L2"]`).click();
+        await expect.poll(targets).toBe(1);
+
+        await page.locator(`${Selectors.assistantMessage} a[href$="summarize.ts"]`).click();
+        await expect.poll(targets).toBe(0);
+    });
+
+    test('scrolls a long file to the line a link names', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="export.md#L${FILE_VIEWER_EXPORT_LINES}"]`).click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        await expect(viewer.locator(Selectors.fileViewerGutter)).toBeVisible({ timeout: 10000 });
+        await expect.poll(() => viewer.locator(Selectors.fileViewerBody).evaluate(el => el.scrollTop)).toBeGreaterThan(1000);
+        const target = await page.evaluate(() => {
+            const range = [...CSS.highlights.get('file-target')!][0] as Range;
+            const view = document.querySelector('.file-viewer-body')!.getBoundingClientRect();
+            const rect = range.getBoundingClientRect();
+            return { text: range.toString(), inView: rect.top >= view.top && rect.bottom <= view.bottom };
+        });
+        expect(target).toEqual({ text: '* DONE Renew the passport', inView: true });
     });
 
     test('finds text in rendered markdown', async ({ page }) => {

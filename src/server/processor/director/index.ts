@@ -42,7 +42,7 @@ import { SANDBOX_TEMP_DIR } from '../../sandbox';
 import { PlatformBillingError } from '../../http/billing-errors';
 import { PlatformAuthError } from '../../http/platform-fetch';
 import { createChildLogger } from '../../logger';
-import type { RefusalInfo } from '../../../shared';
+import { DEFAULT_VIEW_FILE_LINES, type RefusalInfo } from '../../../shared';
 
 const log = createChildLogger({ component: 'director' });
 
@@ -264,7 +264,7 @@ const builtInTools: ToolDefinition[] = [
                 },
                 limit: {
                     type: 'integer',
-                    description: 'Optional maximum number of lines to read for text files. Default is 50.',
+                    description: `Optional maximum number of lines to read for text files. Default is ${DEFAULT_VIEW_FILE_LINES}.`,
                     minimum: 1,
                 },
             },

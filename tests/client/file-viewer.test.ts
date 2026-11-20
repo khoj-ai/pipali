@@ -6,7 +6,7 @@ import {
     resolveDocumentLink,
     RICH_RENDER_MAX_CHARS,
 } from '../../src/client/utils/file-viewer';
-import { fileUrlToPath } from '../../src/client/utils/formatting';
+import { fileUrlToPath, parseFileLink } from '../../src/client/utils/formatting';
 
 describe('fileViewKind', () => {
     test('picks the view by extension, case-insensitively', () => {
@@ -95,9 +95,34 @@ describe('fileUrlToPath', () => {
         expect(fileUrlToPath('file://localhost/Users/me/a.md')).toBe('/Users/me/a.md');
     });
 
+    test('drops the fragment', () => {
+        expect(fileUrlToPath('file:///Users/me/a.ts#L42')).toBe('/Users/me/a.ts');
+        expect(fileUrlToPath('file://~/a.ts#L42')).toBe('~/a.ts');
+    });
+
     test('passes anything that is not a file URL through', () => {
         expect(fileUrlToPath('/Users/me/a.md')).toBe('/Users/me/a.md');
         expect(fileUrlToPath('https://example.com')).toBe('https://example.com');
+    });
+});
+
+describe('parseFileLink', () => {
+    test('reads the lines a fragment names, and leaves them off the path', () => {
+        const lines = (start: number, end: number) => ({ kind: 'lines' as const, start, end });
+        expect(parseFileLink('file:///Users/me/a.ts#L42')).toEqual({ path: '/Users/me/a.ts', target: lines(42, 42) });
+        expect(parseFileLink('file:///Users/me/a.ts#L42-L50').target).toEqual(lines(42, 50));
+        expect(parseFileLink('file:///Users/me/a.ts#L42-50').target).toEqual(lines(42, 50));
+        expect(parseFileLink('file:///Users/me/a.ts#L50-L42').target).toEqual(lines(50, 50));
+        expect(parseFileLink('file://~/notes/a.md#L3')).toEqual({ path: '~/notes/a.md', target: lines(3, 3) });
+    });
+
+    test('keeps an encoded # in the path and ignores a fragment it does not know', () => {
+        expect(parseFileLink('file:///Users/me/issue%231.md#L2')).toEqual({
+            path: '/Users/me/issue#1.md',
+            target: { kind: 'lines', start: 2, end: 2 },
+        });
+        expect(parseFileLink('file:///Users/me/report.html#summary')).toEqual({ path: '/Users/me/report.html', target: null });
+        expect(parseFileLink('file:///Users/me/a.ts')).toEqual({ path: '/Users/me/a.ts', target: null });
     });
 });
 
@@ -106,14 +131,19 @@ describe('resolveDocumentLink', () => {
 
     test('sends web links to the browser and file links to the viewer', () => {
         expect(resolveDocumentLink('https://example.com/x', doc)).toEqual({ kind: 'web', url: 'https://example.com/x' });
-        expect(resolveDocumentLink('file:///Users/me/other.md', doc)).toEqual({ kind: 'file', path: '/Users/me/other.md' });
+        expect(resolveDocumentLink('file:///Users/me/other.md', doc)).toEqual({ kind: 'file', path: '/Users/me/other.md', target: null });
     });
 
     test('resolves relative links against the document folder', () => {
-        expect(resolveDocumentLink('chapter2.html', doc)).toEqual({ kind: 'file', path: '/Users/me/report/chapter2.html' });
-        expect(resolveDocumentLink('../notes.md', doc)).toEqual({ kind: 'file', path: '/Users/me/notes.md' });
+        expect(resolveDocumentLink('chapter2.html', doc)).toEqual({ kind: 'file', path: '/Users/me/report/chapter2.html', target: null });
+        expect(resolveDocumentLink('../notes.md', doc)).toEqual({ kind: 'file', path: '/Users/me/notes.md', target: null });
         expect(resolveDocumentLink('img/chart.png', 'C:\\Users\\me\\report\\index.html'))
-            .toEqual({ kind: 'file', path: 'C:/Users/me/report/img/chart.png' });
+            .toEqual({ kind: 'file', path: 'C:/Users/me/report/img/chart.png', target: null });
+    });
+
+    test('keeps where in the linked file to land', () => {
+        expect(resolveDocumentLink('file:///Users/me/run.ts#L42', doc))
+            .toEqual({ kind: 'file', path: '/Users/me/run.ts', target: { kind: 'lines', start: 42, end: 42 } });
     });
 
     test('blocks every other scheme', () => {

@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { openInBrowser, openFile, isTauri } from '../utils/tauri';
 import { useFileViewer } from '../hooks/useFileViewer';
 import { fileViewKind } from '../utils/file-viewer';
-import { fileUrlToPath } from '../utils/formatting';
+import { parseFileLink } from '../utils/formatting';
 import { isDeepLink, dispatchInAppDeepLink } from '../utils/deep-link';
 
 type ExternalLinkProps = AnchorHTMLAttributes<HTMLAnchorElement> & {
@@ -28,8 +28,8 @@ export function ExternalLink({ href, children, node: _node, ...props }: External
     const isFileHref = href?.startsWith('file://');
     const isHttpHref = href?.startsWith('http://') || href?.startsWith('https://');
     const inTauri = isTauri();
-    const filePath = isFileHref && href ? fileUrlToPath(href) : null;
-    const viewable = !!filePath && !!openInViewer && fileViewKind(filePath) !== null;
+    const link = isFileHref && href ? parseFileLink(href) : null;
+    const viewable = !!link && !!openInViewer && fileViewKind(link.path) !== null;
 
     const handleMouseDown = (e: MouseEvent<HTMLAnchorElement>) => {
         if (!isFileHref) return;
@@ -47,7 +47,7 @@ export function ExternalLink({ href, children, node: _node, ...props }: External
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             (e.nativeEvent as any)?.stopImmediatePropagation?.();
 
-            if (viewable) openInViewer!(filePath!);
+            if (viewable) openInViewer!(link!.path, link!.target);
             else void openFile(href);
             return;
         }

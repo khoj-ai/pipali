@@ -8,16 +8,17 @@ import { FileViewerFind, type FindTarget } from './FileViewerFind';
 import { HtmlFileView } from './HtmlFileView';
 import { MarkdownFileView } from './MarkdownFileView';
 import { TextFileView } from './TextFileView';
-import { useFileViewer } from '../../hooks/useFileViewer';
+import { useFileViewer, type FileViewerRequest } from '../../hooks/useFileViewer';
 import { fetchFileContent, fileViewKind, resolveDocumentLink, RICH_RENDER_MAX_CHARS } from '../../utils/file-viewer';
 import { getFileName, shortenHomePath } from '../../utils/formatting';
-import { FRAME_FIND_CSS } from '../../utils/find-matches';
+import { FRAME_FIND_CSS, scrollToRange } from '../../utils/find-matches';
+import { clearTarget, paintTarget, targetRange } from '../../utils/file-target';
 import { localImageSrc } from '../../utils/markdown';
 import { getApiBaseUrl } from '../../utils/api';
 import { isTauri, openFile, openInBrowser } from '../../utils/tauri';
 
 interface FileViewerPanelProps {
-    path: string;
+    request: FileViewerRequest;
     /** Changes when Pipali writes or edits this file, so the panel refetches */
     revision: number;
     onClose: () => void;
@@ -38,8 +39,9 @@ function errorKey(httpStatus: number) {
     }
 }
 
-export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProps) {
+export function FileViewerPanel({ request, revision, onClose }: FileViewerPanelProps) {
     const { t } = useTranslation();
+    const { path } = request;
     const openInViewer = useFileViewer();
     const kind = fileViewKind(path);
     const [reloads, setReloads] = useState(0);
@@ -103,6 +105,25 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
         asideRef.current?.focus({ preventScroll: true });
     };
 
+    // Land on the linked place once the file is shown, clearing where the last link into it
+    // landed. Later refetches of the same request leave the reader's scroll alone.
+    const landedRef = useRef<FileViewerRequest | null>(null);
+    const frameShown = !isFrame || frameLoads > 0;
+    useEffect(() => {
+        if (state.status !== 'ready' || !frameShown || landedRef.current === request) return;
+        const found = getFindTarget();
+        if (!found) return;
+        landedRef.current = request;
+        clearTarget(found.root.ownerDocument);
+        const { target } = request;
+        // A frame shows a rendered page, whose text has no source lines
+        const range = !target || isFrame ? null : targetRange(found.root, target);
+        if (!range) return;
+        paintTarget(range);
+        scrollToRange(range, found.scroller);
+    }, [request, state, frameShown, isFrame, getFindTarget]);
+    useEffect(() => () => clearTarget(document), []);
+
     // A frame's document has its own keys and highlight rules, so both are set up per load
     const handleDocumentLoad = useCallback((doc: Document) => {
         const style = doc.createElement('style');
@@ -120,7 +141,7 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
         if (link.kind === 'web') {
             void openInBrowser(link.url);
         } else if (link.kind === 'file') {
-            if (fileViewKind(link.path) && openInViewer) openInViewer(link.path);
+            if (fileViewKind(link.path) && openInViewer) openInViewer(link.path, link.target);
             else void openFile(link.path);
         }
     };
