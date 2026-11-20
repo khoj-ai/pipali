@@ -11,6 +11,8 @@ export function useFocusManagement() {
         if (textarea.disabled) return;
         // If the element isn't currently visible/layouted, focusing can be flaky.
         if (textarea.offsetParent === null) return;
+        // Runs ending and chats switching ask for focus; someone typing in a find bar is not to be moved
+        if (document.activeElement?.closest('.find-in-page-bar')) return;
         textarea.focus({ preventScroll: true });
     }, []);
 

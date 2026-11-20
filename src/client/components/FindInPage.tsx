@@ -1,8 +1,8 @@
 // Find in page component with Cmd/Ctrl+F support
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Search, X, ChevronUp, ChevronDown } from 'lucide-react';
+import { FindBar } from './FindBar';
 
 interface FindInPageProps {
     isOpen: boolean;
@@ -22,7 +22,6 @@ export function FindInPage({ isOpen, onClose, containerSelector = '.main-content
     const [query, setQuery] = useState('');
     const [matches, setMatches] = useState<MatchInfo[]>([]);
     const [currentMatchIndex, setCurrentMatchIndex] = useState(0);
-    const inputRef = useRef<HTMLInputElement>(null);
     const highlightClass = 'find-highlight';
     const activeHighlightClass = 'find-highlight-active';
 
@@ -193,14 +192,12 @@ export function FindInPage({ isOpen, onClose, containerSelector = '.main-content
         }
     }, [currentMatchIndex, matches.length, updateActiveHighlight]);
 
-    // Focus input when opened, pre-fill with initialQuery if provided
+    // Pre-fill with initialQuery when opened, reset when closed
     useEffect(() => {
         if (isOpen) {
             if (initialQuery) {
                 setQuery(initialQuery);
             }
-            inputRef.current?.focus();
-            inputRef.current?.select();
         } else {
             clearHighlights();
             setQuery('');
@@ -209,81 +206,18 @@ export function FindInPage({ isOpen, onClose, containerSelector = '.main-content
         }
     }, [isOpen, clearHighlights, initialQuery]);
 
-    // Handle keyboard shortcuts within the find bar
-    const handleKeyDown = (e: React.KeyboardEvent) => {
-        if (e.key === 'Escape') {
-            e.preventDefault();
-            onClose();
-        } else if (e.key === 'Enter') {
-            e.preventDefault();
-            if (e.shiftKey) {
-                goToPreviousMatch();
-            } else {
-                goToNextMatch();
-            }
-        } else if (e.key === 'F3' || (e.key === 'g' && (e.metaKey || e.ctrlKey))) {
-            e.preventDefault();
-            if (e.shiftKey) {
-                goToPreviousMatch();
-            } else {
-                goToNextMatch();
-            }
-        }
-    };
-
     if (!isOpen) return null;
 
     return (
-        <div className="find-in-page-bar">
-            <div className="find-input-wrapper">
-                <Search size={16} className="find-icon" />
-                <input
-                    ref={inputRef}
-                    type="text"
-                    value={query}
-                    onChange={(e) => setQuery(e.target.value)}
-                    onKeyDown={handleKeyDown}
-                    placeholder={t('findInPage.placeholder')}
-                    className="find-input"
-                    autoComplete="off"
-                    spellCheck={false}
-                />
-                {query && (
-                    <span className="find-count">
-                        {matches.length > 0
-                            ? t('findInPage.matchCount', { current: currentMatchIndex + 1, total: matches.length })
-                            : t('findInPage.noResults')}
-                    </span>
-                )}
-            </div>
-            <div className="find-actions">
-                <button
-                    onClick={goToPreviousMatch}
-                    disabled={matches.length === 0}
-                    className="find-nav-button"
-                    title={t('findInPage.previousMatch')}
-                    aria-label={t('findInPage.previousMatchLabel')}
-                >
-                    <ChevronUp size={18} />
-                </button>
-                <button
-                    onClick={goToNextMatch}
-                    disabled={matches.length === 0}
-                    className="find-nav-button"
-                    title={t('findInPage.nextMatch')}
-                    aria-label={t('findInPage.nextMatchLabel')}
-                >
-                    <ChevronDown size={18} />
-                </button>
-                <button
-                    onClick={onClose}
-                    className="find-close-button"
-                    title={t('findInPage.closeFind')}
-                    aria-label={t('findInPage.closeFindLabel')}
-                >
-                    <X size={18} />
-                </button>
-            </div>
-        </div>
+        <FindBar
+            query={query}
+            onQueryChange={setQuery}
+            placeholder={t('findInPage.placeholder')}
+            current={currentMatchIndex}
+            total={matches.length}
+            onNext={goToNextMatch}
+            onPrevious={goToPreviousMatch}
+            onClose={onClose}
+        />
     );
 }
