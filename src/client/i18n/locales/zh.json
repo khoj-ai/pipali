@@ -681,6 +681,8 @@
         "openInViewer": "在 Pipali 中打开",
         "openExternally": "用默认应用打开",
         "reload": "重新加载",
+        "find": "在文件中查找",
+        "findPlaceholder": "在文件中查找...",
         "close": "关闭",
         "loading": "加载中...",
         "notAllowed": "此文件位于 Pipali 可显示的文件夹之外。",

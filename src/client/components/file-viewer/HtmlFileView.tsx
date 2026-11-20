@@ -7,12 +7,16 @@ interface HtmlFileViewProps {
     html: string;
     title: string;
     onOpenLink: (href: string) => void;
+    /** Called with each document the frame finishes loading */
+    onDocumentLoad?: (doc: Document) => void;
 }
 
-export function HtmlFileView({ html, title, onOpenLink }: HtmlFileViewProps) {
+export function HtmlFileView({ html, title, onOpenLink, onDocumentLoad }: HtmlFileViewProps) {
     const frameRef = useRef<HTMLIFrameElement>(null);
     const onOpenLinkRef = useRef(onOpenLink);
     onOpenLinkRef.current = onOpenLink;
+    const onDocumentLoadRef = useRef(onDocumentLoad);
+    onDocumentLoadRef.current = onDocumentLoad;
 
     // Every srcdoc change loads a fresh document, so the listener is attached on each load
     const handleLoad = useCallback(() => {
@@ -26,6 +30,7 @@ export function HtmlFileView({ html, title, onOpenLink }: HtmlFileViewProps) {
             event.preventDefault();
             onOpenLinkRef.current(href);
         });
+        onDocumentLoadRef.current?.(doc);
     }, []);
 
     return (

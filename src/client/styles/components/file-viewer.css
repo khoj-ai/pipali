@@ -1,6 +1,6 @@
 /*
  * Pipali Styles - File Viewer
- * Includes: chat/viewer split, viewer panel, source view, highlight palette
+ * Includes: chat/viewer split, viewer panel, find bar, source view, highlight palette
  */
 
 /* Chat with the viewer beside it; the input area stays below both */
@@ -22,6 +22,11 @@
     min-width: 0;
     border-left: 1px solid var(--color-border);
     background: var(--color-bg);
+}
+
+/* The panel takes focus when opened so Cmd/Ctrl+F finds in the file; it is not a control */
+.file-viewer:focus {
+    outline: none;
 }
 
 .file-viewer-header {
@@ -95,6 +100,27 @@
     font-size: 13px;
     color: var(--color-text-muted);
     text-align: center;
+}
+
+/* The find bar sits in the panel's flow rather than floating over the chat */
+.file-viewer .find-in-page-bar {
+    position: static;
+    border: 0;
+    border-bottom: 1px solid var(--color-border-subtle);
+    border-radius: 0;
+    box-shadow: none;
+    animation: none;
+}
+
+/* Find matches, painted over the text without wrapping it (see utils/find-matches.ts) */
+::highlight(file-find) {
+    background-color: var(--color-warning-bg);
+    color: var(--color-warning-text);
+}
+
+::highlight(file-find-active) {
+    background-color: var(--color-warning);
+    color: white;
 }
 
 /* Documents keep their own styling; a generated page assumes a white ground */

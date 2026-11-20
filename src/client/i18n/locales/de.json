@@ -681,6 +681,8 @@
         "openInViewer": "In Pipali öffnen",
         "openExternally": "Mit Standard-App öffnen",
         "reload": "Neu laden",
+        "find": "In Datei suchen",
+        "findPlaceholder": "In Datei suchen...",
         "close": "Schließen",
         "loading": "Wird geladen...",
         "notAllowed": "Diese Datei liegt außerhalb der Ordner, die Pipali anzeigen kann.",

@@ -15,7 +15,8 @@ import { FILE_VIEWER_DIR } from '../fixtures/mock-llm';
 // A 3 MB markdown export. Through react-markdown this takes well over the switch timeout below,
 // so a viewer that renders it, or renders it once more while switching away, fails the test.
 const EXPORT_LINE = '* TODO [#A] Call the bank :finance: see [[https://example.com][the site]] for *this* one\n';
-const EXPORT_TEXT = EXPORT_LINE.repeat(Math.ceil(3 * 1024 * 1024 / EXPORT_LINE.length));
+const EXPORT_TEXT = EXPORT_LINE.repeat(Math.ceil(3 * 1024 * 1024 / EXPORT_LINE.length))
+    + '* DONE Renew the passport\n';
 
 test.describe('File viewer', () => {
     let chatPage: ChatPage;
@@ -104,5 +105,80 @@ test.describe('File viewer', () => {
 
         await page.locator(`${Selectors.assistantMessage} a[href$="report.html"]`).first().click();
         await expect(page.frameLocator(Selectors.fileViewerFrame).locator('#viewer-heading')).toHaveText('Quarterly report', { timeout: 5000 });
+    });
+
+    test('finds text across highlight spans in a source file, leaving the gutter out', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="summarize.ts"]`).first().click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        await expect(viewer.locator(`${Selectors.fileViewerSource} .hljs-keyword`).first()).toBeVisible();
+
+        // The panel took focus when it opened, so the shortcut is the file's, not the chat's
+        await page.keyboard.press('ControlOrMeta+f');
+        const input = viewer.locator(Selectors.findInput);
+        await expect(input).toBeFocused();
+        await expect(page.locator(Selectors.findBar)).toHaveCount(1);
+
+        // `return` and ` rows` are separate nodes under highlighting
+        await input.fill('return rows');
+        await expect(viewer.locator(Selectors.findCount)).toHaveText('1 of 1');
+        await expect.poll(() => page.evaluate(() => CSS.highlights.get('file-find')?.size)).toBe(1);
+
+        // Line numbers are in the gutter, not in the file
+        await input.fill('2');
+        await expect(viewer.locator(Selectors.findCount)).toHaveText('No results');
+
+        // Closing the bar clears the marks
+        await input.press('Escape');
+        await expect(viewer.locator(Selectors.findBar)).toHaveCount(0);
+        expect(await page.evaluate(() => CSS.highlights.has('file-find'))).toBe(false);
+    });
+
+    test('finds text in rendered markdown', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="notes.md"]`).first().click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        await expect(viewer.locator(`${Selectors.fileViewerMarkdown} h1`)).toHaveText('Agenda');
+
+        await page.keyboard.press('ControlOrMeta+f');
+        await viewer.locator(Selectors.findInput).fill('budget');
+        await expect(viewer.locator(Selectors.findCount)).toHaveText('1 of 1');
+        await expect.poll(() => page.evaluate(() => CSS.highlights.get('file-find')?.size)).toBe(1);
+    });
+
+    test('jumps to a match deep in a long file', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="export.md"]`).first().click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        await expect(viewer.locator(Selectors.fileViewerGutter)).toBeVisible({ timeout: 10000 });
+
+        await page.keyboard.press('ControlOrMeta+f');
+        await viewer.locator(Selectors.findInput).fill('passport');
+        await expect(viewer.locator(Selectors.findCount)).toHaveText('1 of 1');
+
+        const body = viewer.locator(Selectors.fileViewerBody);
+        await expect.poll(() => body.evaluate(el => el.scrollTop)).toBeGreaterThan(1000);
+        const inView = await page.evaluate(() => {
+            const range = [...CSS.highlights.get('file-find-active')!][0] as Range;
+            const view = document.querySelector('.file-viewer-body')!.getBoundingClientRect();
+            const rect = range.getBoundingClientRect();
+            return rect.top >= view.top && rect.bottom <= view.bottom;
+        });
+        expect(inView).toBe(true);
+    });
+
+    test('finds text in a document shown in the sandboxed frame', async ({ page }) => {
+        await page.locator(`${Selectors.assistantMessage} a[href$="brief.docx"]`).first().click();
+
+        const viewer = page.locator(Selectors.fileViewer);
+        const document = page.frameLocator(Selectors.fileViewerFrame);
+        await expect(document.locator('h1')).toHaveText('Project brief');
+
+        // Keys typed inside the frame never reach the app's window, so the frame forwards them
+        await document.locator('h1').click();
+        await page.keyboard.press('ControlOrMeta+f');
+        await viewer.locator(Selectors.findInput).fill('doubled');
+        await expect(viewer.locator(Selectors.findCount)).toHaveText('1 of 1');
+        await expect.poll(() => document.locator('body').evaluate(() => CSS.highlights.get('file-find')?.size)).toBe(1);
     });
 });

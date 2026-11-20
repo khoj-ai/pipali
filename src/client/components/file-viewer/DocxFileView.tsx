@@ -17,9 +17,10 @@ interface DocxFileViewProps {
     html: string;
     title: string;
     onOpenLink: (href: string) => void;
+    onDocumentLoad?: (doc: Document) => void;
 }
 
-export function DocxFileView({ html, title, onOpenLink }: DocxFileViewProps) {
+export function DocxFileView({ html, title, onOpenLink, onDocumentLoad }: DocxFileViewProps) {
     const page = `<!doctype html><html><head><style>${PAGE_STYLE}</style></head><body>${html}</body></html>`;
-    return <HtmlFileView html={page} title={title} onOpenLink={onOpenLink} />;
+    return <HtmlFileView html={page} title={title} onOpenLink={onOpenLink} onDocumentLoad={onDocumentLoad} />;
 }

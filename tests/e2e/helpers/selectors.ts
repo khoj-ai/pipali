@@ -55,6 +55,10 @@ export const Selectors = {
     fileViewerMarkdown: '.file-viewer-markdown',
     fileViewerFrontmatter: '.file-viewer-frontmatter',
     fileViewerClose: '.file-viewer-close',
+    fileViewerBody: '.file-viewer-body',
+    findBar: '.find-in-page-bar',
+    findInput: '.find-input',
+    findCount: '.find-count',
 
     // Home Page
     emptyState: '.empty-state',

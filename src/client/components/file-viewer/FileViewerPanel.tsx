@@ -1,15 +1,17 @@
 // Panel beside the chat showing a file Pipali wrote or linked, rendered without running it
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ExternalLink as ExternalLinkIcon, FileText, Loader2, RotateCw, X } from 'lucide-react';
+import { ExternalLink as ExternalLinkIcon, FileText, Loader2, RotateCw, Search, X } from 'lucide-react';
 import { DocxFileView } from './DocxFileView';
+import { FileViewerFind, type FindTarget } from './FileViewerFind';
 import { HtmlFileView } from './HtmlFileView';
 import { MarkdownFileView } from './MarkdownFileView';
 import { TextFileView } from './TextFileView';
 import { useFileViewer } from '../../hooks/useFileViewer';
 import { fetchFileContent, fileViewKind, resolveDocumentLink, RICH_RENDER_MAX_CHARS } from '../../utils/file-viewer';
 import { getFileName, shortenHomePath } from '../../utils/formatting';
+import { FRAME_FIND_CSS } from '../../utils/find-matches';
 import { localImageSrc } from '../../utils/markdown';
 import { getApiBaseUrl } from '../../utils/api';
 import { isTauri, openFile, openInBrowser } from '../../utils/tauri';
@@ -44,6 +46,16 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
     const [state, setState] = useState<LoadState>({ status: 'loading' });
     const onCloseRef = useRef(onClose);
     onCloseRef.current = onClose;
+    const asideRef = useRef<HTMLElement>(null);
+    const bodyRef = useRef<HTMLDivElement>(null);
+    const findInputRef = useRef<HTMLInputElement>(null);
+    const [findOpen, setFindOpen] = useState(false);
+    const [frameLoads, setFrameLoads] = useState(0);
+    const isFrame = kind === 'html' || kind === 'docx';
+    const canFind = state.status === 'ready';
+
+    // Clicks inside the panel land on it, so focus inside means Cmd/Ctrl+F is meant for the file
+    useEffect(() => { asideRef.current?.focus({ preventScroll: true }); }, []);
 
     useEffect(() => {
         if (kind === 'image') return; // the <img> below loads on its own
@@ -63,6 +75,42 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
         });
         return () => { cancelled = true; };
     }, [path, kind, revision, reloads]);
+
+    const getFindTarget = useCallback((): FindTarget | null => {
+        const body = bodyRef.current;
+        if (!body) return null;
+        if (!isFrame) return { root: body, scroller: body };
+        const doc = body.querySelector('iframe')?.contentDocument;
+        return doc?.body && doc.scrollingElement ? { root: doc.body, scroller: doc.scrollingElement } : null;
+    }, [isFrame]);
+
+    const handleFindShortcut = (e: KeyboardEvent | React.KeyboardEvent) => {
+        if (e.key !== 'f' || !(e.metaKey || e.ctrlKey) || e.shiftKey || e.altKey || !canFind) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (findOpen) {
+            findInputRef.current?.focus();
+            findInputRef.current?.select();
+        } else {
+            setFindOpen(true);
+        }
+    };
+    const findShortcutRef = useRef(handleFindShortcut);
+    findShortcutRef.current = handleFindShortcut;
+
+    const closeFind = () => {
+        setFindOpen(false);
+        asideRef.current?.focus({ preventScroll: true });
+    };
+
+    // A frame's document has its own keys and highlight rules, so both are set up per load
+    const handleDocumentLoad = useCallback((doc: Document) => {
+        const style = doc.createElement('style');
+        style.textContent = FRAME_FIND_CSS;
+        doc.head.append(style);
+        doc.addEventListener('keydown', e => findShortcutRef.current(e));
+        setFrameLoads(n => n + 1);
+    }, []);
 
     // A link may name the file as ~/notes.md; once read, the server says where that really is
     const shownPath = state.status === 'ready' ? state.path : path;
@@ -107,9 +155,9 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
         }
         switch (kind) {
             case 'html':
-                return <HtmlFileView html={state.text} title={filename} onOpenLink={openLink} />;
+                return <HtmlFileView html={state.text} title={filename} onOpenLink={openLink} onDocumentLoad={handleDocumentLoad} />;
             case 'docx':
-                return <DocxFileView html={state.text} title={filename} onOpenLink={openLink} />;
+                return <DocxFileView html={state.text} title={filename} onOpenLink={openLink} onDocumentLoad={handleDocumentLoad} />;
             case 'markdown':
                 return state.text.length > RICH_RENDER_MAX_CHARS
                     ? <TextFileView text={state.text} path={path} />
@@ -120,13 +168,25 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
     };
 
     return (
-        <aside className="file-viewer" aria-label={filename}>
+        <aside ref={asideRef} className="file-viewer" aria-label={filename} tabIndex={-1} onKeyDown={handleFindShortcut}>
             <div className="file-viewer-header">
                 <FileText size={14} className="file-viewer-icon" />
                 <div className="file-viewer-title" title={shownPath}>
                     <span className="file-viewer-name">{filename}</span>
                     {folder && <span className="file-viewer-folder">{folder}</span>}
                 </div>
+                {canFind && (
+                    <button
+                        type="button"
+                        className="file-viewer-action"
+                        onClick={() => findOpen ? closeFind() : setFindOpen(true)}
+                        aria-pressed={findOpen}
+                        aria-label={t('fileViewer.find')}
+                        title={t('fileViewer.find')}
+                    >
+                        <Search size={14} />
+                    </button>
+                )}
                 <button
                     type="button"
                     className="file-viewer-action"
@@ -157,7 +217,15 @@ export function FileViewerPanel({ path, revision, onClose }: FileViewerPanelProp
                     <X size={14} />
                 </button>
             </div>
-            <div className="file-viewer-body">{renderBody()}</div>
+            {findOpen && (
+                <FileViewerFind
+                    getTarget={getFindTarget}
+                    contentKey={isFrame ? frameLoads : state.status === 'ready' ? state.text : null}
+                    onClose={closeFind}
+                    inputRef={findInputRef}
+                />
+            )}
+            <div ref={bodyRef} className="file-viewer-body">{renderBody()}</div>
         </aside>
     );
 }
