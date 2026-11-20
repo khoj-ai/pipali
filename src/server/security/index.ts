@@ -7,4 +7,4 @@
  */
 
 export { isSensitivePath, getSensitivePathReason } from './path-validator';
-export { isInternalUrl, getInternalUrlReason } from './url-validator';
+export { type ResolvedHost, getInternalAddressReason, resolveHost, fetchResolvedHost } from './url-validator';

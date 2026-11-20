@@ -10,7 +10,7 @@ import { platformFetch } from '../../http/platform-fetch';
 import { getPlatformUrl } from '../../auth';
 import { extractRelevantContent, truncateWebpageContent } from './webpage_extractor';
 import type { MetricsAccumulator } from '../director/types';
-import { isInternalUrl, getInternalUrlReason } from '../../security';
+import { type ResolvedHost, resolveHost, fetchResolvedHost } from '../../security';
 import {
     type ConfirmationContext,
     requestOperationConfirmation,
@@ -21,6 +21,12 @@ const log = createChildLogger({ component: 'read_webpage' });
 
 // Timeout for webpage fetch requests (in milliseconds)
 const FETCH_REQUEST_TIMEOUT = 60000;
+
+const REDIRECT_STATUSES = [301, 302, 303, 307, 308];
+const MAX_REDIRECTS = 10;
+
+/** Resolves the host a fetch is about to reach. Throws when the user will not allow it. */
+type AuthorizeHost = (target: URL, redirectedFrom?: URL) => Promise<ResolvedHost>;
 
 // User agent for direct URL fetching
 const USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36';
@@ -105,12 +111,17 @@ async function readWithPlatform(
 /**
  * Read webpage content using direct URL fetch
  * Fetches HTML/JSON and converts to text
+ *
+ * Redirects are followed here rather than by fetch, so each host on the way is
+ * authorized before it is reached.
  */
-async function readWithDirectFetch(url: string, fresh?: boolean): Promise<string | null> {
+async function readWithDirectFetch(
+    url: string,
+    host: ResolvedHost,
+    authorizeHost: AuthorizeHost,
+    fresh?: boolean,
+): Promise<string | null> {
     log.debug(`Reading with direct fetch: ${url}${fresh ? ' (fresh)' : ''}`);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), FETCH_REQUEST_TIMEOUT);
 
     try {
         const headers: Record<string, string> = {
@@ -122,14 +133,26 @@ async function readWithDirectFetch(url: string, fresh?: boolean): Promise<string
             headers['Cache-Control'] = 'no-cache';
             headers['Pragma'] = 'no-cache';
         }
-        const response = await fetch(url, {
-            headers,
-            signal: controller.signal,
-            redirect: 'follow',
-            ...(fresh ? { cache: 'no-store' as RequestCache } : {}),
-        });
 
-        clearTimeout(timeoutId);
+        let target = new URL(url);
+        let response: Response;
+        for (let redirects = 0; ; redirects++) {
+            response = await fetchResolvedHost(target, host, {
+                headers,
+                signal: AbortSignal.timeout(FETCH_REQUEST_TIMEOUT),
+                redirect: 'manual',
+                ...(fresh ? { cache: 'no-store' as RequestCache } : {}),
+            });
+
+            const location = REDIRECT_STATUSES.includes(response.status) && response.headers.get('location');
+            if (!location) break;
+            if (redirects === MAX_REDIRECTS) throw new Error('Too many redirects');
+
+            const next = new URL(location, target);
+            if (!isValidUrl(next.href)) throw new Error(`Redirected to an unsupported URL: ${next.href}`);
+            if (next.host !== target.host) host = await authorizeHost(next, target);
+            target = next;
+        }
 
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -148,8 +171,7 @@ async function readWithDirectFetch(url: string, fresh?: boolean): Promise<string
         const html = await response.text();
         return htmlToText(html);
     } catch (error) {
-        clearTimeout(timeoutId);
-        if (error instanceof Error && error.name === 'AbortError') {
+        if (error instanceof Error && error.name === 'TimeoutError') {
             throw new Error('Webpage fetch timed out');
         }
         throw error;
@@ -246,47 +268,60 @@ export async function readWebpage(
         };
     }
 
-    // Check if URL points to internal/private network and request confirmation
-    if (isInternalUrl(url) && opts.confirmationContext) {
-        const reason = getInternalUrlReason(url) || 'internal network resource';
-        const confirmResult = await requestOperationConfirmation(
-            'fetch_internal_url',
-            url,
-            opts.confirmationContext,
-            {
-                toolName: 'read_webpage',
-                toolArgs: { url, query },
-                additionalMessage: `This URL points to a ${reason}.\n\nInternal network resources may expose sensitive information. Are you sure you want to access this URL?`,
-            }
-        );
+    // Ask before reading from a host on this computer or its private network
+    const authorizeHost: AuthorizeHost = async (target, redirectedFrom) => {
+        const host = await resolveHost(target);
+        if (host.internalReason && opts.confirmationContext) {
+            const subject = redirectedFrom ? `${redirectedFrom.href} redirects to this URL, which` : 'This URL';
+            const confirmResult = await requestOperationConfirmation(
+                'fetch_internal_url',
+                target.href,
+                opts.confirmationContext,
+                {
+                    toolName: 'read_webpage',
+                    toolArgs: { url, query },
+                    additionalMessage: `${subject} points to a ${host.internalReason}.\n\nInternal network resources may expose sensitive information. Are you sure you want to access this URL?`,
+                }
+            );
 
-        if (!confirmResult.approved) {
-            return {
-                query: `**Reading webpage**: ${url}`,
-                file: url,
-                uri: url,
-                compiled: `Webpage fetch cancelled: ${confirmResult.denialReason || 'User denied access to internal network URL'}`,
-            };
+            if (!confirmResult.approved) {
+                throw new Error(`Webpage fetch cancelled: ${confirmResult.denialReason || 'User denied access to internal network URL'}`);
+            }
         }
+        return host;
+    };
+
+    let host: ResolvedHost;
+    try {
+        host = await authorizeHost(new URL(url));
+    } catch (error) {
+        return {
+            query: `**Reading webpage**: ${url}`,
+            file: url,
+            uri: url,
+            compiled: error instanceof Error ? error.message : String(error),
+        };
     }
 
     try {
         let rawContent: string | null = null;
         let usedPlatform = false;
 
-        // Try platform scraper first
-        try {
-            rawContent = await readWithPlatform(url, query, fresh, conversationId, runId);
-            if (rawContent) usedPlatform = true;
-        } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            log.warn(`Platform scraper failed: ${message}`);
+        // Try platform scraper first. It cannot reach an internal host.
+        if (!host.internalReason) {
+            try {
+                rawContent = await readWithPlatform(url, query, fresh, conversationId, runId);
+                if (rawContent) usedPlatform = true;
+            } catch (error) {
+                const message = error instanceof Error ? error.message : String(error);
+                log.warn(`Platform scraper failed: ${message}`);
+            }
         }
 
         // Fall back to direct URL fetch
         if (!rawContent) {
             try {
-                rawContent = await readWithDirectFetch(url, fresh);
+                rawContent = await readWithDirectFetch(url, host, authorizeHost, fresh);
             } catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
                 log.warn(`Direct fetch failed: ${message}`);

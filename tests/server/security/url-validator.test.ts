@@ -1,183 +1,118 @@
-import { test, expect, describe } from 'bun:test';
-import { isInternalUrl, getInternalUrlReason } from '../../../src/server/security/url-validator';
+import { test, expect, describe, afterEach, spyOn } from 'bun:test';
+import dns from 'node:dns/promises';
+import os from 'node:os';
+import { getInternalAddressReason, resolveHost } from '../../../src/server/security/url-validator';
 
-describe('isInternalUrl', () => {
-    describe('Localhost and loopback', () => {
-        test('should detect localhost', () => {
-            expect(isInternalUrl('http://localhost')).toBe(true);
-            expect(isInternalUrl('http://localhost:3000')).toBe(true);
-            expect(isInternalUrl('https://localhost/path')).toBe(true);
-            expect(isInternalUrl('http://LOCALHOST:8080')).toBe(true);
-        });
-
-        test('should detect localhost.localdomain', () => {
-            expect(isInternalUrl('http://localhost.localdomain')).toBe(true);
-        });
-
-        test('should detect 127.x.x.x loopback addresses', () => {
-            expect(isInternalUrl('http://127.0.0.1')).toBe(true);
-            expect(isInternalUrl('http://127.0.0.1:8080')).toBe(true);
-            expect(isInternalUrl('http://127.0.1.1')).toBe(true);
-            expect(isInternalUrl('http://127.255.255.255')).toBe(true);
-        });
-
-        test('should detect 0.0.0.0', () => {
-            expect(isInternalUrl('http://0.0.0.0')).toBe(true);
-            expect(isInternalUrl('http://0.0.0.0:3000')).toBe(true);
-        });
-
-        test('should detect IPv6 loopback', () => {
-            // Note: URL parser extracts hostname without brackets for IPv6
-            // The validator checks for '::1' directly in INTERNAL_HOSTNAMES
-            expect(isInternalUrl('http://[::1]')).toBe(true);
-            expect(isInternalUrl('http://[::1]:8080')).toBe(true);
-        });
-
-        test('should detect ip6-localhost', () => {
-            expect(isInternalUrl('http://ip6-localhost')).toBe(true);
-            expect(isInternalUrl('http://ip6-loopback')).toBe(true);
-        });
+describe('getInternalAddressReason', () => {
+    test.each([
+        ['127.0.0.1', 'localhost/loopback address'],
+        ['127.255.255.255', 'localhost/loopback address'],
+        ['0.0.0.0', 'localhost/loopback address'],
+        ['::1', 'localhost/loopback address'],
+        ['::', 'localhost/loopback address'],
+        ['10.0.0.1', 'private network address'],
+        ['172.16.0.1', 'private network address'],
+        ['172.31.255.255', 'private network address'],
+        ['192.168.1.1', 'private network address'],
+        ['fd12:3456::1', 'private network address'],
+        ['169.254.0.1', 'link-local address'],
+        ['fe80::1', 'link-local address'],
+        ['100.64.0.1', 'carrier-grade NAT address'],
+        ['100.127.255.255', 'carrier-grade NAT address'],
+        ['169.254.169.254', 'cloud instance metadata endpoint'],
+        ['fd00:ec2::254', 'cloud instance metadata endpoint'],
+        // IPv4 addresses written as IPv6
+        ['::ffff:127.0.0.1', 'localhost/loopback address'],
+        ['::ffff:7f00:1', 'localhost/loopback address'],
+        ['::ffff:c0a8:101', 'private network address'],
+        ['::ffff:a9fe:a9fe', 'cloud instance metadata endpoint'],
+    ])('%s is a %s', (address, reason) => {
+        expect(getInternalAddressReason(address)).toBe(reason);
     });
 
-    describe('RFC 1918 private networks', () => {
-        test('should detect 10.x.x.x addresses', () => {
-            expect(isInternalUrl('http://10.0.0.1')).toBe(true);
-            expect(isInternalUrl('http://10.255.255.255')).toBe(true);
-            expect(isInternalUrl('http://10.0.0.1:8080/api')).toBe(true);
-        });
-
-        test('should detect 172.16-31.x.x addresses', () => {
-            expect(isInternalUrl('http://172.16.0.1')).toBe(true);
-            expect(isInternalUrl('http://172.20.0.1')).toBe(true);
-            expect(isInternalUrl('http://172.31.255.255')).toBe(true);
-        });
-
-        test('should not detect 172.15.x.x or 172.32.x.x (outside private range)', () => {
-            expect(isInternalUrl('http://172.15.0.1')).toBe(false);
-            expect(isInternalUrl('http://172.32.0.1')).toBe(false);
-        });
-
-        test('should detect 192.168.x.x addresses', () => {
-            expect(isInternalUrl('http://192.168.0.1')).toBe(true);
-            expect(isInternalUrl('http://192.168.1.1')).toBe(true);
-            expect(isInternalUrl('http://192.168.255.255')).toBe(true);
-        });
+    test.each([
+        '8.8.8.8',
+        '1.1.1.1',
+        '172.15.0.1',
+        '172.32.0.1',
+        '100.63.0.1',
+        '100.128.0.1',
+        '169.253.0.1',
+        '2606:4700::1111',
+        '::ffff:8.8.8.8',
+    ])('%s is public', (address) => {
+        expect(getInternalAddressReason(address)).toBeNull();
     });
 
-    describe('Link-local addresses', () => {
-        test('should detect 169.254.x.x addresses', () => {
-            expect(isInternalUrl('http://169.254.0.1')).toBe(true);
-            expect(isInternalUrl('http://169.254.169.254')).toBe(true);
-        });
+    test('a public address of this computer is internal', () => {
+        const interfaces = { en0: [{ address: '203.0.113.9' }, { address: '2001:db8::9' }] };
+        const interfacesSpy = spyOn(os, 'networkInterfaces').mockReturnValue(interfaces as never);
 
-        test('should detect IPv6 link-local', () => {
-            expect(isInternalUrl('http://[fe80::1]')).toBe(true);
-            expect(isInternalUrl('http://[fe80::1]:8080')).toBe(true);
-        });
-    });
-
-    describe('Carrier-grade NAT addresses', () => {
-        test('should detect 100.64-127.x.x addresses', () => {
-            expect(isInternalUrl('http://100.64.0.1')).toBe(true);
-            expect(isInternalUrl('http://100.100.0.1')).toBe(true);
-            expect(isInternalUrl('http://100.127.255.255')).toBe(true);
-        });
-
-        test('should not detect addresses outside CGNAT range', () => {
-            expect(isInternalUrl('http://100.63.0.1')).toBe(false);
-            expect(isInternalUrl('http://100.128.0.1')).toBe(false);
-        });
-    });
-
-    describe('Cloud metadata endpoints', () => {
-        test('should detect AWS/GCP/Azure metadata endpoint', () => {
-            expect(isInternalUrl('http://169.254.169.254')).toBe(true);
-            expect(isInternalUrl('http://169.254.169.254/latest/meta-data/')).toBe(true);
-            expect(isInternalUrl('http://169.254.169.254/metadata/instance')).toBe(true);
-        });
-
-        test('should detect Google metadata internal hostname', () => {
-            expect(isInternalUrl('http://metadata.google.internal')).toBe(true);
-            expect(isInternalUrl('http://metadata.google.internal/computeMetadata/v1/')).toBe(true);
-        });
-
-        test('should detect metadata.goog hostname', () => {
-            expect(isInternalUrl('http://metadata.goog')).toBe(true);
-        });
-    });
-
-    describe('External URLs (should NOT be internal)', () => {
-        test('should not flag public websites', () => {
-            expect(isInternalUrl('https://google.com')).toBe(false);
-            expect(isInternalUrl('https://api.github.com')).toBe(false);
-            expect(isInternalUrl('https://example.com/path')).toBe(false);
-        });
-
-        test('should not flag public IP addresses', () => {
-            expect(isInternalUrl('http://8.8.8.8')).toBe(false);
-            expect(isInternalUrl('http://1.1.1.1')).toBe(false);
-            expect(isInternalUrl('http://208.67.222.222')).toBe(false);
-        });
-
-        test('should not flag hostnames containing internal keywords', () => {
-            expect(isInternalUrl('https://localhost-tunnel.example.com')).toBe(false);
-            expect(isInternalUrl('https://my-localhost.dev')).toBe(false);
-        });
-    });
-
-    describe('Invalid URLs', () => {
-        test('should return false for invalid URLs', () => {
-            expect(isInternalUrl('not-a-url')).toBe(false);
-            expect(isInternalUrl('')).toBe(false);
-            expect(isInternalUrl('ftp://')).toBe(false);
-        });
+        try {
+            for (const address of ['203.0.113.9', '::ffff:203.0.113.9', '2001:db8::9']) {
+                expect(getInternalAddressReason(address)).toBe('network address of this computer');
+            }
+            expect(getInternalAddressReason('203.0.113.10')).toBeNull();
+            expect(getInternalAddressReason('2001:db8::10')).toBeNull();
+        } finally {
+            interfacesSpy.mockRestore();
+        }
     });
 });
 
-describe('getInternalUrlReason', () => {
-    test('should return reason for localhost', () => {
-        expect(getInternalUrlReason('http://localhost')).toBe('localhost/loopback address');
-        expect(getInternalUrlReason('http://0.0.0.0')).toBe('localhost/loopback address');
+describe('resolveHost', () => {
+    let lookupSpy: ReturnType<typeof spyOn> | undefined;
+
+    function resolveTo(...addresses: string[]) {
+        const found = addresses.map(address => ({ address, family: address.includes(':') ? 6 : 4 }));
+        lookupSpy = spyOn(dns, 'lookup').mockResolvedValue(found as never);
+    }
+
+    afterEach(() => {
+        lookupSpy?.mockRestore();
+        lookupSpy = undefined;
     });
 
-    test('should return reason for cloud metadata', () => {
-        expect(getInternalUrlReason('http://169.254.169.254/latest/meta-data/')).toBe('cloud instance metadata endpoint');
-        expect(getInternalUrlReason('http://metadata.google.internal')).toBe('cloud instance metadata endpoint');
+    test.each([
+        'http://localhost:3000',
+        'http://LOCALHOST',
+        'http://localhost.',
+        'http://app.localhost',
+        'http://[::1]:8080',
+        'http://[::ffff:127.0.0.1]',
+        'http://[::]',
+        'http://[fd00::1]',
+        // Other ways to write 127.0.0.1
+        'http://2130706433',
+        'http://0x7f.1',
+        'http://127.1',
+    ])('%s is internal however its host is written', async (url) => {
+        expect((await resolveHost(new URL(url))).internalReason).not.toBeNull();
     });
 
-    test('should return reason for loopback addresses', () => {
-        expect(getInternalUrlReason('http://127.0.0.1')).toBe('loopback address (127.x.x.x)');
-        expect(getInternalUrlReason('http://127.0.1.1')).toBe('loopback address (127.x.x.x)');
+    test.each(['http://8.8.8.8', 'http://[2606:4700::1111]'])('%s is public', async (url) => {
+        expect((await resolveHost(new URL(url))).internalReason).toBeNull();
     });
 
-    test('should return reason for 10.x.x.x network', () => {
-        expect(getInternalUrlReason('http://10.0.0.1')).toBe('private network (10.x.x.x)');
+    test('a name is internal when any address it resolves to is', async () => {
+        resolveTo('2606:4700::1111', '203.0.113.7', '127.0.0.1');
+
+        const host = await resolveHost(new URL('https://rebind.example'));
+
+        expect(host.internalReason).toBe('localhost/loopback address');
+        expect(host.addresses).toEqual(['203.0.113.7', '127.0.0.1', '2606:4700::1111']);
     });
 
-    test('should return reason for 172.16-31.x.x network', () => {
-        expect(getInternalUrlReason('http://172.16.0.1')).toBe('private network (172.16-31.x.x)');
-        expect(getInternalUrlReason('http://172.31.0.1')).toBe('private network (172.16-31.x.x)');
+    test('a public name that only mentions localhost is public', async () => {
+        resolveTo('203.0.113.7');
+
+        expect((await resolveHost(new URL('https://localhost-tunnel.example.com'))).internalReason).toBeNull();
+        expect((await resolveHost(new URL('https://my-localhost.dev'))).internalReason).toBeNull();
     });
 
-    test('should return reason for 192.168.x.x network', () => {
-        expect(getInternalUrlReason('http://192.168.1.1')).toBe('private network (192.168.x.x)');
-    });
+    test('a name that does not resolve has no addresses to fetch from', async () => {
+        lookupSpy = spyOn(dns, 'lookup').mockRejectedValue(new Error('ENOTFOUND') as never);
 
-    test('should return reason for link-local addresses', () => {
-        expect(getInternalUrlReason('http://169.254.0.1')).toBe('link-local address');
-    });
-
-    test('should return reason for CGNAT addresses', () => {
-        expect(getInternalUrlReason('http://100.64.0.1')).toBe('carrier-grade NAT address');
-        expect(getInternalUrlReason('http://100.100.0.1')).toBe('carrier-grade NAT address');
-    });
-
-    test('should return null for external URLs', () => {
-        expect(getInternalUrlReason('https://google.com')).toBeNull();
-        expect(getInternalUrlReason('http://8.8.8.8')).toBeNull();
-    });
-
-    test('should return null for invalid URLs', () => {
-        expect(getInternalUrlReason('not-a-url')).toBeNull();
+        expect(await resolveHost(new URL('https://unknown.example'))).toEqual({ addresses: [], internalReason: null });
     });
 });

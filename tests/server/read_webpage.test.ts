@@ -1,19 +1,24 @@
 import { test, expect, describe, beforeEach, afterEach, spyOn } from 'bun:test';
+import dns from 'node:dns/promises';
 import { readWebpage } from '../../src/server/processor/actor/read_webpage';
 
 describe('readWebpage', () => {
     const originalEnv = { ...process.env };
     let fetchSpy: ReturnType<typeof spyOn>;
+    let lookupSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
         // Reset environment
         process.env = { ...originalEnv };
+        // Every host resolves to a public address, without the network
+        lookupSpy = spyOn(dns, 'lookup').mockResolvedValue([{ address: '203.0.113.7', family: 4 }] as never);
     });
 
     afterEach(() => {
-        // Restore original env and clear spy
+        // Restore original env and clear spies
         process.env = originalEnv;
         fetchSpy?.mockRestore();
+        lookupSpy.mockRestore();
     });
 
     test('should return error when URL is empty', async () => {

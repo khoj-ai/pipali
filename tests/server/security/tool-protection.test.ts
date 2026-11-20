@@ -1,4 +1,5 @@
-import { test, expect, describe, beforeAll, afterAll } from 'bun:test';
+import { test, expect, describe, beforeAll, afterAll, afterEach, spyOn } from 'bun:test';
+import dns from 'node:dns/promises';
 import path from 'path';
 import fs from 'fs/promises';
 import os from 'os';
@@ -553,6 +554,117 @@ describe('Tool Protection - Internal URL Confirmation', () => {
             );
 
             expect(capturedRequests.length).toBe(1);
+        });
+
+        describe('however the host is reached', () => {
+            const internalUrl = 'http://127.0.0.1:6464/api/mcp/servers';
+            let lookupSpy: ReturnType<typeof spyOn> | undefined;
+            let fetchSpy: ReturnType<typeof spyOn>;
+
+            /** Stand in for DNS: the named hosts resolve as given, the rest as they really do */
+            function resolveAs(records: Record<string, string[]>) {
+                const lookup = dns.lookup;
+                lookupSpy = spyOn(dns, 'lookup').mockImplementation(((hostname: string, options: object) =>
+                    records[hostname]
+                        ? Promise.resolve(records[hostname].map(address => ({ address, family: 4 })))
+                        : lookup(hostname, options)) as never);
+            }
+
+            /** Stand in for the network: a public address redirects to an internal URL that serves a secret */
+            function redirectToInternalUrl() {
+                fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async (input: URL) =>
+                    input.hostname === '203.0.113.7'
+                        ? new Response(null, { status: 302, headers: { Location: internalUrl } })
+                        : new Response('pipali-secret', { headers: { 'Content-Type': 'text/plain' } })) as never);
+            }
+
+            const fetchedUrls = () => fetchSpy.mock.calls.map(([input]: [URL]) => input.href);
+
+            afterEach(() => {
+                lookupSpy?.mockRestore();
+                lookupSpy = undefined;
+                fetchSpy.mockRestore();
+            });
+
+            test.each([
+                'http://[::ffff:127.0.0.1]:6464/api/mcp/servers',
+                'http://[::ffff:a9fe:a9fe]/latest/meta-data/',
+                'http://[::]:6464/',
+                'http://[fd00::1]/',
+                'http://localhost.:6464/',
+                'http://app.localhost:6464/',
+            ])('should request confirmation for %s', async (url) => {
+                fetchSpy = spyOn(globalThis, 'fetch');
+                const capturedRequests: ConfirmationRequest[] = [];
+                const context = createMockConfirmationContext(false, capturedRequests);
+
+                const result = await readWebpage({ url }, { confirmationContext: context });
+
+                expect(capturedRequests.length).toBe(1);
+                expect(result.compiled).toContain('denied');
+                expect(fetchSpy).not.toHaveBeenCalled();
+            });
+
+            test('should request confirmation for a public name that resolves to an internal address', async () => {
+                resolveAs({ 'rebind.example': ['203.0.113.7', '127.0.0.1'] });
+                fetchSpy = spyOn(globalThis, 'fetch');
+                const capturedRequests: ConfirmationRequest[] = [];
+                const context = createMockConfirmationContext(false, capturedRequests);
+
+                const result = await readWebpage({ url: 'https://rebind.example/' }, { confirmationContext: context });
+
+                expect(capturedRequests.length).toBe(1);
+                expect(capturedRequests[0]!.message).toContain('loopback');
+                expect(result.compiled).toContain('denied');
+                expect(fetchSpy).not.toHaveBeenCalled();
+            });
+
+            test('should not follow a redirect to an internal URL that the user denies', async () => {
+                resolveAs({ 'public.example': ['203.0.113.7'] });
+                redirectToInternalUrl();
+                const capturedRequests: ConfirmationRequest[] = [];
+                const context = createMockConfirmationContext(false, capturedRequests);
+
+                const result = await readWebpage({ url: 'https://public.example/' }, { confirmationContext: context });
+
+                expect(capturedRequests.length).toBe(1);
+                expect(capturedRequests[0]!.context?.affectedFiles).toEqual([internalUrl]);
+                expect(capturedRequests[0]!.message).toContain('https://public.example/ redirects to this URL');
+                expect(result.compiled).toContain('denied');
+                expect(result.compiled).not.toContain('pipali-secret');
+                expect(fetchedUrls()).not.toContain(internalUrl);
+            });
+
+            test('should follow a redirect to an internal URL that the user allows', async () => {
+                resolveAs({ 'public.example': ['203.0.113.7'] });
+                redirectToInternalUrl();
+                const capturedRequests: ConfirmationRequest[] = [];
+                const context = createMockConfirmationContext(true, capturedRequests);
+
+                const result = await readWebpage({ url: 'https://public.example/' }, { confirmationContext: context });
+
+                expect(capturedRequests.length).toBe(1);
+                expect(result.compiled).toContain('pipali-secret');
+            });
+
+            test('should fetch a public host from the address that was checked', async () => {
+                resolveAs({ 'public.example': ['203.0.113.7'] });
+                fetchSpy = spyOn(globalThis, 'fetch').mockImplementation((async () =>
+                    new Response('public page', { headers: { 'Content-Type': 'text/plain' } })) as never);
+                const capturedRequests: ConfirmationRequest[] = [];
+                const context = createMockConfirmationContext(false, capturedRequests);
+
+                const result = await readWebpage({ url: 'https://public.example/page' }, { confirmationContext: context });
+
+                expect(capturedRequests.length).toBe(0);
+                expect(result.compiled).toContain('public page');
+                // Fetching by name would resolve the host again, to an answer nobody checked
+                expect(fetchedUrls()).toEqual(['https://203.0.113.7/page']);
+                const init = fetchSpy.mock.calls[0]![1];
+                expect(init.headers.get('Host')).toBe('public.example');
+                expect(init.tls.serverName).toBe('public.example');
+                expect(init.redirect).toBe('manual');
+            });
         });
 
         test('should NOT request confirmation for external URLs', async () => {
