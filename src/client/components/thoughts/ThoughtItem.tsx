@@ -19,6 +19,7 @@ import { WebpageView } from '../tool-views/WebpageView';
 import { GenerateImageView } from '../tool-views/GenerateImageView';
 import { ChromeSnapshotView } from '../tool-views/ChromeSnapshotView';
 import { ChromePageView } from '../tool-views/ChromePageView';
+import { AskUserView } from '../tool-views/AskUserView';
 import { ToolResultView } from '../tool-views/ToolResultView';
 
 /** Chrome tools that show page lists in their results */
@@ -34,7 +35,7 @@ const CHROME_PAGE_TOOLS = new Set([
 const TOOLS_WITH_CUSTOM_VIEWS = new Set([
     'edit_file', 'write_file', 'grep_files', 'list_files',
     'shell_command', 'view_file', 'search_web', 'read_webpage',
-    'generate_image', 'chrome-browser__take_snapshot',
+    'generate_image', 'ask_user', 'chrome-browser__take_snapshot',
     // Chrome page tools rendered by ChromePageView
     ...CHROME_PAGE_TOOLS,
     // Chrome tools with confirmation-only results (args already convey what happened)
@@ -332,6 +333,10 @@ export const ThoughtItem = memo(function ThoughtItem({ thought, stepNumber, isPr
                             {/* Show generated image result */}
                             {toolName === 'generate_image' && thought.toolResult && !isInterrupted && (
                                 <GenerateImageView result={thought.toolResult} />
+                            )}
+                            {/* Show the question with its options and the user's answer */}
+                            {toolName === 'ask_user' && thought.toolArgs?.title && !isInterrupted && (
+                                <AskUserView args={thought.toolArgs} result={thought.toolResult} />
                             )}
                             {/* Show chrome browser snapshot as visual page outline */}
                             {toolName === 'chrome-browser__take_snapshot' && thought.toolResult && !isInterrupted && (

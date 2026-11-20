@@ -108,6 +108,9 @@ export function formatToolArgs(toolName: string, args: any): string {
         case 'delegate_task':
             return args.title || args.message || '';
 
+        case 'ask_user':
+            return args.title || '';
+
         case 'stop_process':
             return args.pid ? `pid ${args.pid}` : '';
 
@@ -215,6 +218,7 @@ export function formatToolCallsForSidebar(toolCalls: any[]): string {
                 detail = args.query ? ` ${args.query}` : '';
                 break;
             case 'delegate_task':
+            case 'ask_user':
                 detail = args.title ? ` ${args.title}` : '';
                 break;
             case 'stop_process':
@@ -327,6 +331,7 @@ export function getFriendlyToolName(toolName: string): string {
         "inspect_task": "Check",
         "stop_task": "Stop",
         "wait_for_tasks": "Wait",
+        "ask_user": "Ask",
     };
     if (friendlyNames[toolName]) return friendlyNames[toolName];
 

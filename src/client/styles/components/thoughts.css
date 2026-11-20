@@ -1294,3 +1294,65 @@
     font: inherit;
     cursor: pointer;
 }
+
+/* Ask user question card */
+.thought-ask-user {
+    margin-top: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-sm);
+    background: var(--color-bg-elevated);
+    font-size: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.ask-user-description {
+    color: var(--color-text-secondary);
+}
+
+.ask-user-options {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.ask-user-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 9px;
+    border: 1px solid var(--color-border);
+    border-radius: 999px;
+    background: var(--color-bg-muted);
+    color: var(--color-text);
+    font-size: 11px;
+}
+
+.ask-user-option.chosen {
+    background: var(--color-accent-bg);
+    color: var(--color-accent);
+    border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+    font-weight: 600;
+}
+
+.ask-user-option.dimmed {
+    color: var(--color-text-muted);
+    background: transparent;
+}
+
+.ask-user-reply {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    color: var(--color-text);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.ask-user-reply svg {
+    flex-shrink: 0;
+    margin-top: 2px;
+    color: var(--color-accent);
+}

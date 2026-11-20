@@ -6,3 +6,4 @@ export * from './GrepResultView';
 export * from './ListResultView';
 export * from './BashCommandView';
 export * from './DiffView';
+export * from './AskUserView';
