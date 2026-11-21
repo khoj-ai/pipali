@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.12.0
+
+### 🎁 New
+- Choose how much of its past runs each routine remembers: all of it, a rolling summary, or none
+- Find text in the file viewer, and open file links at the exact line or passage
+
+### 🧪 Improve
+- Smoother, more responsive chat, especially in long conversations
+- Safer approvals: "don't ask again" for shell commands applies only to that folder, and Pipali asks before reading pages on your local network
+- Easier MCP tool selection, and see why an MCP tool server failed to connect
+- Questions Pipali asks you show as cards in its trajectory
+
+### 🛠️ Fix
+- Editing or deleting a message stops the reply it was getting
+- See why a model declined to respond, instead of an empty reply
+- Shell commands stop at their time limit instead of hanging
+- Large images no longer break a conversation
+- Creating and editing Word and Excel documents works again
+- Sandboxed commands and file writes on Windows no longer fail or ask for approval in temp folders
+
 ## 0.11.0
 
 ### 🎁 New
